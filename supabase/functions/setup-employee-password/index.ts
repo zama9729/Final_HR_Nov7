@@ -23,11 +23,26 @@ Deno.serve(async (req) => {
 
     console.log('Setting up password for employee:', email);
 
-    // Get employee details
+    // First, find the user by email in profiles
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (profileError || !profile) {
+      console.error('Profile not found:', profileError);
+      return new Response(
+        JSON.stringify({ error: 'Employee profile not found' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Get employee details using user_id
     const { data: employee, error: employeeError } = await supabase
       .from('employees')
       .select('id, user_id')
-      .eq('email', email)
+      .eq('user_id', profile.id)
       .single();
 
     if (employeeError || !employee) {
@@ -64,7 +79,7 @@ Deno.serve(async (req) => {
     }
 
     // Update profile with security questions
-    const { error: profileError } = await supabase
+    const { error: updateProfileError } = await supabase
       .from('profiles')
       .update({
         security_question_1: securityQuestion1,
@@ -74,8 +89,8 @@ Deno.serve(async (req) => {
       })
       .eq('id', employee.user_id);
 
-    if (profileError) {
-      console.error('Error updating profile:', profileError);
+    if (updateProfileError) {
+      console.error('Error updating profile:', updateProfileError);
     }
 
     console.log('Password setup completed successfully for:', email);

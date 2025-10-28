@@ -23,11 +23,29 @@ Deno.serve(async (req) => {
 
     console.log('Verifying employee email:', email);
 
-    // Check if employee exists and needs password setup
+    // First, find the user by email in profiles
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (profileError || !profile) {
+      console.log('Profile not found:', profileError);
+      return new Response(
+        JSON.stringify({ 
+          valid: false, 
+          error: 'No employee found with this email address. Please contact HR.' 
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Now check if employee exists and needs password setup
     const { data: employee, error: employeeError } = await supabase
       .from('employees')
       .select('id, user_id, must_change_password')
-      .eq('email', email)
+      .eq('user_id', profile.id)
       .single();
 
     if (employeeError || !employee) {
