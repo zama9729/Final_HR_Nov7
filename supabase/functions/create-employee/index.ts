@@ -135,23 +135,12 @@ Deno.serve(async (req) => {
 
     console.log('Role assigned:', requestData.role);
 
-    // Send magic link for first login
-    const { error: magicLinkError } = await supabaseAdmin.auth.admin.generateLink({
-      type: 'magiclink',
-      email: requestData.email,
-      options: {
-        redirectTo: `${req.headers.get('origin')}/setup-password`,
-      }
-    });
-
-    if (magicLinkError) {
-      console.error('Error generating magic link:', magicLinkError);
-    }
-
     return new Response(
       JSON.stringify({ 
         success: true,
-        message: 'Employee created successfully. They will receive a magic link to set up their account.',
+        temporaryPassword: tempPassword,
+        email: requestData.email,
+        message: 'Employee created successfully. Share the temporary password with them.',
         userId: authData.user.id
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

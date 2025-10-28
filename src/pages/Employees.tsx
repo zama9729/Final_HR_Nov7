@@ -60,6 +60,7 @@ export default function Employees() {
         join_date,
         user_id,
         reporting_manager_id,
+        onboarding_status,
         profiles!employees_user_id_fkey(first_name, last_name, email)
       `);
 
@@ -77,9 +78,16 @@ export default function Employees() {
       }
     }
 
-    const { data } = await query.order('created_at', { ascending: false });
+    const { data, error } = await query.order('created_at', { ascending: false });
 
-    if (data) setEmployees(data as any);
+    if (error) {
+      console.error('Error fetching employees:', error);
+    }
+    
+    if (data) {
+      console.log('Fetched employees:', data);
+      setEmployees(data as any);
+    }
     setLoading(false);
   };
 

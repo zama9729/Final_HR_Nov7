@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import { Building2 } from "lucide-react";
 
 export default function Login() {
@@ -22,6 +23,15 @@ export default function Login() {
 
     try {
       await login(email, password);
+      
+      // Check if user needs to set up password
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user?.user_metadata?.needs_password_setup) {
+        navigate("/setup-password");
+        return;
+      }
+      
       toast({
         title: "Welcome back!",
         description: "You've successfully logged in.",

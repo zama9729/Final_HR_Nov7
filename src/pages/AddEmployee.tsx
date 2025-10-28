@@ -92,10 +92,14 @@ export default function AddEmployee() {
 
       toast({
         title: "Employee added successfully",
-        description: data.message || "Magic link sent to employee's email",
+        description: `Email: ${data.email} | Password: ${data.temporaryPassword} (Save this password!)`,
+        duration: 10000,
       });
 
-      navigate('/employees');
+      // Refresh employees list before navigating
+      setTimeout(() => {
+        navigate('/employees');
+      }, 500);
     } catch (error: any) {
       toast({
         title: "Error adding employee",

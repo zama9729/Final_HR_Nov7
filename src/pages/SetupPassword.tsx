@@ -51,9 +51,12 @@ export default function SetupPassword() {
       const validated = passwordSchema.parse(formData);
       setLoading(true);
 
-      // Update password
+      // Update password and remove needs_password_setup flag
       const { error: passwordError } = await supabase.auth.updateUser({
         password: validated.password,
+        data: {
+          needs_password_setup: false,
+        }
       });
 
       if (passwordError) throw passwordError;
