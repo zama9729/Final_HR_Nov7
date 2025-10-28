@@ -2,9 +2,8 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Save, Play } from "lucide-react";
-import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
+import { InteractiveWorkflowCanvas } from "@/components/workflow/InteractiveWorkflowCanvas";
 import { WorkflowToolbox } from "@/components/workflow/WorkflowToolbox";
 import { useState } from "react";
 
@@ -48,7 +47,7 @@ export default function WorkflowEditor() {
 
           <Card className="overflow-hidden">
             <CardContent className="p-0 h-full">
-              <WorkflowCanvas />
+              <InteractiveWorkflowCanvas />
             </CardContent>
           </Card>
         </div>

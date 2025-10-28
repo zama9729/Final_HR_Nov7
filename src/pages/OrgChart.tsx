@@ -1,5 +1,6 @@
 import { AppLayout } from "@/components/layout/AppLayout";
-import OrgChartComponent from "@/components/org-chart/OrgChart";
+import EnhancedOrgChart from "@/components/org-chart/EnhancedOrgChart";
+import { Card } from "@/components/ui/card";
 
 export default function OrgChartPage() {
   return (
@@ -7,10 +8,12 @@ export default function OrgChartPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Organization Chart</h1>
-          <p className="text-muted-foreground">View your organization's reporting structure</p>
+          <p className="text-muted-foreground">Interactive view of your organization's reporting structure</p>
         </div>
 
-        <OrgChartComponent />
+        <Card className="border-2">
+          <EnhancedOrgChart />
+        </Card>
       </div>
     </AppLayout>
   );

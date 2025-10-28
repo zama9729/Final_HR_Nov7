@@ -334,18 +334,24 @@ export default function LeaveRequests() {
                       <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                           <Label htmlFor="leave_type_id">Leave Type</Label>
-                          <Select name="leave_type_id" required>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select leave type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {policies.map((policy) => (
-                                <SelectItem key={policy.id} value={policy.id}>
-                                  {policy.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {policies.length === 0 ? (
+                            <p className="text-sm text-muted-foreground mt-2">
+                              No leave policies available. Please contact HR to set up leave policies.
+                            </p>
+                          ) : (
+                            <Select name="leave_type_id" required>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select leave type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {policies.map((policy) => (
+                                  <SelectItem key={policy.id} value={policy.id}>
+                                    {policy.name} ({policy.annual_entitlement} days/year)
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
                         </div>
                         <div>
                           <Label htmlFor="start_date">Start Date</Label>

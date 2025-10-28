@@ -3,13 +3,11 @@ import {
   Users, 
   FileText, 
   Calendar, 
-  DollarSign, 
   Clock, 
   Workflow, 
   Settings, 
   BarChart3,
   Building2,
-  ClipboardList,
   Network,
   UserCheck
 } from "lucide-react";
@@ -26,37 +24,87 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 // Navigation items for different roles
 const hrItems = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Employees", url: "/employees", icon: Users },
-  { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
-  { title: "Org Chart", url: "/org-chart", icon: Network },
-  { title: "Timesheets", url: "/timesheets", icon: Clock },
-  { title: "Leave Requests", url: "/leaves", icon: Calendar },
-  { title: "Workflows", url: "/workflows", icon: Workflow },
-  { title: "Policies", url: "/policies", icon: FileText },
-  { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, showBadge: false },
+  { title: "Employees", url: "/employees", icon: Users, showBadge: false },
+  { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck, showBadge: false },
+  { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
+  { title: "Timesheets", url: "/timesheets", icon: Clock, showBadge: true },
+  { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
+  { title: "Workflows", url: "/workflows", icon: Workflow, showBadge: false },
+  { title: "Policies", url: "/policies", icon: FileText, showBadge: false },
+  { title: "Analytics", url: "/analytics", icon: BarChart3, showBadge: false },
 ];
 
 const managerItems = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "My Team", url: "/employees", icon: Users },
-  { title: "Org Chart", url: "/org-chart", icon: Network },
-  { title: "Timesheets", url: "/timesheets", icon: Clock },
-  { title: "Leave Requests", url: "/leaves", icon: Calendar },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, showBadge: false },
+  { title: "My Team", url: "/employees", icon: Users, showBadge: false },
+  { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
+  { title: "Timesheets", url: "/timesheets", icon: Clock, showBadge: true },
+  { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
 ];
 
 const employeeItems = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "My Timesheets", url: "/timesheets", icon: Clock },
-  { title: "Leave Requests", url: "/leaves", icon: Calendar },
-  { title: "Org Chart", url: "/org-chart", icon: Network },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, showBadge: false },
+  { title: "My Timesheets", url: "/timesheets", icon: Clock, showBadge: false },
+  { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: false },
+  { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
 ];
 
 export function AppSidebar() {
-  const { userRole } = useAuth();
+  const { user, userRole } = useAuth();
+  const [pendingCounts, setPendingCounts] = useState<{ timesheets: number; leaves: number }>({
+    timesheets: 0,
+    leaves: 0,
+  });
+
+  useEffect(() => {
+    if (user && userRole && ['manager', 'hr', 'director', 'ceo'].includes(userRole)) {
+      fetchPendingCounts();
+      
+      // Set up realtime subscriptions
+      const channel = supabase
+        .channel('sidebar-notifications')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'timesheets' }, () => {
+          fetchPendingCounts();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, () => {
+          fetchPendingCounts();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [user, userRole]);
+
+  const fetchPendingCounts = async () => {
+    if (!user) return;
+
+    try {
+      const { count: timesheetCount } = await supabase
+        .from('timesheets')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      const { count: leaveCount } = await supabase
+        .from('leave_requests')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      setPendingCounts({
+        timesheets: timesheetCount || 0,
+        leaves: leaveCount || 0,
+      });
+    } catch (error) {
+      console.error('Error fetching pending counts:', error);
+    }
+  };
   
   // Determine which navigation items to show based on role
   const getNavigationItems = () => {
@@ -74,6 +122,12 @@ export function AppSidebar() {
   };
   
   const navigationItems = getNavigationItems();
+
+  const getBadgeCount = (url: string) => {
+    if (url === '/timesheets') return pendingCounts.timesheets;
+    if (url === '/leaves') return pendingCounts.leaves;
+    return 0;
+  };
 
   return (
     <Sidebar>
@@ -100,21 +154,29 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigationItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink 
-                      to={item.url}
-                      className={({ isActive }) => 
-                        isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
-                      }
-                    >
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {navigationItems.map((item) => {
+                const badgeCount = item.showBadge ? getBadgeCount(item.url) : 0;
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild>
+                      <NavLink 
+                        to={item.url}
+                        className={({ isActive }) => 
+                          isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
+                        }
+                      >
+                        <item.icon className="h-4 w-4" />
+                        <span className="flex-1">{item.title}</span>
+                        {badgeCount > 0 && (
+                          <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
+                            {badgeCount > 9 ? '9+' : badgeCount}
+                          </span>
+                        )}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

@@ -7,49 +7,92 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
-const stats = [
-  {
-    title: "Total Employees",
-    value: "0",
-    change: "No data yet",
-    icon: Users,
-    trend: "neutral",
-  },
-  {
-    title: "Pending Approvals",
-    value: "0",
-    change: "No pending items",
-    icon: Clock,
-    trend: "neutral",
-  },
-  {
-    title: "Active Leave Requests",
-    value: "0",
-    change: "No active requests",
-    icon: Calendar,
-    trend: "neutral",
-  },
-  {
-    title: "Avg. Attendance",
-    value: "0%",
-    change: "No data yet",
-    icon: TrendingUp,
-    trend: "neutral",
-  },
-];
-
-const recentActivities: Array<{ id: number; type: string; user: string; action: string; time: string }> = [];
-
-const pendingTasks: Array<{ id: number; title: string; priority: string; link: string }> = [];
+interface DashboardStats {
+  totalEmployees: number;
+  pendingApprovals: number;
+  activeLeaveRequests: number;
+  avgAttendance: number;
+}
 
 export default function Dashboard() {
   const { user, userRole } = useAuth();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardStats>({
+    totalEmployees: 0,
+    pendingApprovals: 0,
+    activeLeaveRequests: 0,
+    avgAttendance: 0,
+  });
 
   useEffect(() => {
     checkOnboardingStatus();
+    fetchDashboardStats();
   }, [user]);
+
+  const fetchDashboardStats = async () => {
+    if (!user) return;
+
+    try {
+      // Get current employee
+      const { data: currentEmployee } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      // Total active employees
+      const { count: employeeCount } = await supabase
+        .from('employees')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'active');
+
+      // Pending approvals (timesheets + leave requests)
+      let pendingCount = 0;
+      if (userRole && ['manager', 'hr', 'director', 'ceo'].includes(userRole) && currentEmployee) {
+        const { count: timesheetCount } = await supabase
+          .from('timesheets')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'pending');
+
+        const { count: leaveCount } = await supabase
+          .from('leave_requests')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'pending');
+
+        pendingCount = (timesheetCount || 0) + (leaveCount || 0);
+      }
+
+      // Active leave requests (approved leaves that haven't ended yet)
+      const today = new Date().toISOString().split('T')[0];
+      const { count: activeLeaves } = await supabase
+        .from('leave_requests')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'approved')
+        .gte('end_date', today);
+
+      // Calculate average attendance (simplified: approved timesheets / total weeks)
+      const { count: approvedTimesheets } = await supabase
+        .from('timesheets')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'approved');
+
+      const { count: totalTimesheets } = await supabase
+        .from('timesheets')
+        .select('*', { count: 'exact', head: true });
+
+      const attendance = totalTimesheets ? Math.round(((approvedTimesheets || 0) / totalTimesheets) * 100) : 0;
+
+      setStats({
+        totalEmployees: employeeCount || 0,
+        pendingApprovals: pendingCount,
+        activeLeaveRequests: activeLeaves || 0,
+        avgAttendance: attendance,
+      });
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error);
+    }
+  };
 
   const checkOnboardingStatus = async () => {
     if (!user || userRole === 'hr' || userRole === 'director' || userRole === 'ceo') {
@@ -96,20 +139,61 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {stats.map((stat) => (
-            <Card key={stat.title} className="transition-all hover:shadow-medium">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  {stat.title}
-                </CardTitle>
-                <stat.icon className="h-4 w-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
-                <p className="text-xs text-muted-foreground mt-1">{stat.change}</p>
-              </CardContent>
-            </Card>
-          ))}
+          <Card className="transition-all hover:shadow-medium">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Total Employees
+              </CardTitle>
+              <Users className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.totalEmployees}</div>
+              <p className="text-xs text-muted-foreground mt-1">Active employees</p>
+            </CardContent>
+          </Card>
+
+          <Card className="transition-all hover:shadow-medium">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Pending Approvals
+              </CardTitle>
+              <Clock className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.pendingApprovals}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {stats.pendingApprovals > 0 ? 'Awaiting review' : 'No pending items'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="transition-all hover:shadow-medium">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Active Leave Requests
+              </CardTitle>
+              <Calendar className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.activeLeaveRequests}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {stats.activeLeaveRequests > 0 ? 'Currently on leave' : 'No active requests'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="transition-all hover:shadow-medium">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Avg. Attendance
+              </CardTitle>
+              <TrendingUp className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.avgAttendance}%</div>
+              <p className="text-xs text-muted-foreground mt-1">Timesheet approval rate</p>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -117,31 +201,17 @@ export default function Dashboard() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <AlertCircle className="h-5 w-5 text-warning" />
-                Pending Tasks
+                Quick Info
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {pendingTasks.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <p className="text-sm">No pending tasks</p>
-                </div>
-              ) : (
-                pendingTasks.map((task) => (
-                  <div key={task.id} className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className={`h-2 w-2 rounded-full ${
-                        task.priority === 'high' ? 'bg-destructive' : 
-                        task.priority === 'medium' ? 'bg-warning' : 
-                        'bg-muted-foreground'
-                      }`} />
-                      <span className="text-sm">{task.title}</span>
-                    </div>
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link to={task.link}>View</Link>
-                    </Button>
-                  </div>
-                ))
-              )}
+              <div className="text-center py-8 text-muted-foreground">
+                <p className="text-sm">
+                  {stats.pendingApprovals > 0 
+                    ? `You have ${stats.pendingApprovals} pending approval${stats.pendingApprovals > 1 ? 's' : ''}`
+                    : 'All caught up! No pending approvals'}
+                </p>
+              </div>
             </CardContent>
           </Card>
 
@@ -149,29 +219,13 @@ export default function Dashboard() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CheckCircle className="h-5 w-5 text-success" />
-                Recent Activity
+                System Status
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {recentActivities.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <p className="text-sm">No recent activity</p>
-                </div>
-              ) : (
-                recentActivities.map((activity) => (
-                  <div key={activity.id} className="flex items-start gap-3">
-                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <Users className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm">
-                        <span className="font-medium">{activity.user}</span> {activity.action}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{activity.time}</p>
-                    </div>
-                  </div>
-                ))
-              )}
+              <div className="text-center py-8 text-muted-foreground">
+                <p className="text-sm">All systems operational</p>
+              </div>
             </CardContent>
           </Card>
         </div>
