@@ -20,40 +20,62 @@ Deno.serve(async (req) => {
   }
 
   try {
+    console.log('Create employee function invoked');
+    
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
     // Verify the requesting user has HR/Director/CEO role
-    const authHeader = req.headers.get('Authorization')!;
+    const authHeader = req.headers.get('Authorization');
+    
+    if (!authHeader) {
+      console.error('No authorization header');
+      return new Response(
+        JSON.stringify({ error: 'No authorization header' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
     const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
 
     if (authError || !user) {
+      console.error('Auth error:', authError);
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    console.log('User authenticated:', user.id);
+
     // Check if user has required role
-    const { data: roleData } = await supabaseAdmin
+    const { data: roleData, error: roleCheckError } = await supabaseAdmin
       .from('user_roles')
       .select('role')
       .eq('user_id', user.id)
       .single();
 
+    if (roleCheckError) {
+      console.error('Role check error:', roleCheckError);
+    }
+
     if (!roleData || !['hr', 'director', 'ceo'].includes(roleData.role)) {
+      console.error('Insufficient permissions. Role:', roleData?.role);
       return new Response(
         JSON.stringify({ error: 'Insufficient permissions' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const requestData: CreateEmployeeRequest = await req.json();
+    console.log('User has required role:', roleData.role);
 
-    // Generate temporary password
+    const requestData: CreateEmployeeRequest = await req.json();
+    console.log('Creating employee with email:', requestData.email);
+
+    // Generate temporary password that employee won't use directly
     const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8).toUpperCase();
 
     // Create user account
@@ -64,12 +86,16 @@ Deno.serve(async (req) => {
       user_metadata: {
         first_name: requestData.firstName,
         last_name: requestData.lastName,
+        needs_password_setup: true,
       },
     });
 
     if (createUserError) {
+      console.error('Error creating user:', createUserError);
       throw createUserError;
     }
+
+    console.log('User created:', authData.user.id);
 
     // Create employee record
     const { error: employeeError } = await supabaseAdmin
@@ -84,12 +110,15 @@ Deno.serve(async (req) => {
         reporting_manager_id: requestData.reportingManagerId || null,
         temporary_password: tempPassword,
         must_change_password: true,
-        onboarding_status: 'pending',
+        onboarding_status: 'not_started',
       });
 
     if (employeeError) {
+      console.error('Error creating employee:', employeeError);
       throw employeeError;
     }
+
+    console.log('Employee record created');
 
     // Assign role
     const { error: roleError } = await supabaseAdmin
@@ -100,13 +129,29 @@ Deno.serve(async (req) => {
       });
 
     if (roleError) {
+      console.error('Error assigning role:', roleError);
       throw roleError;
+    }
+
+    console.log('Role assigned:', requestData.role);
+
+    // Send magic link for first login
+    const { error: magicLinkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'magiclink',
+      email: requestData.email,
+      options: {
+        redirectTo: `${req.headers.get('origin')}/setup-password`,
+      }
+    });
+
+    if (magicLinkError) {
+      console.error('Error generating magic link:', magicLinkError);
     }
 
     return new Response(
       JSON.stringify({ 
         success: true,
-        temporaryPassword: tempPassword,
+        message: 'Employee created successfully. They will receive a magic link to set up their account.',
         userId: authData.user.id
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -114,6 +159,7 @@ Deno.serve(async (req) => {
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    console.error('Function error:', errorMessage);
     return new Response(
       JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

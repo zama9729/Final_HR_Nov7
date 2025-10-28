@@ -89,7 +89,7 @@ export default function AddEmployee() {
 
       toast({
         title: "Employee added successfully",
-        description: `Temporary password: ${data.temporaryPassword} (Please save this)`,
+        description: data.message || "Magic link sent to employee's email",
       });
 
       navigate('/employees');

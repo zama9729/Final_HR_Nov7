@@ -206,6 +206,10 @@ export type Database = {
           id: string
           last_name: string | null
           phone: string | null
+          security_answer_1: string | null
+          security_answer_2: string | null
+          security_question_1: string | null
+          security_question_2: string | null
           updated_at: string | null
         }
         Insert: {
@@ -215,6 +219,10 @@ export type Database = {
           id: string
           last_name?: string | null
           phone?: string | null
+          security_answer_1?: string | null
+          security_answer_2?: string | null
+          security_question_1?: string | null
+          security_question_2?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -224,6 +232,10 @@ export type Database = {
           id?: string
           last_name?: string | null
           phone?: string | null
+          security_answer_1?: string | null
+          security_answer_2?: string | null
+          security_question_1?: string | null
+          security_question_2?: string | null
           updated_at?: string | null
         }
         Relationships: []
@@ -311,7 +323,7 @@ export type Database = {
         | "maternity"
         | "paternity"
         | "bereavement"
-      onboarding_status: "pending" | "in_progress" | "completed"
+      onboarding_status: "pending" | "in_progress" | "completed" | "not_started"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -448,7 +460,7 @@ export const Constants = {
         "paternity",
         "bereavement",
       ],
-      onboarding_status: ["pending", "in_progress", "completed"],
+      onboarding_status: ["pending", "in_progress", "completed", "not_started"],
     },
   },
 } as const

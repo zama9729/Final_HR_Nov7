@@ -65,12 +65,7 @@ export default function Dashboard() {
         .single();
 
       if (employeeData) {
-        if (employeeData.must_change_password) {
-          navigate('/change-password');
-          return;
-        }
-        
-        if (employeeData.onboarding_status === 'pending') {
+        if (employeeData.onboarding_status === 'in_progress' || employeeData.onboarding_status === 'not_started' || employeeData.onboarding_status === 'pending') {
           navigate('/onboarding');
           return;
         }

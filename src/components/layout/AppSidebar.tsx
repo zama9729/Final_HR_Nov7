@@ -10,7 +10,8 @@ import {
   BarChart3,
   Building2,
   ClipboardList,
-  Network
+  Network,
+  UserCheck
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -30,6 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 const hrItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Employees", url: "/employees", icon: Users },
+  { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
   { title: "Org Chart", url: "/org-chart", icon: Network },
   { title: "Timesheets", url: "/timesheets", icon: Clock },
   { title: "Leave Requests", url: "/leaves", icon: Calendar },

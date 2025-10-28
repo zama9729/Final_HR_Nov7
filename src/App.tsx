@@ -22,6 +22,8 @@ import LeavePolicies from "./pages/LeavePolicies";
 import Onboarding from "./pages/Onboarding";
 import ChangePassword from "./pages/ChangePassword";
 import OrgChart from "./pages/OrgChart";
+import SetupPassword from "./pages/SetupPassword";
+import OnboardingTracker from "./pages/OnboardingTracker";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +38,7 @@ const App = () => (
             {/* Public routes */}
             <Route path="/auth/login" element={<PublicRoute><Login /></PublicRoute>} />
             <Route path="/auth/signup" element={<PublicRoute><Signup /></PublicRoute>} />
+            <Route path="/setup-password" element={<SetupPassword />} />
             
             {/* Protected routes */}
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -44,6 +47,7 @@ const App = () => (
             {/* HR-only routes */}
             <Route path="/employees/new" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><AddEmployee /></ProtectedRoute>} />
             <Route path="/employees/import" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><EmployeeImport /></ProtectedRoute>} />
+            <Route path="/onboarding-tracker" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><OnboardingTracker /></ProtectedRoute>} />
             <Route path="/workflows" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><Workflows /></ProtectedRoute>} />
             <Route path="/workflows/new" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><WorkflowEditor /></ProtectedRoute>} />
             <Route path="/workflows/:id/edit" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><WorkflowEditor /></ProtectedRoute>} />
