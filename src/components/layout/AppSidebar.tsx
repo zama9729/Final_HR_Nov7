@@ -9,7 +9,10 @@ import {
   BarChart3,
   Building2,
   Network,
-  UserCheck
+  UserCheck,
+  CalendarClock,
+  Award,
+  Bot
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -35,9 +38,11 @@ const hrItems = [
   { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
   { title: "Timesheets", url: "/timesheets", icon: Clock, showBadge: true },
   { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
+  { title: "Shift Management", url: "/shifts", icon: CalendarClock, showBadge: false },
   { title: "Workflows", url: "/workflows", icon: Workflow, showBadge: false },
   { title: "Policies", url: "/policies", icon: FileText, showBadge: false },
   { title: "Analytics", url: "/analytics", icon: BarChart3, showBadge: false },
+  { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
 ];
 
 const managerItems = [
@@ -46,6 +51,8 @@ const managerItems = [
   { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
   { title: "Timesheets", url: "/timesheets", icon: Clock, showBadge: true },
   { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
+  { title: "Appraisals", url: "/appraisals", icon: Award, showBadge: false },
+  { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
 ];
 
 const employeeItems = [
@@ -53,6 +60,8 @@ const employeeItems = [
   { title: "My Timesheets", url: "/timesheets", icon: Clock, showBadge: false },
   { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: false },
   { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
+  { title: "My Appraisal", url: "/my-appraisal", icon: Award, showBadge: false },
+  { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
 ];
 
 export function AppSidebar() {

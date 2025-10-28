@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      appraisal_cycles: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          cycle_name: string
+          cycle_year: number
+          end_date: string
+          id: string
+          start_date: string
+          status: string
+          tenant_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          cycle_name: string
+          cycle_year: number
+          end_date: string
+          id?: string
+          start_date: string
+          status?: string
+          tenant_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          cycle_name?: string
+          cycle_year?: number
+          end_date?: string
+          id?: string
+          start_date?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       employees: {
         Row: {
           created_at: string | null
@@ -343,6 +382,79 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      performance_reviews: {
+        Row: {
+          appraisal_cycle_id: string
+          areas_of_improvement: string | null
+          comments: string | null
+          created_at: string | null
+          employee_id: string
+          goals: string | null
+          id: string
+          performance_score: number | null
+          rating: number | null
+          reviewer_id: string
+          status: string
+          strengths: string | null
+          tenant_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          appraisal_cycle_id: string
+          areas_of_improvement?: string | null
+          comments?: string | null
+          created_at?: string | null
+          employee_id: string
+          goals?: string | null
+          id?: string
+          performance_score?: number | null
+          rating?: number | null
+          reviewer_id: string
+          status?: string
+          strengths?: string | null
+          tenant_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          appraisal_cycle_id?: string
+          areas_of_improvement?: string | null
+          comments?: string | null
+          created_at?: string | null
+          employee_id?: string
+          goals?: string | null
+          id?: string
+          performance_score?: number | null
+          rating?: number | null
+          reviewer_id?: string
+          status?: string
+          strengths?: string | null
+          tenant_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "performance_reviews_appraisal_cycle_id_fkey"
+            columns: ["appraisal_cycle_id"]
+            isOneToOne: false
+            referencedRelation: "appraisal_cycles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "performance_reviews_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "performance_reviews_reviewer_id_fkey"
+            columns: ["reviewer_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {

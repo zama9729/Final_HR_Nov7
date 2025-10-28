@@ -12,6 +12,10 @@ import FirstTimeLogin from "./pages/auth/FirstTimeLogin";
 import Signup from "./pages/auth/Signup";
 import Dashboard from "./pages/Dashboard";
 import Employees from "./pages/Employees";
+import Appraisals from "./pages/Appraisals";
+import MyAppraisal from "./pages/MyAppraisal";
+import ShiftManagement from "./pages/ShiftManagement";
+import AIAssistantPage from "./pages/AIAssistantPage";
 import EmployeeImport from "./pages/EmployeeImport";
 import Workflows from "./pages/Workflows";
 import WorkflowEditor from "./pages/WorkflowEditor";
@@ -65,6 +69,10 @@ const App = () => (
             <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
             <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/appraisals" element={<ProtectedRoute allowedRoles={['manager', 'hr', 'director', 'ceo']}><Appraisals /></ProtectedRoute>} />
+            <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
+            <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><ShiftManagement /></ProtectedRoute>} />
+            <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
             
             {/* Redirects */}
             <Route path="/" element={<Navigate to="/dashboard" />} />
