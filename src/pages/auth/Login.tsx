@@ -24,12 +24,20 @@ export default function Login() {
     try {
       await login(email, password);
       
-      // Check if user needs to set up password
+      // Check if employee needs to change password
       const { data: { user } } = await supabase.auth.getUser();
       
-      if (user?.user_metadata?.needs_password_setup) {
-        navigate("/setup-password");
-        return;
+      if (user) {
+        const { data: employeeData } = await supabase
+          .from('employees')
+          .select('must_change_password')
+          .eq('user_id', user.id)
+          .single();
+        
+        if (employeeData?.must_change_password) {
+          navigate("/auth/first-time-login");
+          return;
+        }
       }
       
       toast({

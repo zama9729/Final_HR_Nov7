@@ -53,10 +53,15 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Update user password using admin API
+    // Update user password and metadata using admin API
     const { error: updatePasswordError } = await supabase.auth.admin.updateUserById(
       employee.user_id,
-      { password }
+      { 
+        password,
+        user_metadata: {
+          needs_password_setup: false
+        }
+      }
     );
 
     if (updatePasswordError) {
