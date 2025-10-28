@@ -147,8 +147,15 @@ Deno.serve(async (req) => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
     console.error('Function error:', errorMessage);
+    
+    // Provide user-friendly error messages
+    let userMessage = errorMessage;
+    if (errorMessage.includes('already been registered')) {
+      userMessage = 'This email address is already registered. Please use a different email.';
+    }
+    
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: userMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

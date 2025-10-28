@@ -101,9 +101,10 @@ export default function AddEmployee() {
         navigate('/employees');
       }, 500);
     } catch (error: any) {
+      console.error('Error adding employee:', error);
       toast({
         title: "Error adding employee",
-        description: error.message || "An error occurred",
+        description: error.message || error.error || "An error occurred",
         variant: "destructive",
       });
     } finally {
