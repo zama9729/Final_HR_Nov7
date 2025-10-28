@@ -80,9 +80,12 @@ export default function AddEmployee() {
         throw new Error('Not authenticated');
       }
 
-      // Call edge function to create employee
+      // Call edge function to create employee with auth header
       const { data, error } = await supabase.functions.invoke('create-employee', {
         body: validated,
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       if (error) throw error;
