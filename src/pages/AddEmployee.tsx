@@ -88,7 +88,13 @@ export default function AddEmployee() {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        // Check if it's a CORS or 404 error (function not deployed)
+        if (error.message?.includes('CORS') || error.message?.includes('404') || error.message?.includes('Failed to fetch')) {
+          throw new Error('Edge function not deployed. Please deploy the create-employee function to Supabase.');
+        }
+        throw error;
+      }
 
       toast({
         title: "Employee added successfully",

@@ -1,0 +1,137 @@
+// COMPLETE STANDALONE CODE FOR create-employee FUNCTION
+// Copy this entire file into Supabase Dashboard when creating the function
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.76.1';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Max-Age': '86400',
+};
+
+interface CreateEmployeeRequest {
+  firstName: string;
+  lastName: string;
+  email: string;
+  employeeId: string;
+  department: string;
+  position: string;
+  workLocation: string;
+  joinDate: string;
+  reportingManagerId?: string;
+  role: 'employee' | 'manager' | 'hr' | 'director' | 'ceo';
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { 
+      status: 200,
+      headers: corsHeaders,
+    });
+  }
+
+  try {
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'No authorization header' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { data: roleData } = await supabaseAdmin
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .single();
+
+    if (!roleData || !['hr', 'director', 'ceo'].includes(roleData.role)) {
+      return new Response(
+        JSON.stringify({ error: 'Insufficient permissions' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { data: profileData } = await supabaseAdmin
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!profileData?.tenant_id) {
+      return new Response(
+        JSON.stringify({ error: 'Could not determine organization' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const requestData: CreateEmployeeRequest = await req.json();
+    const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8).toUpperCase();
+
+    const { data: authData, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+      email: requestData.email,
+      password: tempPassword,
+      email_confirm: true,
+      user_metadata: {
+        first_name: requestData.firstName,
+        last_name: requestData.lastName,
+        needs_password_setup: true,
+        tenant_id: profileData.tenant_id,
+      },
+    });
+
+    if (createUserError) throw createUserError;
+
+    await supabaseAdmin.from('employees').insert({
+      user_id: authData.user.id,
+      employee_id: requestData.employeeId,
+      department: requestData.department,
+      position: requestData.position,
+      work_location: requestData.workLocation,
+      join_date: requestData.joinDate,
+      reporting_manager_id: requestData.reportingManagerId || null,
+      must_change_password: true,
+      onboarding_status: 'not_started',
+      tenant_id: profileData.tenant_id,
+    });
+
+    await supabaseAdmin.from('user_roles').insert({
+      user_id: authData.user.id,
+      role: requestData.role,
+      tenant_id: profileData.tenant_id,
+    });
+
+    return new Response(
+      JSON.stringify({ 
+        success: true,
+        email: requestData.email,
+        message: 'Employee created successfully.',
+        userId: authData.user.id
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error: any) {
+    return new Response(
+      JSON.stringify({ error: error.message || 'An error occurred' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});
+

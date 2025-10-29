@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # Frontend application (production build)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+        - VITE_SUPABASE_PUBLISHABLE_KEY=${VITE_SUPABASE_PUBLISHABLE_KEY}
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  # Development server (alternative - runs Vite dev server with hot reload)
+  app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:8080"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_PUBLISHABLE_KEY=${VITE_SUPABASE_PUBLISHABLE_KEY}
+    restart: unless-stopped
+    profiles:
+      - dev

@@ -22,7 +22,29 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      await login(email, password);
+      const result = await login(email, password);
+      
+      if (result.error) {
+        console.error("Login error:", result.error);
+        let errorMessage = "Please check your credentials and try again.";
+        
+        if (result.error.message) {
+          if (result.error.message.includes("Invalid login credentials")) {
+            errorMessage = "Invalid email or password. Please try again.";
+          } else if (result.error.message.includes("Email not confirmed")) {
+            errorMessage = "Please confirm your email address before logging in.";
+          } else {
+            errorMessage = result.error.message;
+          }
+        }
+        
+        toast({
+          title: "Login failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
+        return;
+      }
       
       // Check if employee needs to change password
       const { data: { user } } = await supabase.auth.getUser();
@@ -45,10 +67,11 @@ export default function Login() {
         description: "You've successfully logged in.",
       });
       navigate("/dashboard");
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Login exception:", error);
       toast({
         title: "Login failed",
-        description: "Please check your credentials and try again.",
+        description: error.message || "An unexpected error occurred. Please try again.",
         variant: "destructive",
       });
     } finally {
