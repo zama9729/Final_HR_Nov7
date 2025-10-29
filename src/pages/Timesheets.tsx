@@ -1,376 +1,336 @@
 import { useEffect, useState } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Clock, CheckCircle, XCircle, Plus } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Clock, Save, Check, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { addDays, startOfWeek, format, isSameDay } from "date-fns";
+
+interface TimesheetEntry {
+  id?: string;
+  work_date: string;
+  hours: number;
+  description: string;
+}
 
 interface Timesheet {
-  id: string;
+  id?: string;
   week_start_date: string;
   week_end_date: string;
   total_hours: number;
   status: string;
-  submitted_at: string;
-  reviewed_at: string | null;
-  rejection_reason: string | null;
-  employee: {
-    profiles: {
-      first_name: string;
-      last_name: string;
-    };
-  };
-  reviewer?: {
-    profiles: {
-      first_name: string;
-      last_name: string;
-    };
-  };
+  rejection_reason?: string;
+  entries: TimesheetEntry[];
 }
 
 export default function Timesheets() {
-  const [myTimesheets, setMyTimesheets] = useState<Timesheet[]>([]);
-  const [teamTimesheets, setTeamTimesheets] = useState<Timesheet[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const { user, userRole } = useAuth();
+  const [currentWeek, setCurrentWeek] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }));
+  const [timesheet, setTimesheet] = useState<Timesheet | null>(null);
+  const [entries, setEntries] = useState<Record<string, TimesheetEntry>>({});
+  const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchData();
-  }, [user]);
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
 
-  const fetchData = async () => {
+  useEffect(() => {
+    fetchTimesheet();
+  }, [currentWeek, user]);
+
+  const fetchTimesheet = async () => {
     if (!user) return;
 
     try {
-      // Get current employee ID first
-      const { data: currentEmployee } = await supabase
+      const { data: employeeData } = await supabase
         .from("employees")
         .select("id")
         .eq("user_id", user.id)
         .single();
 
-      if (!currentEmployee) {
-        setLoading(false);
-        return;
-      }
+      if (!employeeData) return;
 
-      // Fetch my timesheets with proper joins
-      const { data: myData, error: myError } = await supabase
+      const weekStart = format(currentWeek, "yyyy-MM-dd");
+      const weekEnd = format(addDays(currentWeek, 6), "yyyy-MM-dd");
+
+      // Fetch existing timesheet
+      const { data: timesheetData } = await supabase
         .from("timesheets")
         .select(`
           *,
-          employee:employees!timesheets_employee_id_fkey(
-            id,
-            employee_id,
-            profiles:profiles!employees_user_id_fkey(first_name, last_name)
-          ),
-          reviewer:employees!timesheets_reviewed_by_fkey(
-            id,
-            profiles:profiles!employees_user_id_fkey(first_name, last_name)
-          )
+          timesheet_entries(*)
         `)
-        .eq("employee_id", currentEmployee.id)
-        .order("submitted_at", { ascending: false });
+        .eq("employee_id", employeeData.id)
+        .eq("week_start_date", weekStart)
+        .single();
 
-      if (myError) {
-        console.error("Error fetching my timesheets:", myError);
-      } else if (myData) {
-        setMyTimesheets(myData as any);
-      }
-
-      // Fetch team timesheets if manager or above
-      if (userRole && ["manager", "hr", "director", "ceo"].includes(userRole)) {
-        const { data: teamData, error: teamError } = await supabase
-          .from("timesheets")
-          .select(`
-            *,
-            employee:employees!timesheets_employee_id_fkey(
-              id,
-              employee_id,
-              reporting_manager_id,
-              profiles:profiles!employees_user_id_fkey(first_name, last_name)
-            ),
-            reviewer:employees!timesheets_reviewed_by_fkey(
-              id,
-              profiles:profiles!employees_user_id_fkey(first_name, last_name)
-            )
-          `)
-          .eq("status", "pending")
-          .order("submitted_at", { ascending: false });
-
-        if (teamError) {
-          console.error("Error fetching team timesheets:", teamError);
-        } else if (teamData) {
-          // Filter to only show timesheets from direct reports
-          const filteredTeam = teamData.filter(
-            (ts: any) => ts.employee?.reporting_manager_id === currentEmployee.id
-          );
-          setTeamTimesheets(filteredTeam as any);
-        }
+      if (timesheetData) {
+        setTimesheet(timesheetData as any);
+        
+        // Map entries by date
+        const entriesMap: Record<string, TimesheetEntry> = {};
+        (timesheetData as any).timesheet_entries?.forEach((entry: any) => {
+          entriesMap[entry.work_date] = entry;
+        });
+        setEntries(entriesMap);
+      } else {
+        // Initialize empty entries
+        const emptyEntries: Record<string, TimesheetEntry> = {};
+        weekDays.forEach((day) => {
+          const dateStr = format(day, "yyyy-MM-dd");
+          emptyEntries[dateStr] = {
+            work_date: dateStr,
+            hours: 0,
+            description: "",
+          };
+        });
+        setEntries(emptyEntries);
+        setTimesheet(null);
       }
     } catch (error) {
-      console.error("Error fetching timesheets:", error);
+      console.error("Error fetching timesheet:", error);
+    }
+  };
+
+  const updateEntry = (date: string, field: "hours" | "description", value: string | number) => {
+    setEntries((prev) => ({
+      ...prev,
+      [date]: {
+        ...prev[date],
+        [field]: field === "hours" ? parseFloat(value as string) || 0 : value,
+      },
+    }));
+  };
+
+  const calculateTotal = () => {
+    return Object.values(entries).reduce((sum, entry) => sum + (entry.hours || 0), 0);
+  };
+
+  const saveTimesheet = async () => {
+    if (!user) return;
+
+    setLoading(true);
+    try {
+      const { data: employeeData } = await supabase
+        .from("employees")
+        .select("id, tenant_id")
+        .eq("user_id", user.id)
+        .single();
+
+      if (!employeeData) throw new Error("Employee not found");
+
+      const weekStart = format(currentWeek, "yyyy-MM-dd");
+      const weekEnd = format(addDays(currentWeek, 6), "yyyy-MM-dd");
+      const totalHours = calculateTotal();
+
+      // Upsert timesheet
+      const { data: timesheetData, error: timesheetError } = await supabase
+        .from("timesheets")
+        .upsert({
+          id: timesheet?.id,
+          employee_id: employeeData.id,
+          tenant_id: employeeData.tenant_id,
+          week_start_date: weekStart,
+          week_end_date: weekEnd,
+          total_hours: totalHours,
+          status: "pending",
+        })
+        .select()
+        .single();
+
+      if (timesheetError) throw timesheetError;
+
+      // Delete existing entries
+      if (timesheet?.id) {
+        await supabase
+          .from("timesheet_entries")
+          .delete()
+          .eq("timesheet_id", timesheet.id);
+      }
+
+      // Insert new entries
+      const entriesToInsert = Object.values(entries)
+        .filter((entry) => entry.hours > 0)
+        .map((entry) => ({
+          timesheet_id: timesheetData.id,
+          tenant_id: employeeData.tenant_id,
+          work_date: entry.work_date,
+          hours: entry.hours,
+          description: entry.description || "",
+        }));
+
+      if (entriesToInsert.length > 0) {
+        const { error: entriesError } = await supabase
+          .from("timesheet_entries")
+          .insert(entriesToInsert);
+
+        if (entriesError) throw entriesError;
+      }
+
+      toast({
+        title: "Success",
+        description: "Timesheet saved successfully",
+      });
+
+      fetchTimesheet();
+    } catch (error) {
+      console.error("Error saving timesheet:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save timesheet",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleApprove = async (timesheetId: string) => {
-    const { data: employeeData } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("user_id", user?.id)
-      .single();
-
-    const { error } = await supabase
-      .from("timesheets")
-      .update({
-        status: "approved",
-        reviewed_by: employeeData?.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("id", timesheetId);
-
-    if (error) {
-      toast({ title: "Error", description: "Failed to approve timesheet", variant: "destructive" });
-    } else {
-      toast({ title: "Success", description: "Timesheet approved" });
-      fetchData();
-    }
-  };
-
-  const handleReject = async (timesheetId: string, reason: string) => {
-    const { data: employeeData } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("user_id", user?.id)
-      .single();
-
-    const { error } = await supabase
-      .from("timesheets")
-      .update({
-        status: "rejected",
-        reviewed_by: employeeData?.id,
-        reviewed_at: new Date().toISOString(),
-        rejection_reason: reason,
-      })
-      .eq("id", timesheetId);
-
-    if (error) {
-      toast({ title: "Error", description: "Failed to reject timesheet", variant: "destructive" });
-    } else {
-      toast({ title: "Success", description: "Timesheet rejected" });
-      fetchData();
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-
-    const { data: employeeData } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("user_id", user?.id)
-      .single();
-
-    if (!employeeData) return;
-
-    const { error } = await supabase.from("timesheets").insert({
-      employee_id: employeeData.id,
-      week_start_date: formData.get("week_start_date") as string,
-      week_end_date: formData.get("week_end_date") as string,
-      total_hours: parseFloat(formData.get("total_hours") as string),
-    });
-
-    if (error) {
-      toast({ title: "Error", description: "Failed to submit timesheet", variant: "destructive" });
-    } else {
-      toast({ title: "Success", description: "Timesheet submitted for approval" });
-      setDialogOpen(false);
-      fetchData();
-    }
-  };
-
-  if (loading) {
-    return (
-      <AppLayout>
-        <div className="text-center py-12">Loading timesheets...</div>
-      </AppLayout>
-    );
-  }
+  const isToday = (date: Date) => isSameDay(date, new Date());
+  const isEditable = !timesheet || timesheet.status === "pending";
 
   return (
-    <AppLayout>
-      <div className="space-y-6">
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Timesheets</h1>
-          <p className="text-muted-foreground">Manage time tracking and approvals</p>
+          <p className="text-muted-foreground">Track your work hours for the week</p>
         </div>
+        <div className="flex gap-2 items-center">
+          {timesheet?.status && (
+            <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+              timesheet.status === "approved" 
+                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                : timesheet.status === "rejected"
+                ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+            }`}>
+              {timesheet.status === "approved" && <Check className="inline h-4 w-4 mr-1" />}
+              {timesheet.status === "rejected" && <X className="inline h-4 w-4 mr-1" />}
+              {timesheet.status === "pending" && <Clock className="inline h-4 w-4 mr-1" />}
+              {timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}
+            </div>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => setCurrentWeek(addDays(currentWeek, -7))}
+          >
+            Previous Week
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setCurrentWeek(addDays(currentWeek, 7))}
+          >
+            Next Week
+          </Button>
+        </div>
+      </div>
 
-        <Tabs defaultValue={userRole && ["manager", "hr", "director", "ceo"].includes(userRole) ? "approvals" : "my-timesheets"}>
-          <TabsList>
-            {userRole && ["manager", "hr", "director", "ceo"].includes(userRole) && (
-              <TabsTrigger value="approvals">Pending Approvals</TabsTrigger>
-            )}
-            <TabsTrigger value="my-timesheets">My Timesheets</TabsTrigger>
-          </TabsList>
-
-          {userRole && ["manager", "hr", "director", "ceo"].includes(userRole) && (
-            <TabsContent value="approvals" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Pending Approvals</CardTitle>
-                  <CardDescription>Review and approve team timesheets</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {teamTimesheets.length === 0 ? (
-                    <div className="text-center py-12 text-muted-foreground">
-                      <p>No pending timesheet approvals</p>
-                    </div>
-                  ) : (
-                    teamTimesheets.map((timesheet) => (
-                      <div
-                        key={timesheet.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                            <Clock className="h-5 w-5 text-primary" />
-                          </div>
-                          <div>
-                            <p className="font-medium">
-                              {timesheet.employee?.profiles?.first_name || "Unknown"} {timesheet.employee?.profiles?.last_name || "Employee"}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              Week: {new Date(timesheet.week_start_date).toLocaleDateString()} - {new Date(timesheet.week_end_date).toLocaleDateString()}
-                            </p>
-                            <p className="text-sm text-muted-foreground">{timesheet.total_hours} hours total</p>
-                            <p className="text-xs text-muted-foreground">
-                              Submitted {new Date(timesheet.submitted_at).toLocaleDateString()}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              const reason = prompt("Enter rejection reason:");
-                              if (reason) handleReject(timesheet.id, reason);
-                            }}
-                          >
-                            <XCircle className="h-4 w-4 text-destructive" />
-                          </Button>
-                          <Button size="sm" onClick={() => handleApprove(timesheet.id)}>
-                            <CheckCircle className="h-4 w-4" />
-                          </Button>
-                        </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>
+              Week of {format(currentWeek, "MMM dd")} - {format(addDays(currentWeek, 6), "MMM dd, yyyy")}
+            </span>
+            <span className="text-2xl font-bold">
+              {calculateTotal().toFixed(1)} hrs
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left p-3 font-semibold w-32">Day</th>
+                  {weekDays.map((day) => (
+                    <th
+                      key={day.toISOString()}
+                      className={`text-center p-3 font-semibold min-w-[120px] ${
+                        isToday(day) ? "bg-primary/10" : ""
+                      }`}
+                    >
+                      <div>{format(day, "EEE")}</div>
+                      <div className="text-sm font-normal text-muted-foreground">
+                        {format(day, "MMM dd")}
                       </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
+                    </th>
+                  ))}
+                  <th className="text-center p-3 font-semibold w-28">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b">
+                  <td className="p-3 font-medium">Hours</td>
+                  {weekDays.map((day) => {
+                    const dateStr = format(day, "yyyy-MM-dd");
+                    const entry = entries[dateStr] || { hours: 0, description: "" };
+                    return (
+                      <td
+                        key={dateStr}
+                        className={`p-2 ${isToday(day) ? "bg-primary/10" : ""}`}
+                      >
+                        <Input
+                          type="number"
+                          step="0.5"
+                          min="0"
+                          max="24"
+                          value={entry.hours || ""}
+                          onChange={(e) => updateEntry(dateStr, "hours", e.target.value)}
+                          className="text-center"
+                          disabled={!isEditable}
+                          placeholder="0"
+                        />
+                      </td>
+                    );
+                  })}
+                  <td className="p-3 text-center font-bold text-lg">
+                    {calculateTotal().toFixed(1)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="p-3 font-medium">Description</td>
+                  {weekDays.map((day) => {
+                    const dateStr = format(day, "yyyy-MM-dd");
+                    const entry = entries[dateStr] || { hours: 0, description: "" };
+                    return (
+                      <td
+                        key={dateStr}
+                        className={`p-2 ${isToday(day) ? "bg-primary/10" : ""}`}
+                      >
+                        <Input
+                          type="text"
+                          value={entry.description || ""}
+                          onChange={(e) => updateEntry(dateStr, "description", e.target.value)}
+                          placeholder="Task details"
+                          disabled={!isEditable}
+                        />
+                      </td>
+                    );
+                  })}
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {isEditable && (
+            <div className="flex justify-end gap-2 mt-6">
+              <Button onClick={saveTimesheet} disabled={loading}>
+                <Save className="h-4 w-4 mr-2" />
+                {loading ? "Saving..." : "Save Timesheet"}
+              </Button>
+            </div>
           )}
 
-          <TabsContent value="my-timesheets" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>My Timesheets</CardTitle>
-                    <CardDescription>Your timesheet submission history</CardDescription>
-                  </div>
-                  <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button>
-                        <Plus className="h-4 w-4 mr-2" />
-                        Submit New Timesheet
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Submit Timesheet</DialogTitle>
-                      </DialogHeader>
-                      <form onSubmit={handleSubmit} className="space-y-4">
-                        <div>
-                          <Label htmlFor="week_start_date">Week Start Date</Label>
-                          <Input type="date" name="week_start_date" required />
-                        </div>
-                        <div>
-                          <Label htmlFor="week_end_date">Week End Date</Label>
-                          <Input type="date" name="week_end_date" required />
-                        </div>
-                        <div>
-                          <Label htmlFor="total_hours">Total Hours</Label>
-                          <Input type="number" step="0.5" name="total_hours" required />
-                        </div>
-                        <Button type="submit" className="w-full">Submit Timesheet</Button>
-                      </form>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {myTimesheets.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <p>No timesheets submitted yet</p>
-                    <p className="text-sm mt-2">Submit your first timesheet to get started</p>
-                  </div>
-                ) : (
-                  myTimesheets.map((timesheet) => (
-                    <div
-                      key={timesheet.id}
-                      className="flex items-center justify-between p-4 border rounded-lg"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                          <Clock className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <p className="font-medium">
-                            Week: {new Date(timesheet.week_start_date).toLocaleDateString()} - {new Date(timesheet.week_end_date).toLocaleDateString()}
-                          </p>
-                          <p className="text-sm text-muted-foreground">{timesheet.total_hours} hours</p>
-                          {timesheet.status === "approved" && timesheet.reviewer?.profiles && (
-                            <p className="text-xs text-muted-foreground">
-                              Approved by {timesheet.reviewer.profiles.first_name} {timesheet.reviewer.profiles.last_name}
-                            </p>
-                          )}
-                          {timesheet.status === "rejected" && (
-                            <p className="text-xs text-destructive">{timesheet.rejection_reason}</p>
-                          )}
-                        </div>
-                      </div>
-                      <Badge
-                        variant={
-                          timesheet.status === "approved"
-                            ? "default"
-                            : timesheet.status === "rejected"
-                            ? "destructive"
-                            : "secondary"
-                        }
-                      >
-                        {timesheet.status}
-                      </Badge>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
-    </AppLayout>
+          {timesheet?.status === "rejected" && timesheet.rejection_reason && (
+            <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+              <p className="font-semibold text-destructive">Rejection Reason:</p>
+              <p className="text-sm mt-1">{timesheet.rejection_reason}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

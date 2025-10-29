@@ -12,6 +12,7 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { Notifications } from "@/components/Notifications";
 
 export function TopBar() {
   const { user, userRole, logout } = useAuth();
@@ -43,10 +44,7 @@ export function TopBar() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="h-5 w-5" />
-            <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-primary" />
-          </Button>
+          <Notifications />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

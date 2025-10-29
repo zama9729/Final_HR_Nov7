@@ -122,7 +122,7 @@ export default function ShiftManagement() {
         .eq("id", profile.user?.id)
         .single();
 
-      const { error } = await supabase.from("shifts").insert({
+      const shiftData = {
         tenant_id: tenantData?.tenant_id,
         employee_id: selectedEmployee,
         shift_date: shiftDate,
@@ -132,9 +132,16 @@ export default function ShiftManagement() {
         notes: notes,
         status: "scheduled",
         created_by: profile.user?.id,
-      });
+      };
+
+      const { error } = await supabase.from("shifts").insert(shiftData);
 
       if (error) throw error;
+
+      // Send notification
+      await supabase.functions.invoke("notify-shift-created", {
+        body: { shifts: [shiftData] },
+      });
 
       toast({
         title: "Success",
@@ -217,6 +224,11 @@ export default function ShiftManagement() {
         .insert(shiftsToInsert);
 
       if (insertError) throw insertError;
+
+      // Send notifications
+      await supabase.functions.invoke("notify-shift-created", {
+        body: { shifts: shiftsToInsert },
+      });
 
       toast({
         title: "Success",
