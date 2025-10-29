@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -26,21 +26,13 @@ interface TreeNode extends Employee {
 }
 
 async function fetchOrgStructure(): Promise<Employee[]> {
-  const { data, error } = await supabase
-    .from("employees")
-    .select(`
-      *,
-      profiles:profiles!employees_user_id_fkey(first_name, last_name, email, phone)
-    `)
-    .eq("status", "active")
-    .order("employee_id");
-
-  if (error) {
+  try {
+    const data = await api.getOrgStructure();
+    return (data || []).filter((emp: any) => emp.profiles);
+  } catch (error) {
     console.error("Error fetching org structure:", error);
     return [];
   }
-
-  return (data || []).filter(emp => emp.profiles);
 }
 
 function buildTree(employees: Employee[]): TreeNode[] {

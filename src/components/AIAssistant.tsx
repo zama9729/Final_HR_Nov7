@@ -24,13 +24,14 @@ export function AIAssistant() {
   }, [messages]);
 
   const streamChat = async (userMessage: string) => {
-    const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    const CHAT_URL = `${API_URL}/api/ai/chat`;
     
     const resp = await fetch(CHAT_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`,
       },
       body: JSON.stringify({ messages: [...messages, { role: "user", content: userMessage }] }),
     });

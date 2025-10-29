@@ -12,7 +12,8 @@ import {
   UserCheck,
   CalendarClock,
   Award,
-  Bot
+  Bot,
+  CheckSquare
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -28,7 +29,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 
 // Navigation items for different roles
 const hrItems = [
@@ -36,7 +37,8 @@ const hrItems = [
   { title: "Employees", url: "/employees", icon: Users, showBadge: false },
   { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck, showBadge: false },
   { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
-  { title: "Timesheets", url: "/timesheets", icon: Clock, showBadge: true },
+  { title: "Timesheets", url: "/timesheets", icon: Clock, showBadge: false },
+  { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
   { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
   { title: "Shift Management", url: "/shifts", icon: CalendarClock, showBadge: false },
   { title: "Workflows", url: "/workflows", icon: Workflow, showBadge: false },
@@ -49,7 +51,8 @@ const managerItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, showBadge: false },
   { title: "My Team", url: "/employees", icon: Users, showBadge: false },
   { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
-  { title: "Timesheets", url: "/timesheets", icon: Clock, showBadge: true },
+  { title: "Timesheets", url: "/timesheets", icon: Clock, showBadge: false },
+  { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
   { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
   { title: "Appraisals", url: "/appraisals", icon: Award, showBadge: false },
   { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
@@ -79,19 +82,13 @@ export function AppSidebar() {
       if (userRole && ['manager', 'hr', 'director', 'ceo'].includes(userRole)) {
         fetchPendingCounts();
         
-        // Set up realtime subscriptions
-        const channel = supabase
-          .channel('sidebar-notifications')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'timesheets' }, () => {
-            fetchPendingCounts();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, () => {
-            fetchPendingCounts();
-          })
-          .subscribe();
+        // Poll for updates every 30 seconds (replaces realtime)
+        const interval = setInterval(() => {
+          fetchPendingCounts();
+        }, 30000);
 
         return () => {
-          supabase.removeChannel(channel);
+          clearInterval(interval);
         };
       }
     }
@@ -101,22 +98,9 @@ export function AppSidebar() {
     if (!user) return;
 
     try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-
-      if (profile?.tenant_id) {
-        const { data: org } = await supabase
-          .from('organizations')
-          .select('name, logo_url')
-          .eq('id', profile.tenant_id)
-          .single();
-
-        if (org) {
-          setOrganization(org);
-        }
+      const org = await api.getOrganization();
+      if (org) {
+        setOrganization(org);
       }
     } catch (error) {
       console.error('Error fetching organization:', error);
@@ -127,19 +111,10 @@ export function AppSidebar() {
     if (!user) return;
 
     try {
-      const { count: timesheetCount } = await supabase
-        .from('timesheets')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending');
-
-      const { count: leaveCount } = await supabase
-        .from('leave_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending');
-
+      const counts = await api.getPendingCounts();
       setPendingCounts({
-        timesheets: timesheetCount || 0,
-        leaves: leaveCount || 0,
+        timesheets: counts.timesheets || 0,
+        leaves: counts.leaves || 0,
       });
     } catch (error) {
       console.error('Error fetching pending counts:', error);
@@ -162,9 +137,19 @@ export function AppSidebar() {
   };
   
   const navigationItems = getNavigationItems();
+  
+  // Debug: Log what menu items are being shown
+  if (navigationItems && navigationItems.length > 0) {
+    console.log('✅ Navigation items loaded:', navigationItems.map(i => i.title));
+    console.log('✅ User role:', userRole);
+    const hasApprovals = navigationItems.some(item => item.title === 'Timesheet Approvals');
+    console.log('✅ Has Timesheet Approvals:', hasApprovals);
+  } else {
+    console.warn('⚠️ No navigation items found! User role:', userRole);
+  }
 
   const getBadgeCount = (url: string) => {
-    if (url === '/timesheets') return pendingCounts.timesheets;
+    if (url === '/timesheet-approvals') return pendingCounts.timesheets;
     if (url === '/leaves') return pendingCounts.leaves;
     return 0;
   };
@@ -204,29 +189,37 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigationItems.map((item) => {
-                const badgeCount = item.showBadge ? getBadgeCount(item.url) : 0;
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild>
-                      <NavLink 
-                        to={item.url}
-                        className={({ isActive }) => 
-                          isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
-                        }
-                      >
-                        <item.icon className="h-4 w-4" />
-                        <span className="flex-1">{item.title}</span>
-                        {badgeCount > 0 && (
-                          <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
-                            {badgeCount > 9 ? '9+' : badgeCount}
-                          </span>
-                        )}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+              {navigationItems && navigationItems.length > 0 ? (
+                navigationItems.map((item) => {
+                  const badgeCount = item.showBadge ? getBadgeCount(item.url) : 0;
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild>
+                        <NavLink 
+                          to={item.url}
+                          className={({ isActive }) => 
+                            isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
+                          }
+                        >
+                          <item.icon className="h-4 w-4" />
+                          <span className="flex-1">{item.title}</span>
+                          {badgeCount > 0 && (
+                            <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
+                              {badgeCount > 9 ? '9+' : badgeCount}
+                            </span>
+                          )}
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })
+              ) : (
+                <SidebarMenuItem>
+                  <div className="px-3 py-2 text-sm text-muted-foreground">
+                    Loading menu items...
+                  </div>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

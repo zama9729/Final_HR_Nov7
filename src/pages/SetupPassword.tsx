@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 import { Building2 } from "lucide-react";
 import { z } from "zod";
 
@@ -77,20 +77,25 @@ export default function SetupPassword() {
       const validated = passwordSchema.parse(formData);
       setLoading(true);
 
-      // Update the user's password using admin API via edge function
-      const { data: authData, error: authError } = await supabase.functions.invoke('setup-employee-password', {
-        body: { 
+      // Update the user's password via API
+      const response = await fetch(`${API_URL}/api/onboarding/setup-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           email,
           password: validated.password,
           securityQuestion1: validated.securityQuestion1,
           securityAnswer1: validated.securityAnswer1.toLowerCase(),
           securityQuestion2: validated.securityQuestion2,
           securityAnswer2: validated.securityAnswer2.toLowerCase(),
-        }
+        })
       });
 
-      if (authError) throw authError;
-      if (authData?.error) throw new Error(authData.error);
+      const authData = await response.json();
+      
+      if (!response.ok || authData.error) {
+        throw new Error(authData.error || 'Failed to set password');
+      }
 
       toast({
         title: "Password set successfully",

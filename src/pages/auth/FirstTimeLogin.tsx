@@ -5,7 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 import { Building2, ArrowLeft } from "lucide-react";
 
 export default function FirstTimeLogin() {
@@ -20,11 +22,13 @@ export default function FirstTimeLogin() {
 
     try {
       // Verify employee email and eligibility
-      const { data, error } = await supabase.functions.invoke('verify-employee-email', {
-        body: { email }
+      const response = await fetch(`${API_URL}/api/onboarding/verify-employee-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
       });
 
-      if (error) throw error;
+      const data = await response.json();
 
       if (!data.valid) {
         toast({

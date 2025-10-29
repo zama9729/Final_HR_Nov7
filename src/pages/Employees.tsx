@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface Employee {
@@ -30,10 +30,10 @@ interface Employee {
   position: string;
   status: string;
   join_date: string;
-  profiles: {
-    first_name: string;
-    last_name: string;
-    email: string;
+  profiles?: {
+    first_name?: string;
+    last_name?: string;
+    email?: string;
   };
 }
 
@@ -47,48 +47,19 @@ export default function Employees() {
   }, [user, userRole]);
 
   const fetchEmployees = async () => {
-    if (!user) return;
-
-    let query = supabase
-      .from('employees')
-      .select(`
-        id,
-        employee_id,
-        department,
-        position,
-        status,
-        join_date,
-        user_id,
-        reporting_manager_id,
-        onboarding_status,
-        profiles!employees_user_id_fkey(first_name, last_name, email)
-      `);
-
-    // If user is a manager, only show their team
-    if (userRole === 'manager') {
-      // First get the employee record for the current user
-      const { data: managerEmployee } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (managerEmployee) {
-        query = query.eq('reporting_manager_id', managerEmployee.id);
-      }
+    if (!user) {
+      setLoading(false);
+      return;
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
-
-    if (error) {
+    try {
+      const data = await api.getEmployees();
+      setEmployees(data);
+    } catch (error) {
       console.error('Error fetching employees:', error);
+    } finally {
+      setLoading(false);
     }
-    
-    if (data) {
-      console.log('Fetched employees:', data);
-      setEmployees(data as any);
-    }
-    setLoading(false);
   };
 
   const isHROrAbove = userRole === 'hr' || userRole === 'director' || userRole === 'ceo';
@@ -172,10 +143,10 @@ export default function Employees() {
                       <TableRow key={employee.id} className="cursor-pointer hover:bg-muted/50">
                         <TableCell className="font-medium">
                           <Link to={`/employees/${employee.id}`} className="hover:underline">
-                            {employee.profiles.first_name} {employee.profiles.last_name}
+                            {employee.profiles?.first_name || ''} {employee.profiles?.last_name || ''}
                           </Link>
                         </TableCell>
-                        <TableCell>{employee.profiles.email}</TableCell>
+                        <TableCell>{employee.profiles?.email || 'N/A'}</TableCell>
                         <TableCell>{employee.position}</TableCell>
                         <TableCell>{employee.department}</TableCell>
                         <TableCell>{new Date(employee.join_date).toLocaleDateString()}</TableCell>

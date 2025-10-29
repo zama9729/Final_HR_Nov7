@@ -4,7 +4,7 @@ import { Users, Clock, Calendar, TrendingUp, AlertCircle, CheckCircle } from "lu
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface DashboardStats {
@@ -34,60 +34,23 @@ export default function Dashboard() {
     if (!user) return;
 
     try {
-      // Get current employee
-      const { data: currentEmployee } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
+      // Get employees count
+      const employees = await api.getEmployees();
+      const employeeCount = employees.filter((e: any) => e.status === 'active').length;
 
-      // Total active employees
-      const { count: employeeCount } = await supabase
-        .from('employees')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'active');
-
-      // Pending approvals (timesheets + leave requests)
+      // Pending approvals
       let pendingCount = 0;
-      if (userRole && ['manager', 'hr', 'director', 'ceo'].includes(userRole) && currentEmployee) {
-        const { count: timesheetCount } = await supabase
-          .from('timesheets')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', 'pending');
-
-        const { count: leaveCount } = await supabase
-          .from('leave_requests')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', 'pending');
-
-        pendingCount = (timesheetCount || 0) + (leaveCount || 0);
+      if (userRole && ['manager', 'hr', 'director', 'ceo'].includes(userRole)) {
+        const counts = await api.getPendingCounts();
+        pendingCount = counts.timesheets + counts.leaves;
       }
 
-      // Active leave requests (approved leaves that haven't ended yet)
-      const today = new Date().toISOString().split('T')[0];
-      const { count: activeLeaves } = await supabase
-        .from('leave_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'approved')
-        .gte('end_date', today);
-
-      // Calculate average attendance (simplified: approved timesheets / total weeks)
-      const { count: approvedTimesheets } = await supabase
-        .from('timesheets')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'approved');
-
-      const { count: totalTimesheets } = await supabase
-        .from('timesheets')
-        .select('*', { count: 'exact', head: true });
-
-      const attendance = totalTimesheets ? Math.round(((approvedTimesheets || 0) / totalTimesheets) * 100) : 0;
-
+      // For now, set defaults (these would need API endpoints for full stats)
       setStats({
-        totalEmployees: employeeCount || 0,
+        totalEmployees: employeeCount,
         pendingApprovals: pendingCount,
-        activeLeaveRequests: activeLeaves || 0,
-        avgAttendance: attendance,
+        activeLeaveRequests: 0,
+        avgAttendance: 0,
       });
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -101,11 +64,7 @@ export default function Dashboard() {
     }
 
     try {
-      const { data: employeeData } = await supabase
-        .from('employees')
-        .select('onboarding_status, must_change_password')
-        .eq('user_id', user.id)
-        .single();
+      const employeeData = await api.checkEmployeePasswordChange();
 
       if (employeeData) {
         if (employeeData.onboarding_status === 'in_progress' || employeeData.onboarding_status === 'not_started' || employeeData.onboarding_status === 'pending') {

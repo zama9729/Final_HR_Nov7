@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { z } from "zod";
 import { Progress } from "@/components/ui/progress";
@@ -57,17 +57,25 @@ export default function Onboarding() {
   const fetchEmployeeId = async () => {
     if (!user) return;
     
-    const { data } = await supabase
-      .from('employees')
-      .select('id, onboarding_status')
-      .eq('user_id', user.id)
-      .single();
+    try {
+      const employeeData = await api.checkEmployeePasswordChange();
 
-    if (data) {
-      setEmployeeId(data.id);
-      if (data.onboarding_status === 'completed') {
-        navigate('/');
+      // employeeData should have id field from the API
+      if (employeeData && employeeData.id) {
+        setEmployeeId(employeeData.id);
+        if (employeeData.onboarding_status === 'completed') {
+          navigate('/dashboard');
+        }
+      } else {
+        console.warn('No employee record found for user');
       }
+    } catch (error: any) {
+      // If employee doesn't exist, that's okay - might not be an employee yet
+      if (error.message?.includes('404') || error.message?.includes('not found')) {
+        console.log('User is not an employee');
+        return;
+      }
+      console.error('Error fetching employee ID:', error);
     }
   };
 
@@ -86,39 +94,22 @@ export default function Onboarding() {
       const validated = onboardingSchema.parse(formData);
       setLoading(true);
 
-      // Insert onboarding data
-      const { error: onboardingError } = await supabase
-        .from('onboarding_data')
-        .insert({
-          employee_id: employeeId,
-          emergency_contact_name: validated.emergencyContactName,
-          emergency_contact_phone: validated.emergencyContactPhone,
-          emergency_contact_relation: validated.emergencyContactRelation,
-          address: validated.address,
-          city: validated.city,
-          state: validated.state,
-          postal_code: validated.postalCode,
-          bank_account_number: validated.bankAccountNumber,
-          bank_name: validated.bankName,
-          bank_branch: validated.bankBranch,
-          ifsc_code: validated.ifscCode,
-          pan_number: validated.panNumber,
-          aadhar_number: validated.aadharNumber,
-          completed_at: new Date().toISOString(),
-        });
-
-      if (onboardingError) throw onboardingError;
-
-      // Update employee onboarding status
-      const { error: updateError } = await supabase
-        .from('employees')
-        .update({
-          onboarding_status: 'completed',
-          must_change_password: false,
-        })
-        .eq('id', employeeId);
-
-      if (updateError) throw updateError;
+      // Submit onboarding data via API
+      await api.submitOnboarding(employeeId, {
+        emergencyContactName: validated.emergencyContactName,
+        emergencyContactPhone: validated.emergencyContactPhone,
+        emergencyContactRelation: validated.emergencyContactRelation,
+        address: validated.address,
+        city: validated.city,
+        state: validated.state,
+        postalCode: validated.postalCode,
+        bankAccountNumber: validated.bankAccountNumber,
+        bankName: validated.bankName,
+        bankBranch: validated.bankBranch,
+        ifscCode: validated.ifscCode,
+        panNumber: validated.panNumber,
+        aadharNumber: validated.aadharNumber,
+      });
 
       toast({
         title: "Onboarding completed",

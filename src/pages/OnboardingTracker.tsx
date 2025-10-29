@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Users, CheckCircle, Clock, XCircle } from "lucide-react";
 
 interface OnboardingEmployee {
@@ -35,32 +35,24 @@ export default function OnboardingTracker() {
   }, []);
 
   const fetchOnboardingEmployees = async () => {
-    const { data } = await supabase
-      .from('employees')
-      .select(`
-        id,
-        employee_id,
-        onboarding_status,
-        must_change_password,
-        join_date,
-        position,
-        department,
-        profiles!employees_user_id_fkey(first_name, last_name, email)
-      `)
-      .in('onboarding_status', ['not_started', 'in_progress', 'pending'])
-      .order('join_date', { ascending: false });
-
-    if (data) {
-      setEmployees(data as any);
+    try {
+      const data = await api.getOnboardingEmployees();
       
-      // Calculate stats
-      const notStarted = data.filter(e => e.onboarding_status === 'not_started' || e.onboarding_status === 'pending').length;
-      const inProgress = data.filter(e => e.onboarding_status === 'in_progress').length;
-      const completed = data.filter(e => e.onboarding_status === 'completed').length;
-      
-      setStats({ notStarted, inProgress, completed });
+      if (data) {
+        setEmployees(data as any);
+        
+        // Calculate stats
+        const notStarted = data.filter((e: any) => e.onboarding_status === 'not_started' || e.onboarding_status === 'pending').length;
+        const inProgress = data.filter((e: any) => e.onboarding_status === 'in_progress').length;
+        const completed = data.filter((e: any) => e.onboarding_status === 'completed').length;
+        
+        setStats({ notStarted, inProgress, completed });
+      }
+    } catch (error) {
+      console.error('Error fetching onboarding employees:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const getStatusBadge = (status: string, mustChangePassword: boolean) => {
@@ -169,7 +161,7 @@ export default function OnboardingTracker() {
                           {getStatusIcon(employee.onboarding_status, employee.must_change_password)}
                           <div>
                             <div className="font-medium">
-                              {employee.profiles.first_name} {employee.profiles.last_name}
+                              {employee.profiles?.first_name || ''} {employee.profiles?.last_name || ''}
                             </div>
                             <div className="text-sm text-muted-foreground">
                               {employee.employee_id}
@@ -177,7 +169,7 @@ export default function OnboardingTracker() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>{employee.profiles.email}</TableCell>
+                      <TableCell>{employee.profiles?.email || 'N/A'}</TableCell>
                       <TableCell>{employee.position}</TableCell>
                       <TableCell>{employee.department}</TableCell>
                       <TableCell>{new Date(employee.join_date).toLocaleDateString()}</TableCell>

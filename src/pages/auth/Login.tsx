@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Building2, UserPlus } from "lucide-react";
 
 export default function Login() {
@@ -47,19 +47,16 @@ export default function Login() {
       }
       
       // Check if employee needs to change password
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (user) {
-        const { data: employeeData } = await supabase
-          .from('employees')
-          .select('must_change_password')
-          .eq('user_id', user.id)
-          .single();
+      try {
+        const employeeData = await api.checkEmployeePasswordChange();
         
         if (employeeData?.must_change_password) {
           navigate("/auth/first-time-login");
           return;
         }
+      } catch (error) {
+        // Not an employee or error checking - continue normally
+        console.log('Not an employee or error checking password status');
       }
       
       toast({

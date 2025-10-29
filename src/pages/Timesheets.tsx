@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Clock, Save, Check, X } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { addDays, startOfWeek, format, isSameDay } from "date-fns";
@@ -39,39 +39,54 @@ export default function Timesheets() {
     fetchTimesheet();
   }, [currentWeek, user]);
 
+  // Ensure entries are initialized
+  useEffect(() => {
+    if (Object.keys(entries).length === 0 && weekDays.length > 0) {
+      const emptyEntries: Record<string, TimesheetEntry> = {};
+      weekDays.forEach((day) => {
+        const dateStr = format(day, "yyyy-MM-dd");
+        emptyEntries[dateStr] = {
+          work_date: dateStr,
+          hours: 0,
+          description: "",
+        };
+      });
+      setEntries(emptyEntries);
+    }
+  }, [weekDays]);
+
+
   const fetchTimesheet = async () => {
     if (!user) return;
 
     try {
-      const { data: employeeData } = await supabase
-        .from("employees")
-        .select("id")
-        .eq("user_id", user.id)
-        .single();
-
-      if (!employeeData) return;
-
       const weekStart = format(currentWeek, "yyyy-MM-dd");
       const weekEnd = format(addDays(currentWeek, 6), "yyyy-MM-dd");
 
       // Fetch existing timesheet
-      const { data: timesheetData } = await supabase
-        .from("timesheets")
-        .select(`
-          *,
-          timesheet_entries(*)
-        `)
-        .eq("employee_id", employeeData.id)
-        .eq("week_start_date", weekStart)
-        .single();
+      const timesheetData = await api.getTimesheet(weekStart, weekEnd);
 
       if (timesheetData) {
         setTimesheet(timesheetData as any);
         
         // Map entries by date
         const entriesMap: Record<string, TimesheetEntry> = {};
-        (timesheetData as any).timesheet_entries?.forEach((entry: any) => {
-          entriesMap[entry.work_date] = entry;
+        (timesheetData as any).entries?.forEach((entry: any) => {
+          // Convert work_date to YYYY-MM-DD format if it's an ISO string
+          let workDate = entry.work_date;
+          if (typeof workDate === 'string' && workDate.includes('T')) {
+            workDate = workDate.split('T')[0];
+          }
+          // Ensure work_date is always set
+          if (!workDate) {
+            console.warn('Entry missing work_date, skipping:', entry);
+            return;
+          }
+          // Use the date as the key and ensure work_date is set on the entry
+          entriesMap[workDate] = {
+            ...entry,
+            work_date: workDate,
+          };
         });
         setEntries(entriesMap);
       } else {
@@ -90,6 +105,17 @@ export default function Timesheets() {
       }
     } catch (error) {
       console.error("Error fetching timesheet:", error);
+      // Initialize empty entries on error
+      const emptyEntries: Record<string, TimesheetEntry> = {};
+      weekDays.forEach((day) => {
+        const dateStr = format(day, "yyyy-MM-dd");
+        emptyEntries[dateStr] = {
+          work_date: dateStr,
+          hours: 0,
+          description: "",
+        };
+      });
+      setEntries(emptyEntries);
     }
   };
 
@@ -97,88 +123,184 @@ export default function Timesheets() {
     setEntries((prev) => ({
       ...prev,
       [date]: {
+        work_date: date, // Always ensure work_date is set
         ...prev[date],
         [field]: field === "hours" ? parseFloat(value as string) || 0 : value,
       },
     }));
   };
 
-  const calculateTotal = () => {
-    return Object.values(entries).reduce((sum, entry) => sum + (entry.hours || 0), 0);
+  const calculateTotal = (): number => {
+    try {
+      if (!entries || typeof entries !== 'object' || Object.keys(entries).length === 0) {
+        return 0;
+      }
+      const total = Object.values(entries).reduce((sum, entry) => {
+        if (!entry || typeof entry !== 'object') return sum;
+        let hours = 0;
+        if (typeof entry.hours === 'number') {
+          hours = entry.hours;
+        } else if (typeof entry.hours === 'string') {
+          hours = parseFloat(entry.hours) || 0;
+        } else {
+          hours = 0;
+        }
+        return sum + hours;
+      }, 0);
+      const result = Number(total);
+      return Number.isNaN(result) ? 0 : result;
+    } catch (error) {
+      console.error('Error calculating total:', error);
+      return 0;
+    }
   };
+  
+  // Memoize the total to avoid recalculating on every render
+  const totalHours: number = useMemo(() => {
+    try {
+      const result = calculateTotal();
+      const num = Number(result);
+      return Number.isFinite(num) ? num : 0;
+    } catch (error) {
+      return 0;
+    }
+  }, [entries]);
 
   const saveTimesheet = async () => {
     if (!user) return;
 
     setLoading(true);
     try {
-      const { data: employeeData } = await supabase
-        .from("employees")
-        .select("id, tenant_id")
-        .eq("user_id", user.id)
-        .single();
-
-      if (!employeeData) throw new Error("Employee not found");
-
       const weekStart = format(currentWeek, "yyyy-MM-dd");
       const weekEnd = format(addDays(currentWeek, 6), "yyyy-MM-dd");
-      const totalHours = calculateTotal();
+      const hoursToSave = calculateTotal();
 
-      // Upsert timesheet
-      const { data: timesheetData, error: timesheetError } = await supabase
-        .from("timesheets")
-        .upsert({
-          id: timesheet?.id,
-          employee_id: employeeData.id,
-          tenant_id: employeeData.tenant_id,
-          week_start_date: weekStart,
-          week_end_date: weekEnd,
-          total_hours: totalHours,
-          status: "pending",
+      // Prepare entries - ensure all required fields are present
+      // Convert entries object to array, using the key as work_date if missing
+      const entriesArray = Object.keys(entries)
+        .filter((dateKey) => {
+          const entry = entries[dateKey];
+          // Only include entries that have hours > 0
+          return entry && (Number(entry.hours) || 0) > 0;
         })
-        .select()
-        .single();
+        .map((dateKey) => {
+          const entry = entries[dateKey];
+          
+          // ALWAYS use dateKey as the primary source for work_date (it's the key in the entries object)
+          // dateKey should be in YYYY-MM-DD format
+          let workDate = dateKey;
+          
+          // If entry has work_date, try to normalize it to YYYY-MM-DD format
+          if (entry?.work_date) {
+            let entryWorkDate = entry.work_date;
+            
+            // If it's an ISO string, extract just the date part
+            if (typeof entryWorkDate === 'string') {
+              if (entryWorkDate.includes('T')) {
+                entryWorkDate = entryWorkDate.split('T')[0];
+              }
+              entryWorkDate = entryWorkDate.trim();
+              
+              // Validate it's a date string
+              const dateMatch = entryWorkDate.match(/^\d{4}-\d{2}-\d{2}/);
+              if (dateMatch) {
+                workDate = dateMatch[0]; // Use normalized entry work_date if valid
+              }
+            }
+          }
+          
+          // Final validation - ensure work_date is set
+          if (!workDate || typeof workDate !== 'string' || workDate.trim() === '') {
+            console.error(`Invalid work_date - using dateKey: ${dateKey}`, entry);
+            workDate = dateKey; // Force use dateKey as final fallback
+          }
+          
+          // Ensure it's in YYYY-MM-DD format
+          const dateMatch = workDate.match(/^\d{4}-\d{2}-\d{2}/);
+          if (dateMatch) {
+            workDate = dateMatch[0];
+          } else {
+            console.error(`Invalid date format for dateKey: ${dateKey}, workDate: ${workDate}`);
+            // If dateKey itself is invalid, try to format current week day
+            const dayIndex = Object.keys(entries).indexOf(dateKey);
+            if (dayIndex >= 0 && weekDays[dayIndex]) {
+              workDate = format(weekDays[dayIndex], "yyyy-MM-dd");
+            } else {
+              throw new Error(`Cannot determine work_date for entry with dateKey: ${dateKey}`);
+            }
+          }
+          
+          return {
+            work_date: workDate, // ALWAYS set work_date
+            hours: Number(entry?.hours) || 0,
+            description: String(entry?.description || ''),
+          };
+        });
 
-      if (timesheetError) throw timesheetError;
+      // Final validation - ensure all entries have valid work_date
+      const entriesToSave = entriesArray.filter((entry) => {
+        const isValid = entry && entry.work_date && entry.work_date.trim() !== '' && entry.hours > 0;
+        if (!isValid) {
+          console.warn('Filtering out invalid entry:', entry);
+        }
+        return isValid;
+      });
 
-      // Delete existing entries
-      if (timesheet?.id) {
-        await supabase
-          .from("timesheet_entries")
-          .delete()
-          .eq("timesheet_id", timesheet.id);
+      // Log for debugging
+      console.log('Saving timesheet:', {
+        weekStart,
+        weekEnd,
+        totalHours: hoursToSave,
+        rawEntriesKeys: Object.keys(entries),
+        rawEntriesCount: Object.keys(entries).length,
+        entriesToSaveCount: entriesToSave.length,
+        entriesToSave: entriesToSave,
+      });
+
+      // Final check - throw error if any entry is missing work_date
+      const invalidEntries = entriesToSave.filter(e => !e || !e.work_date || e.work_date.trim() === '');
+      if (invalidEntries.length > 0) {
+        console.error('Found entries without work_date after filtering:', invalidEntries);
+        throw new Error(`Some entries are missing work_date: ${JSON.stringify(invalidEntries)}`);
       }
 
-      // Insert new entries
-      const entriesToInsert = Object.values(entries)
-        .filter((entry) => entry.hours > 0)
-        .map((entry) => ({
-          timesheet_id: timesheetData.id,
-          tenant_id: employeeData.tenant_id,
-          work_date: entry.work_date,
-          hours: entry.hours,
-          description: entry.description || "",
-        }));
+      // Save timesheet via API
+      const timesheetData = await api.saveTimesheet(weekStart, weekEnd, hoursToSave, entriesToSave);
 
-      if (entriesToInsert.length > 0) {
-        const { error: entriesError } = await supabase
-          .from("timesheet_entries")
-          .insert(entriesToInsert);
-
-        if (entriesError) throw entriesError;
+      if (timesheetData) {
+        setTimesheet(timesheetData as any);
+        
+        // Map entries by date
+        const entriesMap: Record<string, TimesheetEntry> = {};
+        (timesheetData as any).entries?.forEach((entry: any) => {
+          // Convert work_date to YYYY-MM-DD format if it's an ISO string
+          let workDate = entry.work_date;
+          if (typeof workDate === 'string' && workDate.includes('T')) {
+            workDate = workDate.split('T')[0];
+          }
+          // Ensure work_date is always set
+          if (!workDate) {
+            console.warn('Entry missing work_date, skipping:', entry);
+            return;
+          }
+          // Use the date as the key and ensure work_date is set on the entry
+          entriesMap[workDate] = {
+            ...entry,
+            work_date: workDate,
+          };
+        });
+        setEntries(entriesMap);
       }
 
       toast({
         title: "Success",
         description: "Timesheet saved successfully",
       });
-
-      fetchTimesheet();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving timesheet:", error);
       toast({
         title: "Error",
-        description: "Failed to save timesheet",
+        description: error.message || "Failed to save timesheet",
         variant: "destructive",
       });
     } finally {
@@ -233,7 +355,7 @@ export default function Timesheets() {
               Week of {format(currentWeek, "MMM dd")} - {format(addDays(currentWeek, 6), "MMM dd, yyyy")}
             </span>
             <span className="text-2xl font-bold">
-              {calculateTotal().toFixed(1)} hrs
+              {(totalHours || 0).toFixed(1)} hrs
             </span>
           </CardTitle>
         </CardHeader>
@@ -264,7 +386,7 @@ export default function Timesheets() {
                   <td className="p-3 font-medium">Hours</td>
                   {weekDays.map((day) => {
                     const dateStr = format(day, "yyyy-MM-dd");
-                    const entry = entries[dateStr] || { hours: 0, description: "" };
+                    const entry = entries[dateStr] || { work_date: dateStr, hours: 0, description: "" };
                     return (
                       <td
                         key={dateStr}
@@ -285,14 +407,14 @@ export default function Timesheets() {
                     );
                   })}
                   <td className="p-3 text-center font-bold text-lg">
-                    {calculateTotal().toFixed(1)}
+                    {(totalHours || 0).toFixed(1)}
                   </td>
                 </tr>
                 <tr>
                   <td className="p-3 font-medium">Description</td>
                   {weekDays.map((day) => {
                     const dateStr = format(day, "yyyy-MM-dd");
-                    const entry = entries[dateStr] || { hours: 0, description: "" };
+                    const entry = entries[dateStr] || { work_date: dateStr, hours: 0, description: "" };
                     return (
                       <td
                         key={dateStr}

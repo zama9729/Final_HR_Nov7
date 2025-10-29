@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { z } from "zod";
 
 const employeeSchema = z.object({
@@ -47,21 +47,17 @@ export default function AddEmployee() {
   }, []);
 
   const fetchManagers = async () => {
-    const { data } = await supabase
-      .from('employees')
-      .select(`
-        id,
-        user_id,
-        profiles!inner(first_name, last_name)
-      `)
-      .eq('status', 'active');
-
-    if (data) {
-      const managersList = data.map((emp: any) => ({
-        id: emp.id,
-        name: `${emp.profiles.first_name} ${emp.profiles.last_name}`,
-      }));
+    try {
+      const employees = await api.getEmployees();
+      const managersList = employees
+        .filter((emp: any) => emp.status === 'active')
+        .map((emp: any) => ({
+          id: emp.id,
+          name: `${emp.profiles?.first_name || ''} ${emp.profiles?.last_name || ''}`.trim(),
+        }));
       setManagers(managersList);
+    } catch (error) {
+      console.error('Error fetching managers:', error);
     }
   };
 
@@ -73,32 +69,16 @@ export default function AddEmployee() {
       const validated = employeeSchema.parse(formData);
       setLoading(true);
 
-      // Get current session
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
+      // Call API to create employee
+      const result = await api.createEmployee(validated);
 
-      // Call edge function to create employee with auth header
-      const { data, error } = await supabase.functions.invoke('create-employee', {
-        body: validated,
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (error) {
-        // Check if it's a CORS or 404 error (function not deployed)
-        if (error.message?.includes('CORS') || error.message?.includes('404') || error.message?.includes('Failed to fetch')) {
-          throw new Error('Edge function not deployed. Please deploy the create-employee function to Supabase.');
-        }
-        throw error;
+      if (result.error) {
+        throw new Error(result.error);
       }
 
       toast({
         title: "Employee added successfully",
-        description: `${data.email} can now use "First Time Login" on the login page`,
+        description: `${result.email || validated.email} can now use "First Time Login" on the login page`,
         duration: 5000,
       });
 
