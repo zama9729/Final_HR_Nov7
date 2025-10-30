@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Check, X, Clock, Calendar, User } from "lucide-react";
+import { Check, X, Clock, Calendar, User, RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -47,8 +47,10 @@ export default function TimesheetApprovals() {
   const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
   const [loading, setLoading] = useState(true);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [returnDialogOpen, setReturnDialogOpen] = useState(false);
   const [selectedTimesheet, setSelectedTimesheet] = useState<Timesheet | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [returnReason, setReturnReason] = useState("");
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -129,6 +131,42 @@ export default function TimesheetApprovals() {
     }
   };
 
+  const handleReturnClick = (timesheet: Timesheet) => {
+    setSelectedTimesheet(timesheet);
+    setReturnReason("");
+    setReturnDialogOpen(true);
+  };
+
+  const handleReturn = async () => {
+    if (!selectedTimesheet || !returnReason.trim()) {
+      toast({
+        title: "Error",
+        description: "Please provide feedback for returning",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await api.approveTimesheet(selectedTimesheet.id, "return", returnReason.trim());
+      toast({
+        title: "Success",
+        description: "Timesheet returned for editing",
+      });
+      setReturnDialogOpen(false);
+      setSelectedTimesheet(null);
+      setReturnReason("");
+      fetchPendingTimesheets();
+    } catch (error: any) {
+      console.error("Error returning timesheet:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to return timesheet",
+        variant: "destructive",
+      });
+    }
+  };
+
   if (loading) {
     return (
       <AppLayout>
@@ -189,6 +227,15 @@ export default function TimesheetApprovals() {
                       >
                         <Check className="h-4 w-4" />
                         Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleReturnClick(timesheet)}
+                        className="gap-2"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Return for Edit
                       </Button>
                       <Button
                         size="sm"
@@ -273,6 +320,45 @@ export default function TimesheetApprovals() {
             </Button>
             <Button variant="destructive" onClick={handleReject} disabled={!rejectionReason.trim()}>
               Reject Timesheet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Return for Edit Dialog */}
+      <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Return Timesheet for Editing</DialogTitle>
+            <DialogDescription>
+              Provide feedback to help the employee improve their timesheet. It will be returned to pending status so they can make corrections.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {selectedTimesheet && (
+              <div className="text-sm">
+                <p className="font-medium">
+                  {selectedTimesheet.employee.first_name} {selectedTimesheet.employee.last_name}
+                </p>
+                <p className="text-muted-foreground">
+                  Week of {format(parseISO(selectedTimesheet.week_start_date), "MMM dd")} -{" "}
+                  {format(parseISO(selectedTimesheet.week_end_date), "MMM dd, yyyy")}
+                </p>
+              </div>
+            )}
+            <Textarea
+              placeholder="Provide feedback on what needs to be corrected..."
+              value={returnReason}
+              onChange={(e) => setReturnReason(e.target.value)}
+              rows={4}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReturnDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleReturn} disabled={!returnReason.trim()}>
+              Return for Edit
             </Button>
           </DialogFooter>
         </DialogContent>

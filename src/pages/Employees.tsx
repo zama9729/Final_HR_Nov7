@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { ShiftAssignmentDialog } from "@/components/shifts/ShiftAssignmentDialog";
 
 interface Employee {
   id: string;
@@ -41,6 +42,8 @@ export default function Employees() {
   const { user, userRole } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [shiftDialogOpen, setShiftDialogOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     fetchEmployees();
@@ -63,6 +66,20 @@ export default function Employees() {
   };
 
   const isHROrAbove = userRole === 'hr' || userRole === 'director' || userRole === 'ceo';
+  const isManagerOrAbove = isHROrAbove || userRole === 'manager';
+
+  const handleAssignShift = (employee: Employee) => {
+    setSelectedEmployee({
+      id: employee.id,
+      name: `${employee.profiles?.first_name || ''} ${employee.profiles?.last_name || ''}`.trim(),
+    });
+    setShiftDialogOpen(true);
+  };
+
+  const handleShiftAssigned = () => {
+    // Optionally refresh employees list
+    // fetchEmployees();
+  };
 
   return (
     <AppLayout>
@@ -166,6 +183,11 @@ export default function Employees() {
                               <DropdownMenuItem asChild>
                                 <Link to={`/employees/${employee.id}`}>View Profile</Link>
                               </DropdownMenuItem>
+                              {isManagerOrAbove && (
+                                <DropdownMenuItem onClick={() => handleAssignShift(employee)}>
+                                  Assign Shift
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem>Edit</DropdownMenuItem>
                               <DropdownMenuItem className="text-destructive">Deactivate</DropdownMenuItem>
                             </DropdownMenuContent>
@@ -179,6 +201,17 @@ export default function Employees() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Shift Assignment Dialog */}
+        {selectedEmployee && (
+          <ShiftAssignmentDialog
+            open={shiftDialogOpen}
+            onOpenChange={setShiftDialogOpen}
+            employeeId={selectedEmployee.id}
+            employeeName={selectedEmployee.name}
+            onShiftAssigned={handleShiftAssigned}
+          />
+        )}
       </div>
     </AppLayout>
   );

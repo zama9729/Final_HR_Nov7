@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Plus, Edit, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Dialog,
@@ -35,6 +35,7 @@ interface LeavePolicy {
 export default function LeavePolicies() {
   const [policies, setPolicies] = useState<LeavePolicy[]>([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
   
@@ -53,32 +54,37 @@ export default function LeavePolicies() {
   }, []);
 
   const fetchPolicies = async () => {
-    const { data } = await supabase
-      .from('leave_policies')
-      .select('*')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-
-    if (data) setPolicies(data);
+    try {
+      setLoading(true);
+      const data = await api.getLeavePolicies();
+      setPolicies(data || []);
+    } catch (error: any) {
+      console.error("Error fetching policies:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load leave policies",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    const { error } = await supabase
-      .from('leave_policies')
-      .insert({
-        ...formData,
-        tenant_id: user?.user_metadata?.tenant_id || 'default',
+    
+    setLoading(true);
+    try {
+      await api.createLeavePolicy({
+        name: formData.name,
+        leave_type: formData.leave_type,
+        annual_entitlement: formData.annual_entitlement,
+        probation_entitlement: formData.probation_entitlement,
+        carry_forward_allowed: formData.carry_forward_allowed,
+        max_carry_forward: formData.max_carry_forward,
+        encashment_allowed: formData.encashment_allowed,
       });
 
-    if (error) {
-      toast({
-        title: "Error creating policy",
-        description: error.message,
-        variant: "destructive",
-      });
-    } else {
       toast({
         title: "Policy created",
         description: "Leave policy has been created successfully",
@@ -94,6 +100,15 @@ export default function LeavePolicies() {
         max_carry_forward: 0,
         encashment_allowed: false,
       });
+    } catch (error: any) {
+      console.error("Error creating policy:", error);
+      toast({
+        title: "Error creating policy",
+        description: error.message || "Failed to create policy",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
   };
 

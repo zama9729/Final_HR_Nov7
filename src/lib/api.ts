@@ -169,7 +169,7 @@ class ApiClient {
     return this.request('/api/timesheets/pending');
   }
 
-  async approveTimesheet(timesheetId: string, action: 'approve' | 'reject', rejectionReason?: string) {
+  async approveTimesheet(timesheetId: string, action: 'approve' | 'reject' | 'return', rejectionReason?: string) {
     return this.request(`/api/timesheets/${timesheetId}/approve`, {
       method: 'POST',
       body: JSON.stringify({ action, rejectionReason }),
@@ -179,6 +179,130 @@ class ApiClient {
   // Org chart methods
   async getOrgStructure() {
     return this.request('/api/employees/org-chart');
+  }
+
+  // Shift methods
+  async getShifts() {
+    return this.request('/api/shifts');
+  }
+
+  async getShiftsForEmployee(employeeId: string) {
+    return this.request(`/api/shifts?employee_id=${employeeId}`);
+  }
+
+  async createShift(data: {
+    employee_id: string;
+    shift_date: string;
+    start_time: string;
+    end_time: string;
+    shift_type?: string;
+    notes?: string;
+    status?: string;
+  }) {
+    return this.request('/api/shifts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Appraisal methods
+  async getAppraisalCycles() {
+    return this.request('/api/appraisal-cycles');
+  }
+
+  async createAppraisalCycle(data: {
+    cycle_name: string;
+    cycle_year: number;
+    start_date: string;
+    end_date: string;
+    status?: string;
+  }) {
+    return this.request('/api/appraisal-cycles', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getPerformanceReviews(cycleId?: string) {
+    const url = cycleId 
+      ? `/api/performance-reviews?cycle=${cycleId}`
+      : '/api/performance-reviews';
+    return this.request(url);
+  }
+
+  async submitPerformanceReview(data: {
+    appraisal_cycle_id: string;
+    employee_id: string;
+    rating: number;
+    performance_score: number;
+    strengths?: string;
+    areas_of_improvement?: string;
+    goals?: string;
+    comments?: string;
+  }) {
+    return this.request('/api/performance-reviews', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getTeamMembers() {
+    return this.request('/api/employees?team=mine');
+  }
+
+  // Leave policy methods
+  async getLeavePolicies() {
+    return this.request('/api/leave-policies');
+  }
+
+  async createLeavePolicy(data: {
+    name: string;
+    leave_type: string;
+    annual_entitlement: number;
+    probation_entitlement?: number;
+    carry_forward_allowed?: boolean;
+    max_carry_forward?: number;
+    encashment_allowed?: boolean;
+  }) {
+    return this.request('/api/leave-policies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Leave request methods
+  async getLeaveRequests() {
+    return this.request('/api/leave-requests');
+  }
+
+  async createLeaveRequest(data: {
+    leave_type_id: string;
+    start_date: string;
+    end_date: string;
+    reason?: string;
+  }) {
+    return this.request('/api/leave-requests', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async approveLeaveRequest(id: string) {
+    return this.request(`/api/leave-requests/${id}/approve`, {
+      method: 'PATCH',
+    });
+  }
+
+  async rejectLeaveRequest(id: string, rejection_reason: string) {
+    return this.request(`/api/leave-requests/${id}/reject`, {
+      method: 'PATCH',
+      body: JSON.stringify({ rejection_reason }),
+    });
+  }
+
+  // Leave balance
+  async getLeaveBalance() {
+    return this.request('/api/stats/leave-balance');
   }
 }
 

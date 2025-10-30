@@ -2,11 +2,13 @@ import { useEffect, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Clock, Save, Check, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Clock, Save, Check, X, Calendar } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { addDays, startOfWeek, format, isSameDay } from "date-fns";
+import { AppLayout } from "@/components/layout/AppLayout";
 
 interface TimesheetEntry {
   id?: string;
@@ -25,10 +27,20 @@ interface Timesheet {
   entries: TimesheetEntry[];
 }
 
+interface Shift {
+  id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  shift_type: string;
+  notes?: string;
+}
+
 export default function Timesheets() {
   const [currentWeek, setCurrentWeek] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [timesheet, setTimesheet] = useState<Timesheet | null>(null);
   const [entries, setEntries] = useState<Record<string, TimesheetEntry>>({});
+  const [shifts, setShifts] = useState<Record<string, Shift>>({});
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
   const { toast } = useToast();
@@ -37,6 +49,7 @@ export default function Timesheets() {
 
   useEffect(() => {
     fetchTimesheet();
+    fetchShifts();
   }, [currentWeek, user]);
 
   // Ensure entries are initialized
@@ -116,6 +129,79 @@ export default function Timesheets() {
         };
       });
       setEntries(emptyEntries);
+    }
+  };
+
+  const fetchShifts = async () => {
+    if (!user) return;
+
+    try {
+      // Get employee ID
+      const employeeInfo = await api.getEmployeeId();
+      if (!employeeInfo || !employeeInfo.id) return;
+
+      // Fetch shifts for the current week
+      const shiftsData = await api.getShiftsForEmployee(employeeInfo.id);
+      
+      // Map shifts by date
+      const shiftsMap: Record<string, Shift> = {};
+      shiftsData.forEach((shift: any) => {
+        const shiftDate = shift.shift_date.split('T')[0]; // Extract date part
+        shiftsMap[shiftDate] = {
+          id: shift.id,
+          shift_date: shiftDate,
+          start_time: shift.start_time,
+          end_time: shift.end_time,
+          shift_type: shift.shift_type,
+          notes: shift.notes,
+        };
+      });
+      setShifts(shiftsMap);
+
+      // Auto-fill hours for dates with scheduled shifts
+      if (Object.keys(shiftsMap).length > 0) {
+        setEntries((prevEntries) => {
+          const updatedEntries = { ...prevEntries };
+          
+          Object.entries(shiftsMap).forEach(([date, shift]) => {
+            if (updatedEntries[date]) {
+              // Calculate hours from shift times
+              const startTime = parseFloat(shift.start_time.replace(':', '.'));
+              let endTime = parseFloat(shift.end_time.replace(':', '.'));
+              
+              // Handle overnight shifts
+              if (endTime < startTime) {
+                endTime += 24;
+              }
+              
+              const hours = endTime - startTime;
+              
+              // Auto-fill if no manual entry exists or hours are 0
+              if (!updatedEntries[date].hours || updatedEntries[date].hours === 0) {
+                updatedEntries[date] = {
+                  ...updatedEntries[date],
+                  hours,
+                  description: `Shift: ${shift.shift_type} (${shift.start_time} - ${shift.end_time})${shift.notes ? ` - ${shift.notes}` : ''}`,
+                };
+              } else {
+                // Add shift info to description if already has hours
+                const existingDesc = updatedEntries[date].description || '';
+                if (!existingDesc.includes('Shift:')) {
+                  updatedEntries[date] = {
+                    ...updatedEntries[date],
+                    description: `${existingDesc} | Shift: ${shift.shift_type} (${shift.start_time} - ${shift.end_time})`.trim(),
+                  };
+                }
+              }
+            }
+          });
+          
+          return updatedEntries;
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching shifts:", error);
+      // Silently fail - shifts are optional
     }
   };
 
@@ -312,7 +398,8 @@ export default function Timesheets() {
   const isEditable = !timesheet || timesheet.status === "pending";
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <AppLayout>
+      <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Timesheets</h1>
@@ -365,19 +452,28 @@ export default function Timesheets() {
               <thead>
                 <tr className="border-b">
                   <th className="text-left p-3 font-semibold w-32">Day</th>
-                  {weekDays.map((day) => (
-                    <th
-                      key={day.toISOString()}
-                      className={`text-center p-3 font-semibold min-w-[120px] ${
-                        isToday(day) ? "bg-primary/10" : ""
-                      }`}
-                    >
-                      <div>{format(day, "EEE")}</div>
-                      <div className="text-sm font-normal text-muted-foreground">
-                        {format(day, "MMM dd")}
-                      </div>
-                    </th>
-                  ))}
+                  {weekDays.map((day) => {
+                    const dateStr = format(day, "yyyy-MM-dd");
+                    const hasShift = shifts[dateStr];
+                    return (
+                      <th
+                        key={day.toISOString()}
+                        className={`text-center p-3 font-semibold min-w-[120px] ${
+                          isToday(day) ? "bg-primary/10" : ""
+                        }`}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          {format(day, "EEE")}
+                          {hasShift && (
+                            <Calendar className="h-3 w-3 text-primary" title="Scheduled shift" />
+                          )}
+                        </div>
+                        <div className="text-sm font-normal text-muted-foreground">
+                          {format(day, "MMM dd")}
+                        </div>
+                      </th>
+                    );
+                  })}
                   <th className="text-center p-3 font-semibold w-28">Total</th>
                 </tr>
               </thead>
@@ -387,11 +483,17 @@ export default function Timesheets() {
                   {weekDays.map((day) => {
                     const dateStr = format(day, "yyyy-MM-dd");
                     const entry = entries[dateStr] || { work_date: dateStr, hours: 0, description: "" };
+                    const hasShift = shifts[dateStr];
                     return (
                       <td
                         key={dateStr}
-                        className={`p-2 ${isToday(day) ? "bg-primary/10" : ""}`}
+                        className={`p-2 ${isToday(day) ? "bg-primary/10" : ""} ${hasShift ? "relative" : ""}`}
                       >
+                        {hasShift && (
+                          <Badge variant="outline" className="absolute -top-2 -right-1 text-xs">
+                            {shifts[dateStr].shift_type}
+                          </Badge>
+                        )}
                         <Input
                           type="number"
                           step="0.5"
@@ -453,6 +555,7 @@ export default function Timesheets() {
           )}
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </AppLayout>
   );
 }

@@ -10,7 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 interface DashboardStats {
   totalEmployees: number;
   pendingApprovals: number;
-  activeLeaveRequests: number;
+  leaveBalance: number;
   avgAttendance: number;
 }
 
@@ -21,7 +21,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>({
     totalEmployees: 0,
     pendingApprovals: 0,
-    activeLeaveRequests: 0,
+    leaveBalance: 0,
     avgAttendance: 0,
   });
 
@@ -45,11 +45,21 @@ export default function Dashboard() {
         pendingCount = counts.timesheets + counts.leaves;
       }
 
-      // For now, set defaults (these would need API endpoints for full stats)
+      // Get leave balance for employees/managers
+      let leaveBalance = 0;
+      if (userRole && ['employee', 'manager'].includes(userRole)) {
+        try {
+          const balance = await api.getLeaveBalance();
+          leaveBalance = balance.leaveBalance || 0;
+        } catch (error) {
+          console.error('Error fetching leave balance:', error);
+        }
+      }
+
       setStats({
         totalEmployees: employeeCount,
         pendingApprovals: pendingCount,
-        activeLeaveRequests: 0,
+        leaveBalance,
         avgAttendance: 0,
       });
     } catch (error) {
@@ -129,14 +139,14 @@ export default function Dashboard() {
           <Card className="transition-all hover:shadow-medium">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Active Leave Requests
+                Leave Balance
               </CardTitle>
               <Calendar className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.activeLeaveRequests}</div>
+              <div className="text-2xl font-bold">{stats.leaveBalance}</div>
               <p className="text-xs text-muted-foreground mt-1">
-                {stats.activeLeaveRequests > 0 ? 'Currently on leave' : 'No active requests'}
+                {stats.leaveBalance > 0 ? 'Days remaining' : 'No leave balance'}
               </p>
             </CardContent>
           </Card>

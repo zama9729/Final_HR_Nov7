@@ -12,6 +12,9 @@ import statsRoutes from './routes/stats.js';
 import adminRoutes from './routes/admin.js';
 import notificationsRoutes from './routes/notifications.js';
 import timesheetsRoutes from './routes/timesheets.js';
+import shiftsRoutes from './routes/shifts.js';
+import leavePoliciesRoutes from './routes/leave-policies.js';
+import leaveRequestsRoutes from './routes/leave-requests.js';
 import appraisalCycleRoutes from './routes/appraisal-cycles.js';
 import performanceReviewRoutes from './routes/performance-reviews.js';
 import { authenticateToken } from './middleware/auth.js';
@@ -23,7 +26,7 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: true,
   credentials: true
 }));
 app.use(express.json());
@@ -42,6 +45,9 @@ app.use('/api/organizations', organizationsRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/timesheets', timesheetsRoutes);
+app.use('/api/shifts', authenticateToken, shiftsRoutes);
+app.use('/api/leave-policies', leavePoliciesRoutes);
+app.use('/api/leave-requests', leaveRequestsRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Onboarding routes (no auth required for some endpoints)

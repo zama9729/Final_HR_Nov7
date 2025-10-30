@@ -7,17 +7,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar, Plus, Sparkles, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { format } from "date-fns";
+import { AppLayout } from "@/components/layout/AppLayout";
 
 interface Employee {
   id: string;
   user_id: string;
   employee_id: string;
-  profiles: {
-    first_name: string;
-    last_name: string;
-  };
+  first_name: string;
+  last_name: string;
 }
 
 interface Shift {
@@ -65,13 +64,18 @@ export default function ShiftManagement() {
 
   const fetchEmployees = async () => {
     try {
-      const { data, error } = await supabase
-        .from("employees")
-        .select("id, user_id, employee_id, profiles(first_name, last_name)")
-        .eq("status", "active");
-
-      if (error) throw error;
-      setEmployees(data || []);
+      const data = await api.getEmployees();
+      // Map employees to expected format
+      const mappedEmployees = data
+        .filter((emp: any) => emp.status === "active")
+        .map((emp: any) => ({
+          id: emp.id,
+          user_id: emp.user_id,
+          employee_id: emp.employee_id,
+          first_name: emp.first_name,
+          last_name: emp.last_name,
+        }));
+      setEmployees(mappedEmployees);
     } catch (error) {
       console.error("Error fetching employees:", error);
       toast({
@@ -84,22 +88,15 @@ export default function ShiftManagement() {
 
   const fetchShifts = async () => {
     try {
-      const { data, error } = await supabase
-        .from("shifts")
-        .select(`
-          *,
-          employees(
-            employee_id,
-            profiles(first_name, last_name)
-          )
-        `)
-        .order("shift_date", { ascending: true })
-        .order("start_time", { ascending: true });
-
-      if (error) throw error;
+      const data = await api.getShifts();
       setShifts(data || []);
     } catch (error) {
       console.error("Error fetching shifts:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load shifts",
+        variant: "destructive",
+      });
     }
   };
 
@@ -115,33 +112,17 @@ export default function ShiftManagement() {
 
     setLoading(true);
     try {
-      const { data: profile } = await supabase.auth.getUser();
-      const { data: tenantData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", profile.user?.id)
-        .single();
-
       const shiftData = {
-        tenant_id: tenantData?.tenant_id,
         employee_id: selectedEmployee,
         shift_date: shiftDate,
         start_time: startTime,
         end_time: endTime,
         shift_type: shiftType,
-        notes: notes,
+        notes: notes || undefined,
         status: "scheduled",
-        created_by: profile.user?.id,
       };
 
-      const { error } = await supabase.from("shifts").insert(shiftData);
-
-      if (error) throw error;
-
-      // Send notification
-      await supabase.functions.invoke("notify-shift-created", {
-        body: { shifts: [shiftData] },
-      });
+      await api.createShift(shiftData);
 
       toast({
         title: "Success",
@@ -155,11 +136,11 @@ export default function ShiftManagement() {
       setEndTime("");
       setNotes("");
       fetchShifts();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating shift:", error);
       toast({
         title: "Error",
-        description: "Failed to create shift",
+        description: error.message || "Failed to create shift",
         variant: "destructive",
       });
     } finally {
@@ -168,92 +149,16 @@ export default function ShiftManagement() {
   };
 
   const generateRoster = async () => {
-    if (!rosterStartDate || !rosterEndDate || employees.length === 0) {
-      toast({
-        title: "Missing Information",
-        description: "Please select dates and ensure employees are available",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setAiGenerating(true);
-    try {
-      const employeeData = employees.map(emp => ({
-        id: emp.id,
-        name: `${emp.profiles.first_name} ${emp.profiles.last_name}`,
-      }));
-
-      const { data, error } = await supabase.functions.invoke("generate-roster", {
-        body: {
-          startDate: rosterStartDate,
-          endDate: rosterEndDate,
-          employees: employeeData,
-          requirements: requirements || "Standard 8-hour shifts with fair distribution",
-        },
-      });
-
-      if (error) throw error;
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      // Insert generated shifts
-      const { data: profile } = await supabase.auth.getUser();
-      const { data: tenantData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", profile.user?.id)
-        .single();
-
-      const shiftsToInsert = data.roster.map((shift: any) => ({
-        tenant_id: tenantData?.tenant_id,
-        employee_id: shift.employee_id,
-        shift_date: shift.shift_date,
-        start_time: shift.start_time,
-        end_time: shift.end_time,
-        shift_type: shift.shift_type || "regular",
-        notes: shift.notes,
-        status: "scheduled",
-        created_by: profile.user?.id,
-      }));
-
-      const { error: insertError } = await supabase
-        .from("shifts")
-        .insert(shiftsToInsert);
-
-      if (insertError) throw insertError;
-
-      // Send notifications
-      await supabase.functions.invoke("notify-shift-created", {
-        body: { shifts: shiftsToInsert },
-      });
-
-      toast({
-        title: "Success",
-        description: `AI generated ${shiftsToInsert.length} shifts successfully`,
-      });
-
-      // Reset form
-      setRosterStartDate("");
-      setRosterEndDate("");
-      setRequirements("");
-      fetchShifts();
-    } catch (error: any) {
-      console.error("Error generating roster:", error);
-      toast({
-        title: "Error",
-        description: error.message || "Failed to generate roster",
-        variant: "destructive",
-      });
-    } finally {
-      setAiGenerating(false);
-    }
+    toast({
+      title: "Coming Soon",
+      description: "AI roster generation is not yet available with PostgreSQL backend. Please create shifts manually.",
+      variant: "default",
+    });
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <AppLayout>
+      <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Shift Management</h1>
       </div>
@@ -277,7 +182,7 @@ export default function ShiftManagement() {
                 <SelectContent>
                   {employees.map((emp) => (
                     <SelectItem key={emp.id} value={emp.id}>
-                      {emp.profiles.first_name} {emp.profiles.last_name} ({emp.employee_id})
+                      {emp.first_name} {emp.last_name} ({emp.employee_id})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -449,6 +354,7 @@ export default function ShiftManagement() {
           )}
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </AppLayout>
   );
 }

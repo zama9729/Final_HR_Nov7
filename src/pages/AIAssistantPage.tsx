@@ -1,10 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Bot } from "lucide-react";
 import { AIAssistant } from "@/components/AIAssistant";
+import { AppLayout } from "@/components/layout/AppLayout";
 
 export default function AIAssistantPage() {
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <AppLayout>
+      <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">AI Assistant</h1>
       </div>
@@ -29,6 +31,7 @@ export default function AIAssistantPage() {
       </Card>
 
       <AIAssistant />
-    </div>
+      </div>
+    </AppLayout>
   );
 }

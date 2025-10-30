@@ -319,14 +319,14 @@ router.post('/', authenticateToken, async (req, res) => {
 router.post('/:id/approve', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, rejectionReason } = req.body; // action: 'approve' or 'reject'
+    const { action, rejectionReason } = req.body; // action: 'approve', 'reject', or 'return'
 
-    if (!action || !['approve', 'reject'].includes(action)) {
-      return res.status(400).json({ error: 'Action must be approve or reject' });
+    if (!action || !['approve', 'reject', 'return'].includes(action)) {
+      return res.status(400).json({ error: 'Action must be approve, reject, or return' });
     }
 
-    if (action === 'reject' && !rejectionReason) {
-      return res.status(400).json({ error: 'Rejection reason required' });
+    if ((action === 'reject' || action === 'return') && !rejectionReason) {
+      return res.status(400).json({ error: 'Reason required for reject or return' });
     }
 
     // Get current user's employee ID and role
@@ -370,16 +370,21 @@ router.post('/:id/approve', authenticateToken, async (req, res) => {
     }
 
     // Update timesheet
-    const status = action === 'approve' ? 'approved' : 'rejected';
-    const updateQuery = action === 'approve'
-      ? `UPDATE timesheets SET 
+    let status, updateQuery, params;
+    
+    if (action === 'approve') {
+      status = 'approved';
+      updateQuery = `UPDATE timesheets SET 
            status = $1,
            reviewed_by = $2,
            reviewed_at = now(),
            updated_at = now()
          WHERE id = $3
-         RETURNING *`
-      : `UPDATE timesheets SET 
+         RETURNING *`;
+      params = [status, reviewerId, id];
+    } else if (action === 'reject') {
+      status = 'rejected';
+      updateQuery = `UPDATE timesheets SET 
            status = $1,
            reviewed_by = $2,
            reviewed_at = now(),
@@ -387,10 +392,20 @@ router.post('/:id/approve', authenticateToken, async (req, res) => {
            updated_at = now()
          WHERE id = $3
          RETURNING *`;
-
-    const params = action === 'approve'
-      ? [status, reviewerId, id]
-      : [status, reviewerId, id, rejectionReason];
+      params = [status, reviewerId, id, rejectionReason];
+    } else { // return
+      status = 'pending';
+      updateQuery = `UPDATE timesheets SET 
+           status = $1,
+           reviewed_by = $2,
+           reviewed_at = now(),
+           rejection_reason = $4,
+           updated_at = now(),
+           resubmitted_at = NULL
+         WHERE id = $3
+         RETURNING *`;
+      params = [status, reviewerId, id, rejectionReason];
+    }
 
     const updateResult = await query(updateQuery, params);
 

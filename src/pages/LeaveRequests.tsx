@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Calendar, CheckCircle, XCircle, Plus } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -53,6 +53,7 @@ export default function LeaveRequests() {
   const [policies, setPolicies] = useState<LeavePolicy[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedPolicyId, setSelectedPolicyId] = useState<string>("");
   const { user, userRole } = useAuth();
   const { toast } = useToast();
 
@@ -64,169 +65,95 @@ export default function LeaveRequests() {
     if (!user) return;
 
     try {
-      // Get current employee ID first
-      const { data: currentEmployee } = await supabase
-        .from("employees")
-        .select("id")
-        .eq("user_id", user.id)
-        .single();
-
-      if (!currentEmployee) {
-        setLoading(false);
-        return;
+      // Fetch leave policies using API
+      try {
+        const policiesData = await api.getLeavePolicies();
+        setPolicies(policiesData || []);
+      } catch (error) {
+        console.error("Error fetching leave policies:", error);
+        toast({
+          title: "Warning",
+          description: "Failed to load leave policies",
+          variant: "destructive",
+        });
       }
 
-      // Fetch leave policies
-      const { data: policiesData } = await supabase
-        .from("leave_policies")
-        .select("id, name, annual_entitlement")
-        .eq("is_active", true);
-
-      if (policiesData) setPolicies(policiesData);
-
-      // Fetch my leave requests with proper joins
-      const { data: myData, error: myError } = await supabase
-        .from("leave_requests")
-        .select(`
-          *,
-          employee:employees!leave_requests_employee_id_fkey(
-            id,
-            employee_id,
-            profiles:profiles!employees_user_id_fkey(first_name, last_name)
-          ),
-          reviewer:employees!leave_requests_reviewed_by_fkey(
-            id,
-            profiles:profiles!employees_user_id_fkey(first_name, last_name)
-          ),
-          leave_type:leave_policies(name)
-        `)
-        .eq("employee_id", currentEmployee.id)
-        .order("submitted_at", { ascending: false });
-
-      if (myError) {
-        console.error("Error fetching my leave requests:", myError);
-      } else if (myData) {
-        setMyRequests(myData as any);
-      }
-
-      // Fetch team requests if manager or above
-      if (userRole && ["manager", "hr", "director", "ceo"].includes(userRole)) {
-        const { data: teamData, error: teamError } = await supabase
-          .from("leave_requests")
-          .select(`
-            *,
-            employee:employees!leave_requests_employee_id_fkey(
-              id,
-              employee_id,
-              reporting_manager_id,
-              profiles:profiles!employees_user_id_fkey(first_name, last_name)
-            ),
-            reviewer:employees!leave_requests_reviewed_by_fkey(
-              id,
-              profiles:profiles!employees_user_id_fkey(first_name, last_name)
-            ),
-            leave_type:leave_policies(name)
-          `)
-          .eq("status", "pending")
-          .order("submitted_at", { ascending: false });
-
-        if (teamError) {
-          console.error("Error fetching team leave requests:", teamError);
-        } else if (teamData) {
-          // Filter to only show requests from direct reports
-          const filteredTeam = teamData.filter(
-            (req: any) => req.employee?.reporting_manager_id === currentEmployee.id
-          );
-          setTeamRequests(filteredTeam as any);
-        }
-      }
-    } catch (error) {
+      // Fetch leave requests using API
+      const requestsData = await api.getLeaveRequests();
+      setMyRequests(requestsData.myRequests || []);
+      setTeamRequests(requestsData.teamRequests || []);
+    } catch (error: any) {
       console.error("Error fetching leave requests:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load leave requests",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleApprove = async (requestId: string) => {
-    const { data: employeeData } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("user_id", user?.id)
-      .single();
-
-    const { error } = await supabase
-      .from("leave_requests")
-      .update({
-        status: "approved",
-        reviewed_by: employeeData?.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("id", requestId);
-
-    if (error) {
-      toast({ title: "Error", description: "Failed to approve request", variant: "destructive" });
-    } else {
+    try {
+      await api.approveLeaveRequest(requestId);
       toast({ title: "Success", description: "Leave request approved" });
       fetchData();
+    } catch (error: any) {
+      toast({ 
+        title: "Error", 
+        description: error.message || "Failed to approve request", 
+        variant: "destructive" 
+      });
     }
   };
 
   const handleReject = async (requestId: string, reason: string) => {
-    const { data: employeeData } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("user_id", user?.id)
-      .single();
-
-    const { error } = await supabase
-      .from("leave_requests")
-      .update({
-        status: "rejected",
-        reviewed_by: employeeData?.id,
-        reviewed_at: new Date().toISOString(),
-        rejection_reason: reason,
-      })
-      .eq("id", requestId);
-
-    if (error) {
-      toast({ title: "Error", description: "Failed to reject request", variant: "destructive" });
-    } else {
+    try {
+      await api.rejectLeaveRequest(requestId, reason);
       toast({ title: "Success", description: "Leave request rejected" });
       fetchData();
+    } catch (error: any) {
+      toast({ 
+        title: "Error", 
+        description: error.message || "Failed to reject request", 
+        variant: "destructive" 
+      });
     }
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    
+    if (!selectedPolicyId) {
+      toast({
+        title: "Error",
+        description: "Please select a leave type",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const formData = new FormData(e.currentTarget);
 
-    const { data: employeeData } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("user_id", user?.id)
-      .single();
+    try {
+      await api.createLeaveRequest({
+        leave_type_id: selectedPolicyId,
+        start_date: formData.get("start_date") as string,
+        end_date: formData.get("end_date") as string,
+        reason: (formData.get("reason") as string) || undefined,
+      });
 
-    if (!employeeData) return;
-
-    const startDate = new Date(formData.get("start_date") as string);
-    const endDate = new Date(formData.get("end_date") as string);
-    const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-
-    const { error } = await supabase.from("leave_requests").insert({
-      employee_id: employeeData.id,
-      leave_type_id: formData.get("leave_type_id") as string,
-      start_date: formData.get("start_date") as string,
-      end_date: formData.get("end_date") as string,
-      total_days: totalDays,
-      reason: formData.get("reason") as string,
-    });
-
-    if (error) {
-      toast({ title: "Error", description: "Failed to submit leave request", variant: "destructive" });
-    } else {
       toast({ title: "Success", description: "Leave request submitted" });
       setDialogOpen(false);
+      setSelectedPolicyId("");
       fetchData();
+    } catch (error: any) {
+      toast({ 
+        title: "Error", 
+        description: error.message || "Failed to submit leave request", 
+        variant: "destructive" 
+      });
     }
   };
 
@@ -320,7 +247,10 @@ export default function LeaveRequests() {
                     <CardTitle>My Leave Requests</CardTitle>
                     <CardDescription>Your leave request history</CardDescription>
                   </div>
-                  <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                  <Dialog open={dialogOpen} onOpenChange={(open) => {
+                    setDialogOpen(open);
+                    if (!open) setSelectedPolicyId("");
+                  }}>
                     <DialogTrigger asChild>
                       <Button>
                         <Plus className="h-4 w-4 mr-2" />
@@ -339,7 +269,11 @@ export default function LeaveRequests() {
                               No leave policies available. Please contact HR to set up leave policies.
                             </p>
                           ) : (
-                            <Select name="leave_type_id" required>
+                            <Select 
+                              value={selectedPolicyId} 
+                              onValueChange={setSelectedPolicyId}
+                              required
+                            >
                               <SelectTrigger>
                                 <SelectValue placeholder="Select leave type" />
                               </SelectTrigger>

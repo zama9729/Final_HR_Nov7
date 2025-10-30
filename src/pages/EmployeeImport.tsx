@@ -9,39 +9,54 @@ export default function EmployeeImport() {
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<{ imported: number; errors: string[] } | null>(null);
+  const [apiError, setApiError] = useState<string|null>(null);
   const { toast } = useToast();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
       setResults(null);
+      setApiError(null);
     }
   };
 
   const handleImport = async () => {
+    console.log("EmployeeImport handleImport called!");
+    setApiError(null);
     if (!file) return;
-
     setImporting(true);
     try {
-      // TODO: Implement actual API call to import employees
       const formData = new FormData();
       formData.append('file', file);
-      
-      // const response = await fetch('/api/employees/import', {
-      //   method: 'POST',
-      //   body: formData
-      // });
-      // const data = await response.json();
-      // setResults(data);
-      
-      toast({
-        title: "Import started",
-        description: "Processing employee data...",
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/employees/import`, {
+        method: 'POST',
+        headers: {
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        body: formData
       });
-    } catch (error) {
+      let data: any = undefined;
+      try { data = await response.json(); } catch (e) { data = undefined; }
+      setResults(data);
+      if (!response.ok) {
+        setApiError(data?.error || "Import failed. Server error");
+        toast({
+          title: "Import failed",
+          description: data?.error || "An error occurred during import",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Import complete",
+          description: `${data?.imported} employees imported, ${data?.errors?.length ?? 0} errors`,
+        });
+      }
+    } catch (error: any) {
+      setApiError("Frontend JS error: " + (error.message || error));
       toast({
         title: "Import failed",
-        description: "An error occurred during import",
+        description: "A browser/app error occurred during import",
         variant: "destructive",
       });
     } finally {
@@ -66,7 +81,6 @@ export default function EmployeeImport() {
           <h1 className="text-3xl font-bold">Import Employees</h1>
           <p className="text-muted-foreground">Bulk import employees from CSV or Excel files</p>
         </div>
-
         <Card>
           <CardHeader>
             <CardTitle>Download Template</CardTitle>
@@ -89,7 +103,6 @@ export default function EmployeeImport() {
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
             <CardTitle>Upload File</CardTitle>
@@ -118,7 +131,6 @@ export default function EmployeeImport() {
                 </label>
               </div>
             </div>
-
             {file && (
               <div className="flex items-center justify-between p-4 bg-primary/5 rounded-lg">
                 <div className="flex items-center gap-3">
@@ -128,12 +140,14 @@ export default function EmployeeImport() {
                     <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(2)} KB</p>
                   </div>
                 </div>
-                <Button onClick={handleImport} disabled={importing}>
+                <Button onClick={handleImport} disabled={importing} id="import-trigger-btn">
                   {importing ? "Importing..." : "Import"}
                 </Button>
               </div>
             )}
-
+            {apiError && (
+              <div className="p-4 bg-red-100 text-red-700 rounded mt-1">{apiError}</div>
+            )}
             {results && (
               <div className="space-y-4">
                 <div className="p-4 bg-success/10 border border-success/20 rounded-lg">
@@ -144,7 +158,6 @@ export default function EmployeeImport() {
                     </p>
                   </div>
                 </div>
-
                 {results.errors.length > 0 && (
                   <div className="p-4 bg-warning/10 border border-warning/20 rounded-lg">
                     <div className="flex items-start gap-2">
