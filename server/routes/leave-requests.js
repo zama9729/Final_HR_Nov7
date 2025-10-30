@@ -39,6 +39,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     let myRequests = [];
     let teamRequests = [];
+    let approvedRequests = [];
 
     // Fetch my requests if user is an employee
     if (employeeId) {
@@ -81,7 +82,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Fetch team requests if manager or above
     if (['manager', 'hr', 'director', 'ceo'].includes(role) && employeeId) {
-      const teamRequestsResult = await query(
+      // Fetch pending requests
+      const pendingRequestsResult = await query(
         `SELECT 
           lr.*,
           e.employee_id,
@@ -116,12 +118,49 @@ router.get('/', authenticateToken, async (req, res) => {
       );
 
       // Filter to only show requests from direct reports
-      teamRequests = teamRequestsResult.rows.filter(
+      teamRequests = pendingRequestsResult.rows.filter(
         (req) => req.employee?.profiles?.first_name || true // For now, show all pending
       );
+
+      // Fetch approved requests for the team
+      const approvedRequestsResult = await query(
+        `SELECT 
+          lr.*,
+          e.employee_id,
+          json_build_object(
+            'id', p1.id,
+            'profiles', json_build_object(
+              'first_name', p1.first_name,
+              'last_name', p1.last_name
+            )
+          ) as employee,
+          CASE 
+            WHEN lr.reviewed_by IS NOT NULL THEN
+              json_build_object(
+                'id', p2.id,
+                'profiles', json_build_object(
+                  'first_name', p2.first_name,
+                  'last_name', p2.last_name
+                )
+              )
+            ELSE NULL
+          END as reviewer,
+          json_build_object('name', lp.name) as leave_type
+        FROM leave_requests lr
+        LEFT JOIN employees e ON lr.employee_id = e.id
+        LEFT JOIN profiles p1 ON e.user_id = p1.id
+        LEFT JOIN employees er ON lr.reviewed_by = er.id
+        LEFT JOIN profiles p2 ON er.user_id = p2.id
+        LEFT JOIN leave_policies lp ON lr.leave_type_id = lp.id
+        WHERE lr.tenant_id = $1 AND lr.status = 'approved'
+        ORDER BY lr.reviewed_at DESC`,
+        [tenantId]
+      );
+
+      approvedRequests = approvedRequestsResult.rows;
     }
 
-    res.json({ myRequests, teamRequests });
+    res.json({ myRequests, teamRequests, approvedRequests });
   } catch (error) {
     console.error('Error fetching leave requests:', error);
     res.status(500).json({ error: error.message });

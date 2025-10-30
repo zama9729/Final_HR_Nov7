@@ -50,6 +50,7 @@ interface LeavePolicy {
 export default function LeaveRequests() {
   const [myRequests, setMyRequests] = useState<LeaveRequest[]>([]);
   const [teamRequests, setTeamRequests] = useState<LeaveRequest[]>([]);
+  const [approvedRequests, setApprovedRequests] = useState<LeaveRequest[]>([]);
   const [policies, setPolicies] = useState<LeavePolicy[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -82,6 +83,7 @@ export default function LeaveRequests() {
       const requestsData = await api.getLeaveRequests();
       setMyRequests(requestsData.myRequests || []);
       setTeamRequests(requestsData.teamRequests || []);
+      setApprovedRequests(requestsData.approvedRequests || []);
     } catch (error: any) {
       console.error("Error fetching leave requests:", error);
       toast({
@@ -176,7 +178,10 @@ export default function LeaveRequests() {
         <Tabs defaultValue={userRole && ["manager", "hr", "director", "ceo"].includes(userRole) ? "pending" : "my-requests"}>
           <TabsList>
             {userRole && ["manager", "hr", "director", "ceo"].includes(userRole) && (
-              <TabsTrigger value="pending">Pending Approvals</TabsTrigger>
+              <>
+                <TabsTrigger value="pending">Pending Approvals</TabsTrigger>
+                <TabsTrigger value="approved">Approved Requests</TabsTrigger>
+              </>
             )}
             <TabsTrigger value="my-requests">My Requests</TabsTrigger>
           </TabsList>
@@ -231,6 +236,50 @@ export default function LeaveRequests() {
                             <CheckCircle className="h-4 w-4" />
                           </Button>
                         </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {userRole && ["manager", "hr", "director", "ceo"].includes(userRole) && (
+            <TabsContent value="approved" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Approved Requests</CardTitle>
+                  <CardDescription>Team leave requests that have been approved</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {approvedRequests.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <p>No approved leave requests</p>
+                    </div>
+                  ) : (
+                    approvedRequests.map((request) => (
+                      <div
+                        key={request.id}
+                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
+                            <CheckCircle className="h-5 w-5 text-green-500" />
+                          </div>
+                          <div>
+                            <p className="font-medium">
+                              {request.employee?.profiles?.first_name || "Unknown"} {request.employee?.profiles?.last_name || "Employee"}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {new Date(request.start_date).toLocaleDateString()} - {new Date(request.end_date).toLocaleDateString()}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {request.total_days} days • {request.leave_type?.name || "General Leave"}
+                            </p>
+                            {request.reason && <p className="text-xs text-muted-foreground mt-1">{request.reason}</p>}
+                          </div>
+                        </div>
+                        <Badge variant="default">Approved</Badge>
                       </div>
                     ))
                   )}
