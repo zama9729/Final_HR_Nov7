@@ -346,15 +346,6 @@ export default function Timesheets() {
       // Fetch existing timesheet (this now returns holidays even if timesheet doesn't exist)
       const timesheetData = await api.getTimesheet(weekStart, weekEnd);
 
-      console.log('📊 Timesheet Data:', {
-        hasEntries: !!timesheetData?.entries,
-        entriesCount: timesheetData?.entries?.length,
-        hasHolidayCalendar: !!timesheetData?.holidayCalendar,
-        holidayCalendarCount: timesheetData?.holidayCalendar?.length,
-        firstEntry: timesheetData?.entries?.[0],
-        firstHoliday: timesheetData?.holidayCalendar?.[0]
-      });
-
       // Map entries by date (including holidays)
       const entriesMap: Record<string, TimesheetEntry> = {};
       
@@ -377,8 +368,6 @@ export default function Timesheets() {
             work_date: workDate,
             is_holiday: entry.is_holiday || false, // Ensure this is set
           };
-          
-          console.log(`📅 Entry ${workDate}:`, { is_holiday: entry.is_holiday, description: entry.description });
         });
       }
       
@@ -900,16 +889,6 @@ export default function Timesheets() {
                     const holidayName = holidays.find(h => normalizeDate(h.date) === dateStr)?.name || 
                                        (timesheet?.holidayCalendar?.find((h: any) => normalizeDate(h.date) === dateStr)?.name) ||
                                        'Holiday';
-                    
-                    // Debug log for holiday detection
-                    if (isHoliday) {
-                      console.log(`🎉 HOLIDAY DETECTED for ${dateStr}:`, {
-                        entry_is_holiday: entry.is_holiday,
-                        holidays_match: holidays.some(h => normalizeDate(h.date) === dateStr),
-                        timesheet_calendar_match: timesheet?.holidayCalendar?.some((h: any) => normalizeDate(h.date) === dateStr),
-                        holidayName
-                      });
-                    }
                     
                     return (
                       <td
