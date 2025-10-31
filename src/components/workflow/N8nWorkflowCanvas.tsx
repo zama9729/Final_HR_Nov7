@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -38,7 +38,7 @@ function BaseNode({ data }: { data: HrNodeData }) {
 
 const nodeTypes = { base: BaseNode } as const;
 
-function InnerCanvas() {
+const InnerCanvas = React.forwardRef<{ openSave: () => void }, {}>(function InnerCanvas(_props, ref) {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as any);
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as any);
   const [configOpen, setConfigOpen] = useState(false);
@@ -49,6 +49,9 @@ function InnerCanvas() {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const reactFlow = useReactFlow();
   const [saveOpen, setSaveOpen] = useState(false);
+  useImperativeHandle(ref, () => ({
+    openSave: () => setSaveOpen(true)
+  }), []);
   const [saveName, setSaveName] = useState('New Workflow');
   const [saveDesc, setSaveDesc] = useState('');
   const [saving, setSaving] = useState(false);
@@ -103,12 +106,6 @@ function InnerCanvas() {
           onClick={() => { setNodes([]); setEdges([]); }}
           disabled={nodes.length === 0 && edges.length === 0}
         >Clear Canvas</Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => setSaveOpen(true)}
-          disabled={nodes.length === 0}
-        >Save & Publish</Button>
         <Button
           variant="outline"
           size="sm"
@@ -246,14 +243,16 @@ function InnerCanvas() {
       </Dialog>
     </div>
   );
-}
+});
 
-export default function N8nWorkflowCanvas() {
+export type N8nWorkflowCanvasHandle = { openSave: () => void };
+
+export default React.forwardRef<N8nWorkflowCanvasHandle, {}>(function N8nWorkflowCanvas(_props, ref) {
   return (
     <ReactFlowProvider>
-      <InnerCanvas />
+      <InnerCanvas ref={ref as any} />
     </ReactFlowProvider>
   );
-}
+});
 
 

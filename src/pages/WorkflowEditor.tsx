@@ -4,12 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Save, Play } from "lucide-react";
 import { InteractiveWorkflowCanvas } from "@/components/workflow/InteractiveWorkflowCanvas";
-import N8nWorkflowCanvas from "@/components/workflow/N8nWorkflowCanvas";
+import N8nWorkflowCanvas, { N8nWorkflowCanvasHandle } from "@/components/workflow/N8nWorkflowCanvas";
 import { WorkflowToolbox } from "@/components/workflow/WorkflowToolbox";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export default function WorkflowEditor() {
   const [workflowName, setWorkflowName] = useState("New Workflow");
+  const canvasRef = useRef<N8nWorkflowCanvasHandle | null>(null);
 
   return (
     <AppLayout>
@@ -28,7 +29,7 @@ export default function WorkflowEditor() {
               <Play className="mr-2 h-4 w-4" />
               Test Run
             </Button>
-            <Button>
+            <Button onClick={() => canvasRef.current?.openSave()}>
               <Save className="mr-2 h-4 w-4" />
               Save & Publish
             </Button>
@@ -49,7 +50,7 @@ export default function WorkflowEditor() {
           <Card className="overflow-hidden">
             <CardContent className="p-0 h-full">
               {/* Use the n8n-like canvas with React Flow for connections */}
-              <N8nWorkflowCanvas />
+              <N8nWorkflowCanvas ref={canvasRef} />
             </CardContent>
           </Card>
         </div>
