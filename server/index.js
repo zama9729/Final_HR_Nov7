@@ -12,6 +12,8 @@ import statsRoutes from './routes/stats.js';
 import adminRoutes from './routes/admin.js';
 import notificationsRoutes from './routes/notifications.js';
 import timesheetsRoutes from './routes/timesheets.js';
+import leavePoliciesRoutes from './routes/leave-policies.js';
+import leaveRequestsRoutes from './routes/leave-requests.js';
 import appraisalCycleRoutes from './routes/appraisal-cycles.js';
 import performanceReviewRoutes from './routes/performance-reviews.js';
 import { authenticateToken } from './middleware/auth.js';
@@ -58,6 +60,8 @@ app.use('/api/organizations', organizationsRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/timesheets', timesheetsRoutes);
+app.use('/api/leave-policies', authenticateToken, setTenantContext, leavePoliciesRoutes);
+app.use('/api/leave-requests', authenticateToken, leaveRequestsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/shifts', authenticateToken, shiftsRoutes);
 // Mount core workflow routes with auth and tenant context

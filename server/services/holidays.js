@@ -1,7 +1,6 @@
 import { query } from '../db/pool.js';
 
-const DEFAULT_HOLIDAYS_COUNT = Number(process.env.DEFAULT_HOLIDAYS_COUNT || 10);
-const REMOTE_HOLIDAYS_COUNT = Number(process.env.REMOTE_HOLIDAYS_COUNT || 10);
+// Note: Removed holiday count limits - all published holidays are now shown
 
 export async function getPublishedList(orgId, region, year, options = {}) {
   const res = await query(
@@ -26,20 +25,19 @@ export async function selectEmployeeHolidays({ orgId, employee, year, month }) {
     return dates.map(d => ({ date: d, name: 'Holiday (override)', is_national: false }));
   }
 
-  // remote vs onsite
-  const desiredCount = employee.work_mode === 'remote' ? REMOTE_HOLIDAYS_COUNT : DEFAULT_HOLIDAYS_COUNT;
-
-  // region list
+  // region list - get ALL published holidays (no limit)
   const list = await getPublishedList(orgId, employee.state || 'remote', year);
   if (!list) return [];
   const all = await getHolidaysForList(list.id);
 
-  // national first then region-specific until desiredCount
+  // Return all holidays (national first, then region-specific), filtered to month
+  // No limit - show all published holidays
   const nationals = all.filter(h => h.is_national);
   const regionals = all.filter(h => !h.is_national);
-  const picked = [...nationals, ...regionals].slice(0, desiredCount);
+  const allHolidays = [...nationals, ...regionals]; // No .slice() - get all
+  
   // filter to month
-  const picksThisMonth = picked.filter(h => String(h.date).startsWith(`${year}-${String(month).padStart(2,'0')}`));
+  const picksThisMonth = allHolidays.filter(h => String(h.date).startsWith(`${year}-${String(month).padStart(2,'0')}`));
   return picksThisMonth;
 }
 
@@ -53,10 +51,11 @@ export async function injectHolidayRowsIntoTimesheet(orgId, employee, month, row
     holidayRows.push({
       work_date: dateStr,
       hours: 0,
-      description: h.name,
+      description: 'Holiday', // Fixed description as "Holiday"
       is_holiday: true,
       readonly: true,
       conflict,
+      holiday_id: h.id || null,
     });
   }
   // merge: append holiday rows and sort by date

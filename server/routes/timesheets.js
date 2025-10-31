@@ -1,7 +1,52 @@
 import express from 'express';
 import { query } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { injectHolidayRowsIntoTimesheet } from '../services/holidays.js';
+import { injectHolidayRowsIntoTimesheet, selectEmployeeHolidays } from '../services/holidays.js';
+
+// Helper function to auto-persist holiday entries
+async function persistHolidayEntries(timesheetId, orgId, employee, month, existingEntries) {
+  try {
+    const [year, m] = month.split('-').map(Number);
+    const holidays = await selectEmployeeHolidays({ orgId, employee, year, month: m });
+    
+    // Get existing entry dates to avoid duplicates
+    const existingDates = new Set(existingEntries.map(e => String(e.work_date)));
+    
+    // Insert holiday entries that don't exist
+    for (const h of holidays) {
+      const dateStr = h.date instanceof Date ? h.date.toISOString().slice(0,10) : String(h.date);
+      
+      // Skip if entry already exists for this date
+      if (existingDates.has(dateStr)) {
+        // Update existing entry to mark it as holiday if it's not already
+        await query(
+          `UPDATE timesheet_entries 
+           SET is_holiday = true, description = 'Holiday', holiday_id = $1
+           WHERE timesheet_id = $2 AND work_date = $3 AND (is_holiday = false OR is_holiday IS NULL)`,
+          [h.id || null, timesheetId, dateStr]
+        );
+        continue;
+      }
+      
+      // Insert new holiday entry (check if entry already exists for this date)
+      const existingEntry = await query(
+        'SELECT id FROM timesheet_entries WHERE timesheet_id = $1 AND work_date = $2',
+        [timesheetId, dateStr]
+      );
+      
+      if (existingEntry.rows.length === 0) {
+        await query(
+          `INSERT INTO timesheet_entries (timesheet_id, tenant_id, work_date, hours, description, is_holiday, holiday_id)
+           VALUES ($1, $2, $3, 0, 'Holiday', true, $4)`,
+          [timesheetId, orgId, dateStr, h.id || null]
+        );
+      }
+    }
+  } catch (error) {
+    console.error('Error persisting holiday entries:', error);
+    // Don't throw - allow timesheet to load even if holiday persistence fails
+  }
+}
 
 const router = express.Router();
 
@@ -180,8 +225,25 @@ router.get('/', authenticateToken, async (req, res) => {
       [employeeId, weekStart]
     );
 
+    // Get employee info for holidays (needed even if timesheet doesn't exist)
+    const orgRes = await query('SELECT tenant_id FROM employees WHERE id = $1', [employeeId]);
+    const orgId = orgRes.rows[0]?.tenant_id;
+    const empRes = await query('SELECT state, work_mode, holiday_override FROM employees WHERE id = $1', [employeeId]);
+    const employee = empRes.rows[0] || {};
+    const month = String(weekStart).slice(0,7); // YYYY-MM
+    
     if (timesheetResult.rows.length === 0) {
-      return res.json(null);
+      // No timesheet exists yet, but return holidays so they show in the UI
+      const { holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, []);
+      return res.json({ 
+        entries: [], 
+        holidayCalendar,
+        // Return a minimal timesheet structure for the frontend
+        week_start_date: weekStart,
+        week_end_date: weekEnd,
+        total_hours: 0,
+        status: 'pending'
+      });
     }
 
     const timesheet = timesheetResult.rows[0];
@@ -189,13 +251,12 @@ router.get('/', authenticateToken, async (req, res) => {
     // Get entries
     const entriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date', [timesheet.id]);
 
-    // Inject holiday rows for the month of weekStart
-    const orgRes = await query('SELECT tenant_id FROM employees WHERE id = $1', [employeeId]);
-    const orgId = orgRes.rows[0]?.tenant_id;
-    const empRes = await query('SELECT state, work_mode, holiday_override FROM employees WHERE id = $1', [employeeId]);
-    const employee = empRes.rows[0] || {};
-    const month = String(weekStart).slice(0,7); // YYYY-MM
-    const { rows: withHolidays, holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, entriesResult.rows);
+    // Auto-persist holiday entries that don't exist in DB
+    await persistHolidayEntries(timesheet.id, orgId, employee, month, entriesResult.rows);
+    
+    // Fetch entries again after persisting holidays
+    const updatedEntriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date', [timesheet.id]);
+    const { rows: withHolidays, holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, updatedEntriesResult.rows);
 
     res.json({ ...timesheet, entries: withHolidays, holidayCalendar });
   } catch (error) {
@@ -281,15 +342,20 @@ router.post('/', authenticateToken, async (req, res) => {
         timesheetId = insertResult.rows[0].id;
       }
 
-      // Delete old entries
+      // Delete old entries (but preserve holiday entries)
       await query(
-        'DELETE FROM timesheet_entries WHERE timesheet_id = $1',
+        'DELETE FROM timesheet_entries WHERE timesheet_id = $1 AND is_holiday = false',
         [timesheetId]
       );
 
-      // Insert new entries
+      // Insert new entries (skip holiday entries - they're auto-managed)
       if (entries && Array.isArray(entries) && entries.length > 0) {
         for (const entry of entries) {
+          // Skip holiday entries - they're managed separately
+          if (entry.is_holiday) {
+            continue;
+          }
+          
           // Validate entry has required fields
           if (!entry) {
             console.warn('Skipping null/undefined entry');
@@ -307,6 +373,15 @@ router.post('/', authenticateToken, async (req, res) => {
             throw new Error(`Entry has empty 'work_date': ${JSON.stringify(entry)}`);
           }
           
+          // Check if this date already has a holiday entry - if so, skip
+          const holidayCheck = await query(
+            'SELECT id FROM timesheet_entries WHERE timesheet_id = $1 AND work_date = $2 AND is_holiday = true',
+            [timesheetId, workDate]
+          );
+          if (holidayCheck.rows.length > 0) {
+            continue; // Skip regular entry if holiday exists for this date
+          }
+          
           console.log('Inserting entry:', {
             timesheetId,
             tenantId,
@@ -315,8 +390,8 @@ router.post('/', authenticateToken, async (req, res) => {
           });
           
           await query(
-            `INSERT INTO timesheet_entries (timesheet_id, tenant_id, work_date, hours, description)
-             VALUES ($1, $2, $3, $4, $5)`,
+            `INSERT INTO timesheet_entries (timesheet_id, tenant_id, work_date, hours, description, is_holiday)
+             VALUES ($1, $2, $3, $4, $5, false)`,
             [
               timesheetId,
               tenantId,
@@ -327,6 +402,13 @@ router.post('/', authenticateToken, async (req, res) => {
           );
         }
       }
+
+      // Auto-persist holiday entries for this timesheet
+      const empRes = await query('SELECT state, work_mode, holiday_override FROM employees WHERE id = $1', [employeeId]);
+      const employee = empRes.rows[0] || {};
+      const month = String(weekStart).slice(0,7); // YYYY-MM
+      const existingEntriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1', [timesheetId]);
+      await persistHolidayEntries(timesheetId, tenantId, employee, month, existingEntriesResult.rows);
 
       await query('COMMIT');
 

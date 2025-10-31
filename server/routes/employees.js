@@ -90,7 +90,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Get org chart structure (all active employees with profiles)
+// Get org chart structure (all active employees with profiles) - MUST be before /:id
 router.get('/org-chart', authenticateToken, async (req, res) => {
   try {
     // Get user's tenant_id
@@ -142,6 +142,48 @@ router.get('/check-password-change', authenticateToken, async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error checking password change:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single employee by ID - MUST be after specific routes like /org-chart and /check-password-change
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get user's tenant_id for authorization
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [req.user.id]
+    );
+    const userTenantId = tenantResult.rows[0]?.tenant_id;
+    
+    if (!userTenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+    
+    // Get employee with profile data
+    const employeeResult = await query(
+      `SELECT 
+        e.*,
+        json_build_object(
+          'first_name', p.first_name,
+          'last_name', p.last_name,
+          'email', p.email
+        ) as profiles
+      FROM employees e
+      JOIN profiles p ON p.id = e.user_id
+      WHERE e.id = $1 AND e.tenant_id = $2`,
+      [id, userTenantId]
+    );
+    
+    if (employeeResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    
+    res.json(employeeResult.rows[0]);
+  } catch (error) {
+    console.error('Error fetching employee:', error);
     res.status(500).json({ error: error.message });
   }
 });

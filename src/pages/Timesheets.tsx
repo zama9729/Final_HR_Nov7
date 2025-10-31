@@ -4,12 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { Clock, Save, Check, X, Calendar } from "lucide-react";
+import { Clock, Save, Check, X, Calendar as CalendarIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { addDays, startOfWeek, format, isSameDay } from "date-fns";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 
 interface TimesheetEntry {
   id?: string;
@@ -166,15 +168,15 @@ export default function Timesheets() {
       const weekStart = format(currentWeek, "yyyy-MM-dd");
       const weekEnd = format(addDays(currentWeek, 6), "yyyy-MM-dd");
 
-      // Fetch existing timesheet
+      // Fetch existing timesheet (this now returns holidays even if timesheet doesn't exist)
       const timesheetData = await api.getTimesheet(weekStart, weekEnd);
 
-      if (timesheetData) {
-        setTimesheet(timesheetData as any);
-        
-        // Map entries by date (including holidays)
-        const entriesMap: Record<string, TimesheetEntry> = {};
-        (timesheetData as any).entries?.forEach((entry: any) => {
+      // Map entries by date (including holidays)
+      const entriesMap: Record<string, TimesheetEntry> = {};
+      
+      // First, process existing timesheet entries if any
+      if (timesheetData?.entries && Array.isArray(timesheetData.entries)) {
+        timesheetData.entries.forEach((entry: any) => {
           // Convert work_date to YYYY-MM-DD format if it's an ISO string
           let workDate = entry.work_date;
           if (typeof workDate === 'string' && workDate.includes('T')) {
@@ -191,24 +193,46 @@ export default function Timesheets() {
             work_date: workDate,
           };
         });
-        setEntries(entriesMap);
-        
-        // Set holiday calendar if provided
-        if ((timesheetData as any).holidayCalendar) {
-          setHolidays((timesheetData as any).holidayCalendar || []);
-        }
-      } else {
-        // Initialize empty entries
-        const emptyEntries: Record<string, TimesheetEntry> = {};
-        weekDays.forEach((day) => {
-          const dateStr = format(day, "yyyy-MM-dd");
-          emptyEntries[dateStr] = {
+      }
+      
+      // Set holiday calendar and inject holidays into entries
+      const holidayMap: Record<string, any> = {};
+      if (timesheetData?.holidayCalendar && Array.isArray(timesheetData.holidayCalendar)) {
+        setHolidays(timesheetData.holidayCalendar);
+        timesheetData.holidayCalendar.forEach((h: any) => {
+          const holidayDate = String(h.date).split('T')[0]; // Ensure YYYY-MM-DD format
+          holidayMap[holidayDate] = h;
+        });
+      }
+      
+      // Initialize all week days with entries (including holidays)
+      weekDays.forEach((day) => {
+        const dateStr = format(day, "yyyy-MM-dd");
+        // If holiday exists for this date, create/update holiday entry
+        if (holidayMap[dateStr]) {
+          entriesMap[dateStr] = {
+            ...(entriesMap[dateStr] || {}),
+            work_date: dateStr,
+            hours: 0,
+            description: "Holiday",
+            is_holiday: true,
+          };
+        } else if (!entriesMap[dateStr]) {
+          // Create empty entry if it doesn't exist
+          entriesMap[dateStr] = {
             work_date: dateStr,
             hours: 0,
             description: "",
           };
-        });
-        setEntries(emptyEntries);
+        }
+      });
+      
+      setEntries(entriesMap);
+      
+      // Set timesheet data if it exists
+      if (timesheetData && timesheetData.id) {
+        setTimesheet(timesheetData as any);
+      } else {
         setTimesheet(null);
       }
     } catch (error) {
@@ -418,8 +442,12 @@ export default function Timesheets() {
           };
         });
 
-      // Final validation - ensure all entries have valid work_date
+      // Final validation - ensure all entries have valid work_date and skip holiday entries
       const entriesToSave = entriesArray.filter((entry) => {
+        // Skip holiday entries - they're auto-managed by backend
+        if (entry.is_holiday) {
+          return false;
+        }
         const isValid = entry && entry.work_date && entry.work_date.trim() !== '' && entry.hours > 0;
         if (!isValid) {
           console.warn('Filtering out invalid entry:', entry);
@@ -515,17 +543,54 @@ export default function Timesheets() {
               {timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}
             </div>
           )}
+          
           <Button
             variant="outline"
+            size="sm"
+            onClick={() => setCurrentWeek(startOfWeek(new Date(), { weekStartsOn: 1 }))}
+          >
+            Today
+          </Button>
+          
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setCurrentWeek(addDays(currentWeek, -7))}
           >
-            Previous Week
+            ← Prev
           </Button>
+          
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-[200px] justify-start text-left font-normal"
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {format(currentWeek, "MMM dd")} - {format(addDays(currentWeek, 6), "MMM dd, yyyy")}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="single"
+                selected={currentWeek}
+                onSelect={(date) => {
+                  if (date) {
+                    setCurrentWeek(startOfWeek(date, { weekStartsOn: 1 }));
+                  }
+                }}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+          
           <Button
             variant="outline"
+            size="sm"
             onClick={() => setCurrentWeek(addDays(currentWeek, 7))}
           >
-            Next Week
+            Next →
           </Button>
         </div>
       </div>
@@ -629,11 +694,16 @@ export default function Timesheets() {
                       >
                         <Input
                           type="text"
-                          value={isHoliday ? (holidayName || entry.description || "Holiday") : (entry.description || "")}
-                          onChange={(e) => updateEntry(dateStr, "description", e.target.value)}
+                          value={isHoliday ? "Holiday" : (entry.description || "")}
+                          onChange={(e) => {
+                            if (!isHoliday) {
+                              updateEntry(dateStr, "description", e.target.value);
+                            }
+                          }}
                           placeholder="Task details"
                           disabled={!isEditable || isHoliday}
                           className={isHoliday ? "text-green-700 dark:text-green-400 font-medium" : ""}
+                          readOnly={isHoliday}
                         />
                       </td>
                     );

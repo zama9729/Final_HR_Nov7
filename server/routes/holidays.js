@@ -378,9 +378,9 @@ router.get('/holidays/employee/:employeeId', authenticateToken, async (req, res)
     
     const list = listRes.rows[0];
     
-    // Get all holidays for the list (limit to 10 per state)
+    // Get all holidays for the list (no limit - show all published holidays)
     const holidaysRes = await query(
-      'SELECT * FROM holidays WHERE list_id = $1 ORDER BY is_national DESC, date ASC LIMIT 10',
+      'SELECT * FROM holidays WHERE list_id = $1 ORDER BY is_national DESC, date ASC',
       [list.id]
     );
     
@@ -429,7 +429,7 @@ router.get('/holidays/calendar', authenticateToken, async (req, res) => {
     
     for (const list of listsRes.rows) {
       const holidaysRes = await query(
-        'SELECT * FROM holidays WHERE list_id = $1 ORDER BY is_national DESC, date ASC LIMIT 10',
+        'SELECT * FROM holidays WHERE list_id = $1 ORDER BY is_national DESC, date ASC',
         [list.id]
       );
       
