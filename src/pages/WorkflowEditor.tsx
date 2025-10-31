@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Save, Play } from "lucide-react";
 import { InteractiveWorkflowCanvas } from "@/components/workflow/InteractiveWorkflowCanvas";
+import N8nWorkflowCanvas from "@/components/workflow/N8nWorkflowCanvas";
 import { WorkflowToolbox } from "@/components/workflow/WorkflowToolbox";
 import { useState } from "react";
 
@@ -47,7 +48,8 @@ export default function WorkflowEditor() {
 
           <Card className="overflow-hidden">
             <CardContent className="p-0 h-full">
-              <InteractiveWorkflowCanvas />
+              {/* Use the n8n-like canvas with React Flow for connections */}
+              <N8nWorkflowCanvas />
             </CardContent>
           </Card>
         </div>

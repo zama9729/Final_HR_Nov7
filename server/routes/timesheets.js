@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { injectHolidayRowsIntoTimesheet } from '../services/holidays.js';
 
 const router = express.Router();
 
@@ -13,7 +14,20 @@ router.get('/employee-id', authenticateToken, async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Employee not found' });
+      // Auto-provision minimal employee row for logged-in user to enable skills/timesheets
+      const prof = await query('SELECT tenant_id, first_name, last_name FROM profiles WHERE id = $1', [req.user.id]);
+      const tenantId = prof.rows[0]?.tenant_id;
+      if (!tenantId) return res.status(404).json({ error: 'Employee not found' });
+
+      const empCodeRes = await query('SELECT gen_random_uuid() AS id');
+      const newEmpId = `EMP-${empCodeRes.rows[0].id.slice(0,8).toUpperCase()}`;
+      const insert = await query(
+        `INSERT INTO employees (user_id, employee_id, tenant_id, onboarding_status, must_change_password)
+         VALUES ($1,$2,$3,'not_started', false)
+         RETURNING id, tenant_id`,
+        [req.user.id, newEmpId, tenantId]
+      );
+      return res.json(insert.rows[0]);
     }
 
     res.json(result.rows[0]);
@@ -26,7 +40,7 @@ router.get('/employee-id', authenticateToken, async (req, res) => {
 // Get pending timesheets for manager's team (must be before '/' route)
 router.get('/pending', authenticateToken, async (req, res) => {
   try {
-    // Get current user's employee ID and role
+    // Try to resolve employee record first
     const empResult = await query(
       `SELECT e.id, e.tenant_id, ur.role
        FROM employees e
@@ -37,11 +51,26 @@ router.get('/pending', authenticateToken, async (req, res) => {
       [req.user.id]
     );
 
-    if (empResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Employee not found' });
-    }
+    let managerId = null;
+    let tenantId = null;
+    let role = null;
 
-    const { id: managerId, tenant_id: tenantId, role } = empResult.rows[0];
+    if (empResult.rows.length === 0) {
+      // Fallback through profile + roles for HR/CEO
+      const profileRes = await query('SELECT tenant_id FROM profiles WHERE id = $1', [req.user.id]);
+      const roleRes = await query('SELECT role FROM user_roles WHERE user_id = $1 LIMIT 1', [req.user.id]);
+      tenantId = profileRes.rows[0]?.tenant_id || null;
+      role = roleRes.rows[0]?.role || null;
+      // Only allow HR/CEO (not manager) without employee row
+      if (!tenantId || !role || !['hr', 'director', 'ceo'].includes(role)) {
+        return res.status(404).json({ error: 'Employee not found' });
+      }
+      // No managerId; skip manager filter below
+    } else {
+      managerId = empResult.rows[0].id;
+      tenantId = empResult.rows[0].tenant_id;
+      role = empResult.rows[0].role;
+    }
 
     // Check if user is manager or HR/CEO
     if (!['manager', 'hr', 'director', 'ceo'].includes(role)) {
@@ -91,7 +120,16 @@ router.get('/pending', authenticateToken, async (req, res) => {
       `;
     }
 
-    const result = await query(timesheetsQuery, role === 'manager' ? [tenantId, managerId] : [tenantId]);
+    let result;
+    if (role === 'manager') {
+      if (!managerId) {
+        // Managers must have an employee row
+        return res.status(404).json({ error: 'Employee not found' });
+      }
+      result = await query(timesheetsQuery, [tenantId, managerId]);
+    } else {
+      result = await query(timesheetsQuery, [tenantId]);
+    }
     
     // Fetch entries separately for each timesheet
     const timesheetsWithEntries = await Promise.all(
@@ -149,15 +187,17 @@ router.get('/', authenticateToken, async (req, res) => {
     const timesheet = timesheetResult.rows[0];
 
     // Get entries
-    const entriesResult = await query(
-      'SELECT * FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date',
-      [timesheet.id]
-    );
+    const entriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date', [timesheet.id]);
 
-    res.json({
-      ...timesheet,
-      entries: entriesResult.rows,
-    });
+    // Inject holiday rows for the month of weekStart
+    const orgRes = await query('SELECT tenant_id FROM employees WHERE id = $1', [employeeId]);
+    const orgId = orgRes.rows[0]?.tenant_id;
+    const empRes = await query('SELECT state, work_mode, holiday_override FROM employees WHERE id = $1', [employeeId]);
+    const employee = empRes.rows[0] || {};
+    const month = String(weekStart).slice(0,7); // YYYY-MM
+    const { rows: withHolidays, holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, entriesResult.rows);
+
+    res.json({ ...timesheet, entries: withHolidays, holidayCalendar });
   } catch (error) {
     console.error('Error fetching timesheet:', error);
     res.status(500).json({ error: error.message });

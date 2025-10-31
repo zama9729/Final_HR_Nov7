@@ -42,6 +42,9 @@ const hrItems = [
   { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
   { title: "Shift Management", url: "/shifts", icon: CalendarClock, showBadge: false },
   { title: "Workflows", url: "/workflows", icon: Workflow, showBadge: false },
+  { title: "Skills", url: "/profile/skills", icon: Award, showBadge: false },
+  { title: "New Project", url: "/projects/new", icon: Building2, showBadge: false },
+  { title: "CEO Dashboard", url: "/ceo/dashboard", icon: BarChart3, showBadge: false },
   { title: "Policies", url: "/policies", icon: FileText, showBadge: false },
   { title: "Analytics", url: "/analytics", icon: BarChart3, showBadge: false },
   { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
@@ -60,6 +63,7 @@ const managerItems = [
 
 const employeeItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, showBadge: false },
+  { title: "My Profile", url: "/my/profile", icon: Users, showBadge: false },
   { title: "My Timesheets", url: "/timesheets", icon: Clock, showBadge: false },
   { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: false },
   { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },

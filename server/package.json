@@ -20,6 +20,7 @@
     "multer": "^2.0.2",
     "pg": "^8.11.3",
     "redis": "^4.6.10",
+    "node-cron": "^3.0.3",
     "zod": "^3.22.4"
   },
   "devDependencies": {

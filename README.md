@@ -71,3 +71,88 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+# Petal HR Suite Addendum: Approval, CSV Import, Opal AI API
+## Staffing: Skills + AI Candidate Suggestions
+
+### Backend Endpoints
+- Skills & Certs
+  - GET/POST `/api/v1/employees/:id/skills`
+  - GET/POST `/api/v1/employees/:id/certifications`
+- Projects
+  - POST `/api/v1/projects`
+  - POST `/api/v1/projects/:id/suggest-candidates` → returns prioritized candidates with `final_score` and `breakdown`
+  - POST `/api/v1/projects/:id/assign` → respects 100% utilization unless HR override is provided
+
+### AI Suggester
+- Server-only: `server/services/ai/suggester.js`
+- Combines skill match, cert bonus, availability, and past project fit (extensible) and logs to `ai_suggestion_logs`.
+- Configure thresholds via request body: `{ include_overloaded: boolean, util_threshold: number }`.
+
+### Frontend Pages
+- `/profile/skills` — manage personal skills; adding a skill updates the profile immediately.
+- `/projects/new` — create a project with required skills; redirects to suggestions.
+- `/projects/:id/suggestions` — list of candidates with score bar, filters (min availability, include overloaded), and assignment modal.
+- `/ceo/dashboard` — entry point for staffing flow.
+
+### Run Locally
+- Apply migration `server/db/migrations/20251030_skills_projects.sql`.
+- `npm install` (adds `reactflow`)
+- Start backend and frontend; log in as HR/CEO to access staffing routes.
+
+
+---
+
+## Database
+- Run SQL migration in `server/db/migrations/20251030_add_approvals.sql` for approval/audit tables and thresholds.
+- Existing tables for users, employees, orgs as in `server/db/schema.sql` or `full-schema.sql`.
+
+---
+
+## Approval Workflow
+- Approvals for leave/expenses use the `/api/approvals/*` endpoints.
+- Thresholds for HR stage approval can be set per-tenant in the `hr_approval_thresholds` table or via env vars.
+- Audit log for each approval stage; see `approval_audit`.
+
+---
+
+## CSV Import
+- New endpoint: `POST /api/v1/orgs/{org_id}/employees/import`
+  - Auth required.
+  - Multipart/form: field `csv` (CSV upload) or JSON `rows` for data; mapping object required if headers are not standard.
+  - `preview=true` returns first 10 rows and auto-mapping for UI.
+  - Returns `{imported_count, failed_count, errors, warnings}`. For per-row failures, see detailed errors array.
+
+**Sample CSV** (`first_name,last_name,email,employee_id,department,role,manager_email,join_date,work_location,phone`)
+
+---
+
+## AI/Opal Integration
+- Add API Key in backend: `export AI_TOOL_API_KEY="your-long-key"`
+- Tool endpoints (as required by Opal/Google Opal):
+  - GET `/discovery` (manifest)
+  - POST `/api/ai/roster/generate` (shift roster)
+  - POST `/api/ai/csv/diagnose` (CSV mapping diagnostcs)
+  - GET `/api/ai/policy/explain?topic=leave-approval|expense-approval`
+  - API expects header: `x-api-key: your-long-key` (set or rotate in `.env`)
+- See `/api/ai/openapi.json` for OpenAPI manifest for tool registration.
+
+**cURL example:**
+```
+curl -H "x-api-key: your-long-key" http://localhost:3001/discovery
+```
+
+**Registering with Opal:**
+- Point discovery endpoint to `/discovery`.
+- Paste API key where Opal/Google UI requests it.
+- Tool API will appear in the Opal tool registry for shift, CSV, and policies.
+
+---
+
+## Runbook: Rollback/Disabling AI/Import
+- To disable the AI endpoints quickly: unset `AI_TOOL_API_KEY` and restart the backend _or_ temporarily comment `/api/ai` route in `server/index.js`.
+- To rollback failed import: see logs for import job id and manually remove (in a transaction!) the uploaded employees/profiles in batch if needed. See errors in `errors` array from import result.
+- To reset approval thresholds for org: update `hr_approval_thresholds` table or set env vars if defaults are incorrect.
+- To test CSV: sample files are in `test/` or use the template shown in UI.
+
+# FAQ

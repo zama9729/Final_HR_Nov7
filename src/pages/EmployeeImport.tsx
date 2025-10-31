@@ -3,13 +3,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Download, Upload, AlertCircle, CheckCircle } from "lucide-react";
 import { useState } from "react";
+import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 export default function EmployeeImport() {
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
-  const [results, setResults] = useState<{ imported: number; errors: string[] } | null>(null);
+  const [results, setResults] = useState<any | null>(null);
   const [apiError, setApiError] = useState<string|null>(null);
+  const [preview, setPreview] = useState<any | null>(null);
+  const [mapping, setMapping] = useState<Record<string,string>>({});
   const { toast } = useToast();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -24,12 +27,36 @@ export default function EmployeeImport() {
     console.log("EmployeeImport handleImport called!");
     setApiError(null);
     if (!file) return;
+    const token = api.token || localStorage.getItem('auth_token');
+    if (!token) {
+      setApiError('You are not logged in. Please sign in and try again.');
+      toast({ title: 'Unauthorized', description: 'Please log in first', variant: 'destructive' });
+      return;
+    }
     setImporting(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/employees/import`, {
+      formData.append('csv', file);
+      formData.append('mapping', JSON.stringify(mapping || {}));
+      formData.append('preview', 'false');
+      formData.append('fail_on_error', 'false');
+      let orgId = localStorage.getItem('tenant_id') || '';
+      if (!orgId) {
+        try {
+          const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/organizations/me`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const org = await resp.json().catch(()=>null);
+          orgId = org?.id || '';
+          if (orgId) localStorage.setItem('tenant_id', orgId);
+        } catch {}
+      }
+      if (!orgId) {
+        setApiError('Could not resolve your organization. Please reload and try again.');
+        setImporting(false);
+        return;
+      }
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/orgs/${orgId}/employees/import`, {
         method: 'POST',
         headers: {
           Authorization: token ? `Bearer ${token}` : '',
@@ -40,16 +67,17 @@ export default function EmployeeImport() {
       try { data = await response.json(); } catch (e) { data = undefined; }
       setResults(data);
       if (!response.ok) {
-        setApiError(data?.error || "Import failed. Server error");
+        const errMsg = data?.error || (response.status === 401 ? 'Unauthorized: No or invalid token' : 'Import failed. Server error');
+        setApiError(errMsg);
         toast({
           title: "Import failed",
-          description: data?.error || "An error occurred during import",
+          description: errMsg,
           variant: "destructive",
         });
       } else {
         toast({
           title: "Import complete",
-          description: `${data?.imported} employees imported, ${data?.errors?.length ?? 0} errors`,
+          description: `${data?.imported_count} employees imported, ${data?.failed_count} failed`,
         });
       }
     } catch (error: any) {
@@ -59,6 +87,52 @@ export default function EmployeeImport() {
         description: "A browser/app error occurred during import",
         variant: "destructive",
       });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    setApiError(null);
+    if (!file) return;
+    const token = api.token || localStorage.getItem('auth_token');
+    if (!token) {
+      setApiError('You are not logged in. Please sign in and try again.');
+      toast({ title: 'Unauthorized', description: 'Please log in first', variant: 'destructive' });
+      return;
+    }
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('csv', file);
+      formData.append('preview', 'true');
+      let orgId = localStorage.getItem('tenant_id') || '';
+      if (!orgId) {
+        try {
+          const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/organizations/me`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const org = await resp.json().catch(()=>null);
+          orgId = org?.id || '';
+          if (orgId) localStorage.setItem('tenant_id', orgId);
+        } catch {}
+      }
+      if (!orgId) {
+        setApiError('Could not resolve your organization. Please reload and try again.');
+        setImporting(false);
+        return;
+      }
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/orgs/${orgId}/employees/import`, {
+        method: 'POST',
+        headers: { Authorization: token ? `Bearer ${token}` : '' },
+        body: formData
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || 'Preview failed');
+      setPreview(data.preview || []);
+      setMapping(data.mapping || {});
+    } catch (e: any) {
+      setApiError(e.message || 'Preview failed');
     } finally {
       setImporting(false);
     }
@@ -140,9 +214,27 @@ export default function EmployeeImport() {
                     <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(2)} KB</p>
                   </div>
                 </div>
-                <Button onClick={handleImport} disabled={importing} id="import-trigger-btn">
-                  {importing ? "Importing..." : "Import"}
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={handlePreview} disabled={importing} variant="outline">{importing ? "..." : "Preview"}</Button>
+                  <Button onClick={handleImport} disabled={importing} id="import-trigger-btn">
+                    {importing ? "Importing..." : "Import"}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {preview && (
+              <div className="mt-4">
+                <div className="text-sm font-medium mb-2">Detected Mapping (editable)</div>
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  {Object.entries(mapping).map(([k,v]) => (
+                    <div key={k} className="flex items-center gap-2">
+                      <label className="w-40 text-sm text-muted-foreground">{k}</label>
+                      <input className="border rounded px-2 py-1 text-sm w-full" value={v || ''} onChange={(e)=>setMapping({ ...mapping, [k]: e.target.value })} />
+                    </div>
+                  ))}
+                </div>
+                <div className="text-sm font-medium mb-2">Preview (first 10 rows)</div>
+                <pre className="bg-muted p-3 rounded text-xs overflow-auto max-h-64">{JSON.stringify(preview, null, 2)}</pre>
               </div>
             )}
             {apiError && (
@@ -154,11 +246,11 @@ export default function EmployeeImport() {
                   <div className="flex items-center gap-2">
                     <CheckCircle className="h-5 w-5 text-success" />
                     <p className="font-medium text-success">
-                      {results.imported} employees imported successfully
+                      {(results?.imported_count ?? results?.imported ?? 0)} employees imported successfully
                     </p>
                   </div>
                 </div>
-                {results.errors.length > 0 && (
+                {Array.isArray(results?.errors) && results.errors.length > 0 && (
                   <div className="p-4 bg-warning/10 border border-warning/20 rounded-lg">
                     <div className="flex items-start gap-2">
                       <AlertCircle className="h-5 w-5 text-warning mt-0.5" />
@@ -167,9 +259,10 @@ export default function EmployeeImport() {
                           {results.errors.length} errors found
                         </p>
                         <ul className="text-sm space-y-1">
-                          {results.errors.map((error, i) => (
-                            <li key={i} className="text-muted-foreground">{error}</li>
-                          ))}
+                          {results.errors.map((error: any, i: number) => {
+                            const text = typeof error === 'string' ? error : (error?.error ? `Row ${error?.row ?? '?'}: ${error.error}` : JSON.stringify(error));
+                            return <li key={i} className="text-muted-foreground">{text}</li>;
+                          })}
                         </ul>
                       </div>
                     </div>

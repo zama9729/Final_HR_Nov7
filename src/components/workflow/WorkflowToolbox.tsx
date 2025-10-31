@@ -1,13 +1,35 @@
-import { Play, GitBranch, User, Mail, Clock, Code, Webhook } from "lucide-react";
+import { Play, GitBranch, User, Mail, Clock, Code, Webhook, CheckCircle2, FileText, Bell, ClipboardCheck, SplitSquareHorizontal, Building2, FileCheck2, ShieldCheck, DollarSign, Workflow } from "lucide-react";
 
+// Organization-level HR toolbox nodes
 const nodeTypes = [
-  { id: "trigger", name: "Trigger", icon: Play, color: "text-primary" },
-  { id: "condition", name: "Condition", icon: GitBranch, color: "text-warning" },
-  { id: "approver", name: "Approver", icon: User, color: "text-accent" },
-  { id: "email", name: "Email", icon: Mail, color: "text-blue-500" },
-  { id: "delay", name: "Delay", icon: Clock, color: "text-purple-500" },
-  { id: "script", name: "Script", icon: Code, color: "text-orange-500" },
-  { id: "webhook", name: "Webhook", icon: Webhook, color: "text-pink-500" },
+  // Triggers
+  { id: "trigger_leave", name: "Trigger: Leave Request", icon: Play, color: "text-primary" },
+  { id: "trigger_expense", name: "Trigger: Expense Claim", icon: DollarSign, color: "text-primary" },
+  { id: "trigger_onboarding", name: "Trigger: Onboarding", icon: Building2, color: "text-primary" },
+
+  // Policy checks
+  { id: "policy_check_leave", name: "Check Leave Policy", icon: ShieldCheck, color: "text-emerald-600" },
+  { id: "policy_check_expense", name: "Check Expense Policy", icon: ShieldCheck, color: "text-emerald-600" },
+
+  // Approvals
+  { id: "approval_manager", name: "Approval: Manager", icon: User, color: "text-accent" },
+  { id: "approval_hr", name: "Approval: HR", icon: ClipboardCheck, color: "text-accent" },
+  { id: "approval_finance", name: "Approval: Finance", icon: DollarSign, color: "text-accent" },
+
+  // Actions
+  { id: "notify", name: "Notify (Email/In-App)", icon: Bell, color: "text-blue-500" },
+  { id: "assign_task", name: "Assign Task", icon: ClipboardCheck, color: "text-purple-600" },
+  { id: "audit_log", name: "Log Approval/Audit", icon: FileText, color: "text-orange-500" },
+  { id: "generate_doc", name: "Generate Document", icon: FileCheck2, color: "text-teal-600" },
+  { id: "update_status", name: "Update Status", icon: Workflow, color: "text-sky-600" },
+  { id: "escalate", name: "Escalate After Delay", icon: Clock, color: "text-purple-500" },
+
+  // Flow controls
+  { id: "condition", name: "Condition / Branch", icon: GitBranch, color: "text-warning" },
+  { id: "parallel", name: "Parallel Approvals", icon: SplitSquareHorizontal, color: "text-pink-600" },
+
+  // Finish
+  { id: "complete", name: "Mark Complete", icon: CheckCircle2, color: "text-emerald-600" },
 ];
 
 export function WorkflowToolbox() {

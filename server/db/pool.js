@@ -44,3 +44,17 @@ export async function query(text, params) {
   return pool.query(text, params);
 }
 
+export async function withClient(fn, tenantId) {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    if (tenantId) {
+      await client.query('SET SESSION app.current_tenant = $1', [tenantId]);
+    }
+    const result = await fn(client);
+    return result;
+  } finally {
+    client.release();
+  }
+}
+

@@ -33,6 +33,12 @@ import SetupPassword from "./pages/SetupPassword";
 import OnboardingTracker from "./pages/OnboardingTracker";
 import Settings from "./pages/Settings";
 import AdminDashboard from "./pages/AdminDashboard";
+import ProfileSkills from "./pages/ProfileSkills";
+import ProjectNew from "./pages/ProjectNew";
+import ProjectSuggestions from "./pages/ProjectSuggestions";
+import CEODashboard from "./pages/CEODashboard";
+import EmployeeDetail from "./pages/EmployeeDetail";
+import MyProfile from "./pages/MyProfile";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +59,9 @@ const App = () => (
             {/* Protected routes */}
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/employees" element={<ProtectedRoute><Employees /></ProtectedRoute>} />
+            <Route path="/employees/:id" element={<ProtectedRoute allowedRoles={["manager","hr","director","ceo"]}><EmployeeDetail /></ProtectedRoute>} />
+            <Route path="/my/profile" element={<ProtectedRoute><MyProfile /></ProtectedRoute>} />
+            <Route path="/profile/skills" element={<ProtectedRoute><ProfileSkills /></ProtectedRoute>} />
             
             {/* HR-only routes */}
             <Route path="/employees/new" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><AddEmployee /></ProtectedRoute>} />
@@ -63,6 +72,9 @@ const App = () => (
             <Route path="/workflows/:id/edit" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><WorkflowEditor /></ProtectedRoute>} />
             <Route path="/policies" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><LeavePolicies /></ProtectedRoute>} />
             <Route path="/analytics" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><Analytics /></ProtectedRoute>} />
+            <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo']}><CEODashboard /></ProtectedRoute>} />
+            <Route path="/projects/new" element={<ProtectedRoute allowedRoles={['hr','director','ceo']}><ProjectNew /></ProtectedRoute>} />
+            <Route path="/projects/:id/suggestions" element={<ProtectedRoute allowedRoles={['hr','director','ceo']}><ProjectSuggestions /></ProtectedRoute>} />
             {/* Admin page: login required; backend enforces superadmin */}
             <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             

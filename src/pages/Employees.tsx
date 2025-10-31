@@ -183,6 +183,9 @@ export default function Employees() {
                               <DropdownMenuItem asChild>
                                 <Link to={`/employees/${employee.id}`}>View Profile</Link>
                               </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link to={`/profile/skills`}>Skills & Certifications</Link>
+                              </DropdownMenuItem>
                               {isManagerOrAbove && (
                                 <DropdownMenuItem onClick={() => handleAssignShift(employee)}>
                                   Assign Shift

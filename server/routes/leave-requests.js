@@ -1,5 +1,6 @@
 import express from 'express';
 import { query } from '../db/pool.js';
+import { create_approval, apply_approval, next_approver } from '../approval_flow.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -217,7 +218,11 @@ router.post('/', authenticateToken, async (req, res) => {
       [employeeId, leave_type_id, start_date, end_date, totalDays, reason || null, tenantId]
     );
 
-    res.status(201).json(insertResult.rows[0]);
+    const leave = insertResult.rows[0];
+    // Create approval workflow for this leave
+    await create_approval('leave', leave.total_days, req.user.id, leave.id);
+
+    res.status(201).json(leave);
   } catch (error) {
     console.error('Error creating leave request:', error);
     res.status(500).json({ error: error.message });
@@ -241,22 +246,19 @@ router.patch('/:id/approve', authenticateToken, async (req, res) => {
 
     const reviewerId = empResult.rows[0].id;
 
-    // Update leave request
-    const updateResult = await query(
-      `UPDATE leave_requests
-       SET status = 'approved',
-           reviewed_by = $1,
-           reviewed_at = now()
-       WHERE id = $2
-       RETURNING *`,
-      [reviewerId, id]
-    );
+    // Apply staged approval
+    const result = await apply_approval('leave', id, reviewerId, 'approve', null);
 
-    if (updateResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Leave request not found' });
+    if (result.final && result.status === 'approved') {
+      await query(
+        `UPDATE leave_requests SET status = 'approved', reviewed_by = $1, reviewed_at = now() WHERE id = $2`,
+        [reviewerId, id]
+      );
     }
 
-    res.json(updateResult.rows[0]);
+    // If still pending next stage, return next approver info
+    const next = await next_approver('leave', id);
+    res.json({ ok: true, workflow: result, next });
   } catch (error) {
     console.error('Error approving leave request:', error);
     res.status(500).json({ error: error.message });
@@ -281,23 +283,14 @@ router.patch('/:id/reject', authenticateToken, async (req, res) => {
 
     const reviewerId = empResult.rows[0].id;
 
-    // Update leave request
-    const updateResult = await query(
+    const result = await apply_approval('leave', id, reviewerId, 'reject', rejection_reason || null);
+    await query(
       `UPDATE leave_requests
-       SET status = 'rejected',
-           reviewed_by = $1,
-           reviewed_at = now(),
-           rejection_reason = $2
-       WHERE id = $3
-       RETURNING *`,
+       SET status = 'rejected', reviewed_by = $1, reviewed_at = now(), rejection_reason = $2
+       WHERE id = $3`,
       [reviewerId, rejection_reason || null, id]
     );
-
-    if (updateResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Leave request not found' });
-    }
-
-    res.json(updateResult.rows[0]);
+    res.json({ ok: true, workflow: result });
   } catch (error) {
     console.error('Error rejecting leave request:', error);
     res.status(500).json({ error: error.message });
