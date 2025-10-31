@@ -1,14 +1,34 @@
 import express from 'express';
 import { query } from '../db/pool.js';
-import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Get employee-wise statistics for CEO/HR
-router.get('/', authenticateToken, requireRole(['hr', 'director', 'ceo']), async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
+    // Get user ID - JWT might use 'id' or 'userId'
+    const userId = req.user.id || req.user.userId || req.user.user_id;
+    
+    if (!userId) {
+      console.error('No user ID found in token:', req.user);
+      return res.status(403).json({ error: 'User ID not found in token', errors: [] });
+    }
+    
+    // Check user role manually to ensure proper access control
+    const roleRes = await query(
+      'SELECT role FROM user_roles WHERE user_id = $1',
+      [userId]
+    );
+    const userRole = roleRes.rows[0]?.role;
+    
+    console.log('Employee stats check:', { userId, userRole, userEmail: req.user.email });
+    
+    if (!userRole || !['hr', 'director', 'ceo'].includes(userRole)) {
+      return res.status(403).json({ error: 'Insufficient permissions', errors: [] });
+    }
     // Get user's tenant_id
-    const tenantRes = await query('SELECT tenant_id FROM profiles WHERE id = $1', [req.user.id]);
+    const tenantRes = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
     const tenantId = tenantRes.rows[0]?.tenant_id;
     
     if (!tenantId) {

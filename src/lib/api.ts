@@ -258,6 +258,81 @@ class ApiClient {
     return this.request(url);
   }
 
+  // Project methods
+  async getProjects() {
+    return this.request('/api/v1/projects');
+  }
+
+  async getProject(id: string) {
+    return this.request(`/api/v1/projects/${id}`);
+  }
+
+  async createProject(data: {
+    name: string;
+    start_date?: string;
+    end_date?: string;
+    required_skills?: string[];
+    required_certifications?: string[];
+    priority?: number;
+    expected_allocation_percent?: number;
+    location?: string;
+  }) {
+    return this.request('/api/v1/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProject(id: string, data: {
+    name?: string;
+    start_date?: string;
+    end_date?: string;
+    required_skills?: string[];
+    required_certifications?: string[];
+    priority?: number;
+    expected_allocation_percent?: number;
+    location?: string;
+  }) {
+    return this.request(`/api/v1/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProject(id: string) {
+    return this.request(`/api/v1/projects/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getProjectAssignments(projectId: string) {
+    return this.request(`/api/v1/projects/${projectId}/assignments`);
+  }
+
+  async deallocateAssignment(projectId: string, assignmentId: string, endDate?: string, reason?: string) {
+    return this.request(`/api/v1/projects/${projectId}/deallocate`, {
+      method: 'POST',
+      body: JSON.stringify({ assignment_id: assignmentId, end_date: endDate, reason }),
+    });
+  }
+
+  async replaceAssignment(projectId: string, data: {
+    old_assignment_id: string;
+    new_employee_id: string;
+    allocation_percent: number;
+    role?: string;
+    start_date?: string;
+    end_date?: string;
+    override?: boolean;
+    override_reason?: string;
+    reason?: string;
+  }) {
+    return this.request(`/api/v1/projects/${projectId}/replace`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Employee statistics
   async getEmployeeStats(params?: { startDate?: string; endDate?: string; employeeId?: string }) {
     const queryParams = new URLSearchParams();
