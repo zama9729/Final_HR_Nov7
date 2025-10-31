@@ -40,5 +40,77 @@ router.post('/timesheet-projects', async (req, res) => {
   }
 });
 
+// Run fix assignments updated_at migration
+router.post('/fix-assignments-updated-at', async (req, res) => {
+  try {
+    await query('BEGIN');
+    
+    try {
+      // Add updated_at column
+      await query(`
+        ALTER TABLE assignments 
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()
+      `);
+      
+      // Add index for end_date
+      await query(`
+        CREATE INDEX IF NOT EXISTS idx_assignments_end_date ON assignments(end_date)
+      `);
+      
+      // Create trigger for assignments updated_at
+      await query(`
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger WHERE tgname = 'update_assignments_updated_at'
+          ) THEN
+            CREATE TRIGGER update_assignments_updated_at
+            BEFORE UPDATE ON assignments
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at_column();
+          END IF;
+        END $$
+      `);
+      
+      // Create trigger for projects updated_at
+      await query(`
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger WHERE tgname = 'update_projects_updated_at'
+          ) THEN
+            CREATE TRIGGER update_projects_updated_at
+            BEFORE UPDATE ON projects
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at_column();
+          END IF;
+        END $$
+      `);
+      
+      // Create trigger for skills updated_at
+      await query(`
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger WHERE tgname = 'update_skills_updated_at'
+          ) THEN
+            CREATE TRIGGER update_skills_updated_at
+            BEFORE UPDATE ON skills
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at_column();
+          END IF;
+        END $$
+      `);
+      
+      await query('COMMIT');
+      
+      res.json({ success: true, message: 'Assignments updated_at migration completed successfully' });
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
 

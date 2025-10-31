@@ -72,10 +72,12 @@ CREATE TABLE IF NOT EXISTS assignments (
   assigned_by UUID REFERENCES profiles(id),
   override BOOLEAN DEFAULT false,
   override_reason TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_assignments_project ON assignments(project_id);
 CREATE INDEX IF NOT EXISTS idx_assignments_employee ON assignments(employee_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_end_date ON assignments(end_date);
 
 CREATE TABLE IF NOT EXISTS benefit_points (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -95,5 +97,41 @@ CREATE TABLE IF NOT EXISTS ai_suggestion_logs (
   created_at TIMESTAMPTZ DEFAULT now(),
   computed_by TEXT
 );
+
+-- Create trigger for assignments updated_at
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'update_assignments_updated_at'
+  ) THEN
+    CREATE TRIGGER update_assignments_updated_at
+    BEFORE UPDATE ON assignments
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
+
+-- Create trigger for projects updated_at
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'update_projects_updated_at'
+  ) THEN
+    CREATE TRIGGER update_projects_updated_at
+    BEFORE UPDATE ON projects
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
+
+-- Create trigger for skills updated_at
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'update_skills_updated_at'
+  ) THEN
+    CREATE TRIGGER update_skills_updated_at
+    BEFORE UPDATE ON skills
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
 
 

@@ -4,12 +4,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-// Removed Table import as we're using Card layout instead
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Briefcase, Clock, TrendingUp } from "lucide-react";
+import { User, Briefcase, Clock, FileText, DollarSign, Calendar } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface EmployeeStat {
   employee_id: string;
@@ -42,10 +43,21 @@ export default function EmployeeStats() {
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const [allocationFilter, setAllocationFilter] = useState<string>('all');
+  const [billableFilter, setBillableFilter] = useState<string>('all');
+  const [weeklyHoursFilter, setWeeklyHoursFilter] = useState<string>('all');
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
+  const [filteredStats, setFilteredStats] = useState<EmployeeStat[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
 
   useEffect(() => {
     fetchStats();
+    fetchEmployees();
   }, []);
+
+  useEffect(() => {
+    applyFilters();
+  }, [stats, allocationFilter, billableFilter, weeklyHoursFilter, selectedEmployee]);
 
   const fetchStats = async () => {
     try {
@@ -56,6 +68,7 @@ export default function EmployeeStats() {
       
       const data = await api.getEmployeeStats(params);
       setStats(data || []);
+      setFilteredStats(data || []);
     } catch (error: any) {
       console.error('Error fetching employee stats:', error);
       toast({
@@ -68,8 +81,55 @@ export default function EmployeeStats() {
     }
   };
 
+  const fetchEmployees = async () => {
+    try {
+      const data = await api.getEmployees();
+      setEmployees(data || []);
+    } catch (error: any) {
+      console.error('Error fetching employees:', error);
+    }
+  };
+
+  const applyFilters = () => {
+    let filtered = [...stats];
+
+    // Filter by employee
+    if (selectedEmployee !== 'all') {
+      filtered = filtered.filter(stat => stat.employee_id === selectedEmployee);
+    }
+
+    // Filter by allocation status
+    if (allocationFilter === 'allocated') {
+      filtered = filtered.filter(stat => stat.project_count > 0);
+    } else if (allocationFilter === 'not-allocated') {
+      filtered = filtered.filter(stat => stat.project_count === 0);
+    }
+
+    // Filter by billable entries
+    if (billableFilter === 'has-billable') {
+      filtered = filtered.filter(stat => stat.billable_entries > 0);
+    } else if (billableFilter === 'only-non-billable') {
+      filtered = filtered.filter(stat => stat.non_billable_entries > 0 && stat.billable_entries === 0);
+    }
+
+    // Filter by weekly hours
+    if (weeklyHoursFilter === 'under-20') {
+      filtered = filtered.filter(stat => stat.total_hours_logged < 20);
+    } else if (weeklyHoursFilter === '20-40') {
+      filtered = filtered.filter(stat => stat.total_hours_logged >= 20 && stat.total_hours_logged < 40);
+    } else if (weeklyHoursFilter === 'over-40') {
+      filtered = filtered.filter(stat => stat.total_hours_logged >= 40);
+    }
+
+    setFilteredStats(filtered);
+  };
+
   const handleFilter = () => {
     fetchStats();
+  };
+
+  const getInitials = (name: string) => {
+    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   };
 
   if (userRole !== 'hr' && userRole !== 'director' && userRole !== 'ceo') {
@@ -86,41 +146,78 @@ export default function EmployeeStats() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Employee Statistics</h1>
-            <p className="text-muted-foreground">View project allocations and timesheet statistics by employee</p>
-          </div>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Filters</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="startDate">Start Date</Label>
+      <div className="space-y-4">
+        {/* Filters Bar */}
+        <Card className="bg-primary/5 border-primary/20">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="font-bold text-lg">Filters</span>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor="startDate" className="text-sm">Start Date</Label>
                 <Input
                   id="startDate"
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
+                  className="w-auto h-9"
                 />
               </div>
-              <div>
-                <Label htmlFor="endDate">End Date</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="endDate" className="text-sm">End Date</Label>
                 <Input
                   id="endDate"
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
+                  className="w-auto h-9"
                 />
               </div>
-              <div className="flex items-end">
-                <Button onClick={handleFilter} className="w-full">Apply Filters</Button>
-              </div>
+              <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
+                <SelectTrigger className="w-[180px] h-9">
+                  <SelectValue placeholder="All Employees" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Employees</SelectItem>
+                  {employees.map((emp) => (
+                    <SelectItem key={emp.id} value={emp.id}>
+                      {emp.profiles?.first_name} {emp.profiles?.last_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={allocationFilter} onValueChange={setAllocationFilter}>
+                <SelectTrigger className="w-[180px] h-9">
+                  <SelectValue placeholder="Allocation" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="allocated">Allocated</SelectItem>
+                  <SelectItem value="not-allocated">Not Allocated</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={billableFilter} onValueChange={setBillableFilter}>
+                <SelectTrigger className="w-[180px] h-9">
+                  <SelectValue placeholder="Billable" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="has-billable">Has Billable</SelectItem>
+                  <SelectItem value="only-non-billable">Only Non-Billable</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={weeklyHoursFilter} onValueChange={setWeeklyHoursFilter}>
+                <SelectTrigger className="w-[180px] h-9">
+                  <SelectValue placeholder="Weekly Hours" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="under-20">&lt; 20 hrs</SelectItem>
+                  <SelectItem value="20-40">20-40 hrs</SelectItem>
+                  <SelectItem value="over-40">&gt; 40 hrs</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button onClick={handleFilter} className="h-9">Apply</Button>
             </div>
           </CardContent>
         </Card>
@@ -131,91 +228,82 @@ export default function EmployeeStats() {
               <p className="text-muted-foreground">Loading employee statistics...</p>
             </CardContent>
           </Card>
-        ) : stats.length === 0 ? (
+        ) : filteredStats.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">
               <p className="text-muted-foreground">No employee statistics found.</p>
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-4">
-            {stats.map((stat) => (
-              <Card key={stat.employee_id}>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>{stat.employee_name}</CardTitle>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {filteredStats.map((stat) => (
+              <Card key={stat.employee_id} className="flex flex-col">
+                <CardContent className="p-6">
+                  {/* Employee Profile Header */}
+                  <div className="flex items-center gap-4 mb-6">
+                    <Avatar className="h-16 w-16">
+                      <AvatarImage />
+                      <AvatarFallback className="text-xl bg-primary/20">
+                        {getInitials(stat.employee_name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-bold">{stat.employee_name}</h3>
                       <p className="text-sm text-muted-foreground">{stat.employee_email}</p>
                       {stat.department && (
-                        <Badge variant="outline" className="mt-2">{stat.department} • {stat.position}</Badge>
+                        <div className="flex gap-2 mt-1">
+                          <Badge variant="outline" className="font-normal text-xs">
+                            <span className="h-2 w-2 rounded-full bg-green-500 mr-1 inline-block"></span>
+                            {stat.department}
+                          </Badge>
+                          {stat.position && (
+                            <Badge variant="outline" className="font-normal text-xs">{stat.position}</Badge>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                    <div className="flex items-center gap-2">
-                      <Briefcase className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Active Projects</p>
-                        <p className="text-lg font-semibold">{stat.project_count}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Total Allocation</p>
-                        <p className="text-lg font-semibold">{Number(stat.total_allocation) || 0}%</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Hours Logged</p>
-                        <p className="text-lg font-semibold">{Number(stat.total_hours_logged) || 0}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Timesheets</p>
-                        <p className="text-lg font-semibold">{stat.timesheet_count}</p>
-                      </div>
-                    </div>
+
+                  {/* Allocation Status */}
+                  <div className="mb-4 flex items-center gap-2">
+                    {stat.project_count > 0 ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-green-500"></span>
+                        <span className="text-sm font-medium">Allocated to Project</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-gray-400"></span>
+                        <span className="text-sm font-medium">Not Allocated to Project</span>
+                      </>
+                    )}
                   </div>
-
-                  {stat.projects && stat.projects.length > 0 && (
-                    <div className="mb-4">
-                      <h3 className="text-sm font-semibold mb-2">Active Project Assignments</h3>
-                      <div className="space-y-2">
-                        {stat.projects.map((proj) => (
-                          <div key={proj.project_id} className="flex items-center justify-between p-2 border rounded">
-                            <div>
-                              <p className="font-medium">{proj.project_name}</p>
-                              {proj.role && <p className="text-sm text-muted-foreground">Role: {proj.role}</p>}
-                              <p className="text-xs text-muted-foreground">
-                                {proj.start_date} - {proj.end_date || 'Ongoing'}
-                              </p>
-                            </div>
-                            <Badge>{proj.allocation_percent}%</Badge>
-                          </div>
-                        ))}
-                      </div>
+                  
+                  {/* Statistics Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="bg-muted/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Active Projects</p>
+                      <p className="text-xl font-bold">{stat.project_count}</p>
                     </div>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Billable Entries</p>
-                      <p className="text-lg font-semibold">{stat.billable_entries}</p>
+                    <div className="bg-muted/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Total Allocation</p>
+                      <p className="text-xl font-bold">{Number(stat.total_allocation) || 0}%</p>
                     </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Non-Billable</p>
-                      <p className="text-lg font-semibold">{stat.non_billable_entries}</p>
+                    <div className="bg-muted/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Timesheets</p>
+                      <p className="text-xl font-bold">{stat.timesheet_count}</p>
                     </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Internal</p>
-                      <p className="text-lg font-semibold">{stat.internal_entries}</p>
+                    <div className="bg-muted/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Hours Logged</p>
+                      <p className="text-xl font-bold">{Number(stat.total_hours_logged).toFixed(0)}</p>
+                    </div>
+                    <div className="bg-muted/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Billable Entries</p>
+                      <p className="text-xl font-bold">{stat.billable_entries}</p>
+                    </div>
+                    <div className="bg-muted/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Non-Billable</p>
+                      <p className="text-xl font-bold">{stat.non_billable_entries}</p>
                     </div>
                   </div>
                 </CardContent>

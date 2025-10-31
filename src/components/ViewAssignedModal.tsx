@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Users, X, Calendar, MapPin, ArrowLeftRight, Loader2 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import {
   Dialog as AlertDialog,
   DialogContent as AlertDialogContent,
@@ -102,10 +102,12 @@ export default function ViewAssignedModal({
     if (!selectedAssignment) return;
 
     try {
+      // Set end_date to yesterday to ensure it doesn't show in active assignments
+      const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
       await api.deallocateAssignment(
         projectId,
         selectedAssignment.assignment_id,
-        new Date().toISOString().split('T')[0]
+        yesterday
       );
 
       toast({
