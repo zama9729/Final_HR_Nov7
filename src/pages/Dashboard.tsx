@@ -313,6 +313,17 @@ export default function Dashboard() {
     return status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
+  const getTimeBasedGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 18) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
+  const getFirstName = () => {
+    return user?.firstName || 'User';
+  };
+
   // CEO Dashboard View
   if (userRole === 'ceo') {
     return (
@@ -320,7 +331,7 @@ export default function Dashboard() {
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold">CEO Dashboard</h1>
+              <h1 className="text-3xl font-bold">{getTimeBasedGreeting()}, {getFirstName()}!</h1>
               <p className="text-muted-foreground">Strategic overview of your organization</p>
             </div>
             {/* Presence Status Selector */}
@@ -599,7 +610,7 @@ export default function Dashboard() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Dashboard</h1>
+            <h1 className="text-3xl font-bold">{getTimeBasedGreeting()}, {getFirstName()}!</h1>
             <p className="text-muted-foreground">Overview of your organization</p>
           </div>
           {/* Presence Status Selector */}
