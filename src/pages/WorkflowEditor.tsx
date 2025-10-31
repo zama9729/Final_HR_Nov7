@@ -25,7 +25,7 @@ export default function WorkflowEditor() {
             <p className="text-muted-foreground">Design your automation workflow</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline">
+            <Button variant="outline" onClick={() => canvasRef.current?.runPreview()}>
               <Play className="mr-2 h-4 w-4" />
               Test Run
             </Button>

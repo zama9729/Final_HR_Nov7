@@ -38,7 +38,7 @@ function BaseNode({ data }: { data: HrNodeData }) {
 
 const nodeTypes = { base: BaseNode } as const;
 
-const InnerCanvas = React.forwardRef<{ openSave: () => void }, {}>(function InnerCanvas(_props, ref) {
+const InnerCanvas = React.forwardRef<{ openSave: () => void; runPreview: () => Promise<void> }, {}>(function InnerCanvas(_props, ref) {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as any);
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as any);
   const [configOpen, setConfigOpen] = useState(false);
@@ -50,13 +50,26 @@ const InnerCanvas = React.forwardRef<{ openSave: () => void }, {}>(function Inne
   const reactFlow = useReactFlow();
   const [saveOpen, setSaveOpen] = useState(false);
   useImperativeHandle(ref, () => ({
-    openSave: () => setSaveOpen(true)
-  }), []);
+    openSave: () => setSaveOpen(true),
+    runPreview
+  }), [nodes, edges]);
   const [saveName, setSaveName] = useState('New Workflow');
   const [saveDesc, setSaveDesc] = useState('');
   const [saving, setSaving] = useState(false);
 
   const onConnect = useCallback((connection: any) => setEdges((eds: any) => addEdge({ ...connection, animated: true }, eds)), [setEdges]);
+
+  const runPreview = useCallback(async () => {
+    const token = api.token || localStorage.getItem('auth_token');
+    const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/workflows/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : '' },
+      body: JSON.stringify({ workflow: { nodes: nodes.map((n: any) => ({ id: n.id, type: n.data.typeKey, label: n.data.label, x: n.position.x, y: n.position.y, props: n.data.props })), connections: edges.map((e: any) => ({ from: String(e.source), to: String(e.target) })) } })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || 'Preview failed');
+    alert(`Steps:\n${JSON.stringify(data.steps, null, 2)}\n\nApprovals:\n${JSON.stringify(data.approvals, null, 2)}`);
+  }, [nodes, edges]);
 
   const addNode = (typeKey: string, label: string, x = 250, y = 100) => {
     const id = `n_${Date.now()}`;
@@ -118,17 +131,7 @@ const InnerCanvas = React.forwardRef<{ openSave: () => void }, {}>(function Inne
         >Export JSON</Button>
         <Button
           size="sm"
-          onClick={async () => {
-            const token = api.token || localStorage.getItem('auth_token');
-            const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/workflows/execute`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : '' },
-              body: JSON.stringify({ workflow: { nodes: nodes.map(n => ({ id: n.id, type: n.data.typeKey, label: n.data.label, x: n.position.x, y: n.position.y, props: n.data.props })), connections: edges.map(e => ({ from: String(e.source), to: String(e.target) })) } })
-            });
-            const data = await resp.json();
-            if (!resp.ok) return alert(data?.error || 'Preview failed');
-            alert(`Steps:\n${JSON.stringify(data.steps, null, 2)}\n\nApprovals:\n${JSON.stringify(data.approvals, null, 2)}`);
-          }}
+          onClick={async () => { try { await runPreview(); } catch (e: any) { alert(e?.message || 'Preview failed'); } }}
           disabled={nodes.length === 0}
         >Run Preview</Button>
       </div>
@@ -172,8 +175,8 @@ const InnerCanvas = React.forwardRef<{ openSave: () => void }, {}>(function Inne
                     description: saveDesc.trim() || undefined,
                     status: 'draft',
                     workflow: {
-                      nodes: nodes.map(n => ({ id: n.id, type: (n.data as any).typeKey, label: (n.data as any).label, x: n.position.x, y: n.position.y, props: (n.data as any).props })),
-                      connections: edges.map(e => ({ from: String(e.source), to: String(e.target) }))
+                      nodes: nodes.map((n: any) => ({ id: n.id, type: (n.data as any).typeKey, label: (n.data as any).label, x: n.position.x, y: n.position.y, props: (n.data as any).props })),
+                      connections: edges.map((e: any) => ({ from: String(e.source), to: String(e.target) }))
                     }
                   };
                   const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/workflows`, {
@@ -232,7 +235,7 @@ const InnerCanvas = React.forwardRef<{ openSave: () => void }, {}>(function Inne
               )}
               <div className="flex justify-end gap-2 pt-2">
                 <Button size="sm" onClick={() => {
-                  setNodes(nds => nds.map(n => n.id === activeNode.id ? ({ ...n, data: { ...n.data, label: draftLabel, props: draftProps } }) : n));
+                  setNodes((nds: any) => nds.map((n: any) => n.id === (activeNode as any).id ? ({ ...n, data: { ...n.data, label: draftLabel, props: draftProps } }) : n));
                   setConfigOpen(false);
                 }}>Save</Button>
                 <Button size="sm" variant="outline" onClick={() => setConfigOpen(false)}>Cancel</Button>
@@ -245,7 +248,7 @@ const InnerCanvas = React.forwardRef<{ openSave: () => void }, {}>(function Inne
   );
 });
 
-export type N8nWorkflowCanvasHandle = { openSave: () => void };
+export type N8nWorkflowCanvasHandle = { openSave: () => void; runPreview: () => Promise<void> };
 
 export default React.forwardRef<N8nWorkflowCanvasHandle, {}>(function N8nWorkflowCanvas(_props, ref) {
   return (
