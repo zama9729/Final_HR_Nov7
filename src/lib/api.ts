@@ -425,6 +425,31 @@ class ApiClient {
   async getPresenceStatus() {
     return this.request('/api/profiles/me/presence');
   }
+
+  // Check-in/Check-out methods
+  async checkIn() {
+    return this.request('/api/check-in-out/check-in', {
+      method: 'POST'
+    });
+  }
+
+  async checkOut() {
+    return this.request('/api/check-in-out/check-out', {
+      method: 'POST'
+    });
+  }
+
+  async getTodayCheckIns() {
+    return this.request('/api/check-in-out/today');
+  }
+
+  async getCheckInHistory(startDate: string, endDate: string) {
+    return this.request(`/api/check-in-out/history?startDate=${startDate}&endDate=${endDate}`);
+  }
+
+  async getCheckInStatus() {
+    return this.request('/api/check-in-out/status');
+  }
 }
 
 export const api = new ApiClient(API_URL);

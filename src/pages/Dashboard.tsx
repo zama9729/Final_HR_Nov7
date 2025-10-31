@@ -1,6 +1,6 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Clock, Calendar, TrendingUp, AlertCircle, CheckCircle, Circle, BarChart3, Building2, DollarSign, Target, Activity, Briefcase, UserCheck, FileText, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Users, Clock, Calendar, TrendingUp, AlertCircle, CheckCircle, Circle, BarChart3, Building2, DollarSign, Target, Activity, Briefcase, UserCheck, FileText, ArrowUpRight, ArrowDownRight, LogIn, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
@@ -41,6 +41,9 @@ export default function Dashboard() {
   });
   const [presenceStatus, setPresenceStatus] = useState<string>('online');
   const [hasActiveLeave, setHasActiveLeave] = useState(false);
+  const [isCheckedIn, setIsCheckedIn] = useState(false);
+  const [checkedInSince, setCheckedInSince] = useState<string | null>(null);
+  const [todayRecords, setTodayRecords] = useState<any[]>([]);
   const [ceoStats, setCeoStats] = useState<CEODashboardStats>({
     totalEmployees: 0,
     activeProjects: 0,
@@ -59,12 +62,17 @@ export default function Dashboard() {
       fetchCEODashboardStats();
     } else {
       fetchDashboardStats();
+      fetchCheckInStatus();
+      fetchTodayCheckIns();
     }
     fetchPresenceStatus();
 
     // Poll for presence updates every 15 seconds
     const presenceInterval = setInterval(() => {
       fetchPresenceStatus();
+      if (userRole !== 'ceo') {
+        fetchCheckInStatus();
+      }
     }, 15000);
 
     return () => {
@@ -179,6 +187,81 @@ export default function Dashboard() {
         variant: 'destructive',
       });
     }
+  };
+
+  const fetchCheckInStatus = async () => {
+    if (!user) return;
+
+    try {
+      const status = await api.getCheckInStatus();
+      setIsCheckedIn(status.checkedIn);
+      setCheckedInSince(status.checkedInSince);
+    } catch (error) {
+      console.error('Error fetching check-in status:', error);
+    }
+  };
+
+  const fetchTodayCheckIns = async () => {
+    if (!user) return;
+
+    try {
+      const records = await api.getTodayCheckIns();
+      setTodayRecords(records);
+    } catch (error) {
+      console.error('Error fetching today check-ins:', error);
+    }
+  };
+
+  const handleCheckIn = async () => {
+    try {
+      await api.checkIn();
+      await fetchCheckInStatus();
+      await fetchTodayCheckIns();
+      toast({
+        title: 'Checked In',
+        description: 'You have successfully checked in',
+      });
+    } catch (error: any) {
+      console.error('Error checking in:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to check in',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCheckOut = async () => {
+    try {
+      await api.checkOut();
+      await fetchCheckInStatus();
+      await fetchTodayCheckIns();
+      toast({
+        title: 'Checked Out',
+        description: 'You have successfully checked out',
+      });
+    } catch (error: any) {
+      console.error('Error checking out:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to check out',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const calculateTotalHoursToday = () => {
+    return todayRecords.reduce((total, record) => {
+      return total + (Number(record.hours_worked) || 0);
+    }, 0);
+  };
+
+  const formatTime = (timeString: string) => {
+    return new Date(timeString).toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true 
+    });
   };
 
   const checkOnboardingStatus = async () => {
@@ -613,6 +696,76 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Check-In/Check-Out Card */}
+        {userRole !== 'ceo' && (
+          <Card className="bg-primary/5 border-primary/20">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                  <h3 className="font-bold text-lg mb-1">Time Tracking</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {isCheckedIn 
+                      ? `Checked in since ${checkedInSince ? formatTime(checkedInSince) : 'N/A'}` 
+                      : 'Not checked in today'}
+                  </p>
+                  {todayRecords.length > 0 && (
+                    <p className="text-sm font-medium text-primary mt-2">
+                      Total today: {calculateTotalHoursToday().toFixed(2)} hours
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {isCheckedIn ? (
+                    <Button 
+                      variant="destructive" 
+                      size="lg" 
+                      onClick={handleCheckOut}
+                      className="gap-2"
+                    >
+                      <LogOut className="h-5 w-5" />
+                      Check Out
+                    </Button>
+                  ) : (
+                    <Button 
+                      variant="default" 
+                      size="lg" 
+                      onClick={handleCheckIn}
+                      className="gap-2"
+                    >
+                      <LogIn className="h-5 w-5" />
+                      Check In
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {todayRecords.length > 0 && (
+                <div className="mt-4 pt-4 border-t">
+                  <p className="text-sm font-medium mb-2">Today's Sessions</p>
+                  <div className="space-y-2">
+                    {todayRecords.map((record, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 bg-background rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <Circle className="h-2 w-2 text-green-500" fill="currentColor" />
+                          <span className="text-sm">
+                            {record.check_in_time && formatTime(record.check_in_time)}
+                            {record.check_out_time && ` - ${formatTime(record.check_out_time)}`}
+                            {!record.check_out_time && ' - Active'}
+                          </span>
+                        </div>
+                        {record.hours_worked && (
+                          <span className="text-sm font-medium">
+                            {Number(record.hours_worked).toFixed(2)}h
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
