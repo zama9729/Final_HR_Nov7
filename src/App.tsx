@@ -39,6 +39,7 @@ import ProjectSuggestions from "./pages/ProjectSuggestions";
 import CEODashboard from "./pages/CEODashboard";
 import EmployeeDetail from "./pages/EmployeeDetail";
 import MyProfile from "./pages/MyProfile";
+import ProjectCalendar from "./pages/ProjectCalendar";
 
 const queryClient = new QueryClient();
 
@@ -75,6 +76,7 @@ const App = () => (
             <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo']}><CEODashboard /></ProtectedRoute>} />
             <Route path="/projects/new" element={<ProtectedRoute allowedRoles={['hr','director','ceo']}><ProjectNew /></ProtectedRoute>} />
             <Route path="/projects/:id/suggestions" element={<ProtectedRoute allowedRoles={['hr','director','ceo']}><ProjectSuggestions /></ProtectedRoute>} />
+            <Route path="/calendar" element={<ProtectedRoute><ProjectCalendar /></ProtectedRoute>} />
             {/* Admin page: login required; backend enforces superadmin */}
             <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             

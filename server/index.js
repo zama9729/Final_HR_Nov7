@@ -27,6 +27,8 @@ import skillsRoutes from './routes/skills.js';
 import projectsRoutes from './routes/projects.js';
 import employeeProjectsRoutes from './routes/employee-projects.js';
 import holidaysRoutes from './routes/holidays.js';
+import calendarRoutes from './routes/calendar.js';
+import analyticsRoutes from './routes/analytics.js';
 import { scheduleHolidayNotifications } from './services/cron.js';
 
 dotenv.config();
@@ -81,6 +83,8 @@ app.use('/api/v1', authenticateToken, setTenantContext, skillsRoutes);
 app.use('/api/v1/projects', authenticateToken, setTenantContext, projectsRoutes);
 app.use('/api/v1', authenticateToken, setTenantContext, employeeProjectsRoutes);
 app.use('/api', authenticateToken, setTenantContext, holidaysRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/analytics', authenticateToken, analyticsRoutes);
 
 // Public discovery endpoint for AI tools (requires API key in header)
 app.get('/discovery', (req, res, next) => {
