@@ -12,16 +12,10 @@ import statsRoutes from './routes/stats.js';
 import adminRoutes from './routes/admin.js';
 import notificationsRoutes from './routes/notifications.js';
 import timesheetsRoutes from './routes/timesheets.js';
-import shiftsRoutes from './routes/shifts.js';
-import leavePoliciesRoutes from './routes/leave-policies.js';
-import leaveRequestsRoutes from './routes/leave-requests.js';
-import approvalsRoutes from './routes/approvals.js';
 import appraisalCycleRoutes from './routes/appraisal-cycles.js';
 import performanceReviewRoutes from './routes/performance-reviews.js';
 import { authenticateToken } from './middleware/auth.js';
-import { setTenantContext } from './middleware/tenant.js';
-import aiRoutes from './routes/ai.js';
-import importsRoutes from './routes/imports.js';
+import shiftsRoutes from './routes/shifts.js';
 import workflowsRoutes from './routes/workflows.js';
 import skillsRoutes from './routes/skills.js';
 import projectsRoutes from './routes/projects.js';
@@ -29,6 +23,9 @@ import employeeProjectsRoutes from './routes/employee-projects.js';
 import holidaysRoutes from './routes/holidays.js';
 import calendarRoutes from './routes/calendar.js';
 import analyticsRoutes from './routes/analytics.js';
+import aiRoutes from './routes/ai.js';
+import importsRoutes from './routes/imports.js';
+import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications } from './services/cron.js';
 
 dotenv.config();
@@ -36,17 +33,13 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Guard against process exits on unhandled errors
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
-});
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
-
 // Middleware
 app.use(cors({
-  origin: true,
+  origin: [
+    'http://localhost:8080',
+    'http://localhost:3000',
+    process.env.FRONTEND_URL
+  ].filter(Boolean),
   credentials: true
 }));
 app.use(express.json());
@@ -59,26 +52,25 @@ app.get('/health', (req, res) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/employees', authenticateToken, setTenantContext, employeesRoutes);
-app.use('/api/profiles', authenticateToken, setTenantContext, profilesRoutes);
+app.use('/api/employees', authenticateToken, employeesRoutes);
+app.use('/api/profiles', authenticateToken, profilesRoutes);
 app.use('/api/organizations', organizationsRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/timesheets', timesheetsRoutes);
-app.use('/api/shifts', authenticateToken, setTenantContext, shiftsRoutes);
-app.use('/api/leave-policies', leavePoliciesRoutes);
-app.use('/api/leave-requests', leaveRequestsRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/approvals', approvalsRoutes);
+app.use('/api/shifts', authenticateToken, shiftsRoutes);
+// Mount core workflow routes with auth and tenant context
+app.use('/api/workflows', authenticateToken, setTenantContext, workflowsRoutes);
 
 // Onboarding routes (no auth required for some endpoints)
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/onboarding-tracker', onboardingTrackerRoutes);
 app.use('/api/appraisal-cycles', appraisalCycleRoutes);
 app.use('/api/performance-reviews', performanceReviewRoutes);
+// Additional feature routes
 app.use('/api/ai', aiRoutes);
 app.use('/api', importsRoutes);
-app.use('/api/workflows', authenticateToken, setTenantContext, workflowsRoutes);
 app.use('/api/v1', authenticateToken, setTenantContext, skillsRoutes);
 app.use('/api/v1/projects', authenticateToken, setTenantContext, projectsRoutes);
 app.use('/api/v1', authenticateToken, setTenantContext, employeeProjectsRoutes);
@@ -88,7 +80,7 @@ app.use('/api/analytics', authenticateToken, analyticsRoutes);
 
 // Public discovery endpoint for AI tools (requires API key in header)
 app.get('/discovery', (req, res, next) => {
-  req.url = '/discovery';
+  req.url = '/api/ai/discovery';
   return aiRoutes.handle(req, res, next);
 });
 
@@ -136,12 +128,6 @@ createPool().then(async () => {
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
-  try {
-    scheduleHolidayNotifications();
-    console.log('🕒 Holiday notification scheduler started');
-  } catch (e) {
-    console.error('Failed to start scheduler (continuing without cron):', e?.message || e);
-  }
 }).catch((error) => {
   console.error('❌ Failed to initialize database:', error);
   process.exit(1);

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -6,6 +6,8 @@ import ReactFlow, {
   addEdge,
   useEdgesState,
   useNodesState,
+  useReactFlow,
+  ReactFlowProvider,
   Handle,
   Position,
   Connection,
@@ -39,7 +41,7 @@ function BaseNode({ data }: { data: HrNodeData }) {
 
 const nodeTypes = { base: BaseNode } as const;
 
-export default function N8nWorkflowCanvas() {
+function InnerCanvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<HrNodeData>[]>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
   const [configOpen, setConfigOpen] = useState(false);
@@ -47,6 +49,8 @@ export default function N8nWorkflowCanvas() {
   const [draftLabel, setDraftLabel] = useState('');
   const [draftProps, setDraftProps] = useState<Record<string, any>>({});
   const activeNode = useMemo(() => nodes.find(n => n.id === activeNodeId), [nodes, activeNodeId]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const reactFlow = useReactFlow();
 
   const onConnect = useCallback((connection: Connection) => setEdges((eds) => addEdge({ ...connection, animated: true }, eds)), [setEdges]);
 
@@ -63,8 +67,28 @@ export default function N8nWorkflowCanvas() {
     setConfigOpen(true);
   };
 
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const onDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    const typeKey = event.dataTransfer.getData('nodeType');
+    const label = event.dataTransfer.getData('nodeName') || typeKey;
+    if (!typeKey) return;
+
+    const bounds = wrapperRef.current?.getBoundingClientRect();
+    const x = event.clientX - (bounds?.left || 0);
+    const y = event.clientY - (bounds?.top || 0);
+    const position = reactFlow.project({ x, y });
+
+    const id = `n_${Date.now()}`;
+    setNodes((nds) => nds.concat({ id, type: 'base', position, data: { label, typeKey } }));
+  }, [reactFlow, setNodes]);
+
   return (
-    <div className="h-full w-full relative">
+    <div ref={wrapperRef} className="h-full w-full relative" onDragOver={onDragOver} onDrop={onDrop}>
       <div className="absolute top-4 left-4 z-10 flex gap-2">
         <Button variant="secondary" size="sm" onClick={() => addNode('trigger_leave', 'Trigger: Leave Request', 100, 100)}>+ Trigger</Button>
         <Button variant="secondary" size="sm" onClick={() => addNode('approval_manager', 'Approval: Manager', 350, 100)}>+ Manager Approval</Button>
@@ -72,6 +96,12 @@ export default function N8nWorkflowCanvas() {
         <Button variant="secondary" size="sm" onClick={() => addNode('condition', 'Condition', 350, 220)}>+ Condition</Button>
       </div>
       <div className="absolute top-4 right-4 z-10 flex gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => { setNodes([]); setEdges([]); }}
+          disabled={nodes.length === 0 && edges.length === 0}
+        >Clear Canvas</Button>
         <Button
           variant="outline"
           size="sm"
@@ -160,6 +190,14 @@ export default function N8nWorkflowCanvas() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function N8nWorkflowCanvas() {
+  return (
+    <ReactFlowProvider>
+      <InnerCanvas />
+    </ReactFlowProvider>
   );
 }
 
