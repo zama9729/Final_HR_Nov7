@@ -35,8 +35,8 @@ END $$;
 CREATE OR REPLACE FUNCTION calculate_check_in_hours()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- Set work_date from check_in_time
-  IF NEW.work_date IS NULL OR NEW.work_date = '' THEN
+  -- Set work_date from check_in_time if not provided
+  IF NEW.work_date IS NULL THEN
     NEW.work_date := NEW.check_in_time::date;
   END IF;
   
