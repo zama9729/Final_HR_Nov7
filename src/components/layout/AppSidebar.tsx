@@ -187,55 +187,48 @@ export function AppSidebar() {
     return 0;
   };
 
+  // Get organization name abbreviation (ZM) or first two letters
+  const getLogoText = () => {
+    if (organization?.name) {
+      const words = organization.name.split(' ');
+      if (words.length >= 2) {
+        return (words[0][0] + words[1][0]).toUpperCase();
+      }
+      return organization.name.substring(0, 2).toUpperCase();
+    }
+    return 'ZM';
+  };
+
   return (
-    <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border px-3 py-2.5">
-        <div className="flex items-center gap-2.5">
+    <Sidebar className="bg-slate-900 border-r border-slate-800">
+      <SidebarHeader className="border-b border-slate-800 px-4 py-4">
+        <div className="flex items-center gap-3">
           <div className="relative flex-shrink-0">
             {organization?.logo_url ? (
-              <div className="relative h-10 w-10 rounded-lg overflow-hidden border border-sidebar-border shadow-sm bg-background">
+              <div className="relative h-12 w-12 rounded-lg overflow-hidden border border-slate-700 shadow-sm bg-slate-800">
                 <img 
                   src={organization.logo_url} 
                   alt={organization.name || 'Organization'}
                   className="h-full w-full object-cover"
-                  onError={(e) => {
-                    // Fallback to default icon if image fails to load
-                    const target = e.target as HTMLImageElement;
-                    target.style.display = 'none';
-                    const parent = target.parentElement;
-                    if (parent && !parent.querySelector('.fallback-icon')) {
-                      const fallback = document.createElement('div');
-                      fallback.className = 'fallback-icon h-full w-full flex items-center justify-center bg-primary/10';
-                      fallback.innerHTML = '<svg class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>';
-                      parent.appendChild(fallback);
-                    }
-                  }}
                 />
               </div>
             ) : (
-              <div className="h-10 w-10 rounded-lg bg-primary/10 border border-sidebar-border flex items-center justify-center shadow-sm">
-                <Building2 className="h-5 w-5 text-primary" />
+              <div className="h-12 w-12 rounded-lg bg-blue-600 border border-slate-700 flex items-center justify-center shadow-sm">
+                <span className="text-white font-bold text-lg">{getLogoText()}</span>
               </div>
             )}
           </div>
           <div className="hidden lg:block min-w-0 flex-1">
-            <h2 className="text-sm font-semibold text-sidebar-foreground leading-tight truncate">
-              {organization?.name || 'HR Platform'}
+            <h2 className="text-lg font-bold text-white leading-tight truncate">
+              {getLogoText()}
             </h2>
-            <p className="text-[10px] text-sidebar-foreground/60 leading-tight mt-0.5">Powered by AI</p>
+            <p className="text-xs text-slate-400 leading-tight mt-1">Powered by AI</p>
           </div>
         </div>
       </SidebarHeader>
       
-      <SidebarContent>
+      <SidebarContent className="px-2 py-4">
         <SidebarGroup>
-              <SidebarGroupLabel>
-                {userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin'
-                  ? 'HR Dashboard' 
-                  : userRole === 'manager' 
-                  ? 'Manager Dashboard' 
-                  : 'My Dashboard'}
-              </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navigationItems && navigationItems.length > 0 ? (
@@ -247,13 +240,17 @@ export function AppSidebar() {
                         <NavLink 
                           to={item.url}
                           className={({ isActive }) => 
-                            isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
+                            `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                              isActive 
+                                ? "bg-slate-800 text-white" 
+                                : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                            }`
                           }
                         >
-                          <item.icon className="h-3.5 w-3.5 shrink-0" />
-                          <span className="flex-1 text-xs hidden lg:block">{item.title}</span>
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          <span className="flex-1 text-sm">{item.title}</span>
                           {badgeCount > 0 && (
-                            <span className="ml-auto flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-medium text-destructive-foreground shrink-0">
+                            <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-medium text-white shrink-0">
                               {badgeCount > 9 ? '9+' : badgeCount}
                             </span>
                           )}
@@ -264,7 +261,7 @@ export function AppSidebar() {
                 })
               ) : (
                 <SidebarMenuItem>
-                  <div className="px-3 py-2 text-sm text-muted-foreground">
+                  <div className="px-3 py-2 text-sm text-slate-400">
                     Loading menu items...
                   </div>
                 </SidebarMenuItem>
@@ -272,7 +269,16 @@ export function AppSidebar() {
               {isSuperadmin && (
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild>
-                    <NavLink to="/admin">
+                    <NavLink 
+                      to="/admin"
+                      className={({ isActive }) => 
+                        `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                          isActive 
+                            ? "bg-slate-800 text-white" 
+                            : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                        }`
+                      }
+                    >
                       <BarChart3 className="h-4 w-4" />
                       <span>Admin</span>
                     </NavLink>
@@ -288,7 +294,16 @@ export function AppSidebar() {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
-                  <NavLink to="/settings">
+                  <NavLink 
+                    to="/settings"
+                    className={({ isActive }) => 
+                      `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                        isActive 
+                          ? "bg-slate-800 text-white" 
+                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      }`
+                    }
+                  >
                     <Settings className="h-4 w-4" />
                     <span>Settings</span>
                   </NavLink>

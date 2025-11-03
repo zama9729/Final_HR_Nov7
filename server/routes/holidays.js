@@ -396,6 +396,43 @@ router.get('/holidays/employee/:employeeId', authenticateToken, async (req, res)
   }
 });
 
+// Get upcoming holidays
+router.get('/holidays', authenticateToken, async (req, res) => {
+  try {
+    const { upcoming } = req.query;
+    
+    // Get user's tenant_id
+    const profileRes = await query('SELECT tenant_id FROM profiles WHERE id = $1', [req.user.id]);
+    const tenantId = profileRes.rows[0]?.tenant_id;
+    
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+    
+    const currentYear = new Date().getFullYear();
+    const today = new Date().toISOString().split('T')[0];
+    
+    let holidaysQuery = `
+      SELECT h.*, hl.name as list_name, hl.region
+      FROM holidays h
+      JOIN holiday_lists hl ON hl.id = h.list_id
+      WHERE hl.org_id = $1 
+        AND hl.year = $2 
+        AND hl.published = true
+        AND h.date >= $3
+      ORDER BY h.date ASC
+      LIMIT 5
+    `;
+    
+    const holidaysRes = await query(holidaysQuery, [tenantId, currentYear, today]);
+    
+    res.json(holidaysRes.rows);
+  } catch (error) {
+    console.error('Error fetching upcoming holidays:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch holidays' });
+  }
+});
+
 // Get holidays with state filter (for calendar view)
 router.get('/holidays/calendar', authenticateToken, async (req, res) => {
   try {

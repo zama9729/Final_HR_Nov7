@@ -1,31 +1,19 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Clock, Calendar, TrendingUp, AlertCircle, CheckCircle, Circle, BarChart3, Building2, DollarSign, Target, Activity, Briefcase, UserCheck, FileText, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { Clock, Calendar, Bot } from "lucide-react";
+import { format, startOfWeek, endOfWeek, isFuture, parseISO } from "date-fns";
 
 interface DashboardStats {
-  totalEmployees: number;
-  pendingApprovals: number;
+  timesheetHours: number;
   leaveBalance: number;
-  avgAttendance: number;
-}
-
-interface CEODashboardStats {
-  totalEmployees: number;
-  activeProjects: number;
-  pendingApprovals: number;
-  pendingLeaves: number;
-  pendingTimesheets: number;
-  activeAssignments: number;
-  employeeGrowth: number;
-  topDepartments: Array<{ name: string; count: number }>;
-  projectUtilization: Array<any>;
+  nextHoliday: { date: string; name: string } | null;
+  projects: Array<{ id: string; name: string; category?: string }>;
 }
 
 export default function Dashboard() {
@@ -34,60 +22,45 @@ export default function Dashboard() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
-    totalEmployees: 0,
-    pendingApprovals: 0,
+    timesheetHours: 0,
     leaveBalance: 0,
-    avgAttendance: 0,
+    nextHoliday: null,
+    projects: [],
   });
   const [presenceStatus, setPresenceStatus] = useState<string>('online');
-  const [hasActiveLeave, setHasActiveLeave] = useState(false);
-  const [ceoStats, setCeoStats] = useState<CEODashboardStats>({
-    totalEmployees: 0,
-    activeProjects: 0,
-    pendingApprovals: 0,
-    pendingLeaves: 0,
-    pendingTimesheets: 0,
-    activeAssignments: 0,
-    employeeGrowth: 0,
-    topDepartments: [],
-    projectUtilization: [],
-  });
 
   useEffect(() => {
     checkOnboardingStatus();
-    if (userRole === 'ceo') {
-      fetchCEODashboardStats();
-    } else {
-      fetchDashboardStats();
-    }
+    fetchDashboardStats();
     fetchPresenceStatus();
-
-    // Poll for presence updates every 15 seconds
-    const presenceInterval = setInterval(() => {
-      fetchPresenceStatus();
-    }, 15000);
-
-    return () => {
-      clearInterval(presenceInterval);
-    };
   }, [user]);
 
   const fetchDashboardStats = async () => {
     if (!user) return;
 
     try {
-      // Get employees count
-      const employees = await api.getEmployees();
-      const employeeCount = employees.filter((e: any) => e.status === 'active').length;
+      setIsLoading(true);
 
-      // Pending approvals
-      let pendingCount = 0;
-      if (userRole && ['manager', 'hr', 'director', 'ceo'].includes(userRole)) {
-        const counts = await api.getPendingCounts();
-        pendingCount = counts.timesheets + counts.leaves;
+      // Get current week timesheet hours
+      let timesheetHours = 0;
+      try {
+        const employeeId = await api.getEmployeeId();
+        if (employeeId?.id) {
+          const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+          const weekEnd = format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+          const timesheet = await api.getTimesheet(weekStart, weekEnd);
+          
+          if (timesheet.entries && Array.isArray(timesheet.entries)) {
+            timesheetHours = timesheet.entries.reduce((total: number, entry: any) => {
+              return total + (parseFloat(entry.hours || 0));
+            }, 0);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching timesheet:', error);
       }
 
-      // Get leave balance for employees/managers
+      // Get leave balance
       let leaveBalance = 0;
       if (userRole && ['employee', 'manager'].includes(userRole)) {
         try {
@@ -98,54 +71,52 @@ export default function Dashboard() {
         }
       }
 
+      // Get next holiday
+      let nextHoliday: { date: string; name: string } | null = null;
+      try {
+        // Fetch holidays from the API
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/holidays?upcoming=true`,
+          { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
+        );
+        if (response.ok) {
+          const holidays = await response.json();
+          if (holidays && holidays.length > 0) {
+            const holiday = holidays[0];
+            nextHoliday = {
+              date: holiday.date,
+              name: holiday.name || 'Holiday',
+            };
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching holidays:', error);
+      }
+
+      // Get employee projects
+      let projects: Array<{ id: string; name: string; category?: string }> = [];
+      try {
+        const employeeId = await api.getEmployeeId();
+        if (employeeId?.id) {
+          const employeeProjects = await api.getEmployeeProjects(employeeId.id);
+          projects = (employeeProjects || []).map((p: any) => ({
+            id: p.id || p.project_id,
+            name: p.project_name || p.name,
+            category: p.category || p.role || 'Project',
+          })).slice(0, 3); // Limit to 3 projects
+        }
+      } catch (error) {
+        console.error('Error fetching projects:', error);
+      }
+
       setStats({
-        totalEmployees: employeeCount,
-        pendingApprovals: pendingCount,
+        timesheetHours: Math.round(timesheetHours),
         leaveBalance,
-        avgAttendance: 0,
+        nextHoliday,
+        projects,
       });
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
-    }
-  };
-
-  const fetchCEODashboardStats = async () => {
-    if (!user) return;
-
-    try {
-      setIsLoading(true);
-      
-      // Fetch analytics data for comprehensive CEO dashboard
-      const resp = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/analytics`,
-        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
-      );
-      
-      if (!resp.ok) {
-        throw new Error('Failed to fetch analytics');
-      }
-      
-      const data = await resp.json();
-      
-      // Get pending counts
-      const counts = await api.getPendingCounts();
-      
-      setCeoStats({
-        totalEmployees: data.overall?.total_employees || 0,
-        activeProjects: data.overall?.active_projects || 0,
-        pendingApprovals: counts.timesheets + counts.leaves,
-        pendingLeaves: counts.leaves,
-        pendingTimesheets: counts.timesheets,
-        activeAssignments: data.overall?.active_assignments || 0,
-        employeeGrowth: data.employeeGrowth?.slice(-1)[0]?.count || 0,
-        topDepartments: (data.departmentData || []).slice(0, 5).map((row: any) => ({ 
-          name: row.name, 
-          count: parseInt(row.value) || 0 
-        })),
-        projectUtilization: data.projectUtilization || [],
-      });
-    } catch (error) {
-      console.error('Error fetching CEO dashboard stats:', error);
     } finally {
       setIsLoading(false);
     }
@@ -157,34 +128,13 @@ export default function Dashboard() {
     try {
       const presence = await api.getPresenceStatus();
       setPresenceStatus(presence.presence_status || 'online');
-      setHasActiveLeave(presence.has_active_leave || false);
     } catch (error) {
       console.error('Error fetching presence status:', error);
     }
   };
 
-  const handlePresenceChange = async (newStatus: string) => {
-    try {
-      await api.updatePresenceStatus(newStatus as any);
-      setPresenceStatus(newStatus);
-      toast({
-        title: 'Status Updated',
-        description: `Your presence is now ${newStatus.replace('_', ' ')}`,
-      });
-    } catch (error: any) {
-      console.error('Error updating presence status:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update presence status',
-        variant: 'destructive',
-      });
-    }
-  };
-
-
-
   const checkOnboardingStatus = async () => {
-    if (!user || userRole === 'hr' || userRole === 'director' || userRole === 'ceo') {
+    if (!user || userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') {
       setIsLoading(false);
       return;
     }
@@ -205,6 +155,27 @@ export default function Dashboard() {
     }
   };
 
+  const getFirstName = () => {
+    return user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'User';
+  };
+
+  const formatHolidayDate = (dateStr: string) => {
+    try {
+      const date = parseISO(dateStr);
+      return format(date, 'MMMM d');
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const handleSubmitTimesheet = () => {
+    navigate('/timesheets');
+  };
+
+  const handleApplyLeave = () => {
+    navigate('/leaves');
+  };
+
   if (isLoading) {
     return (
       <AppLayout>
@@ -215,487 +186,126 @@ export default function Dashboard() {
     );
   }
 
-  const getPresenceColor = (status: string) => {
-    switch (status) {
-      case 'online': return 'text-green-500';
-      case 'away': return 'text-red-500';
-      case 'break': return 'text-yellow-500';
-      case 'out_of_office': return 'text-blue-500';
-      default: return 'text-gray-500';
-    }
-  };
-
-  const getPresenceLabel = (status: string) => {
-    if (status === 'out_of_office' && hasActiveLeave) {
-      return 'Out of Office (but available)';
-    }
-    return status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-  };
-
-  const getTimeBasedGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 18) return 'Good Afternoon';
-    return 'Good Evening';
-  };
-
-  const getFirstName = () => {
-    return user?.firstName || 'User';
-  };
-
-  // CEO Dashboard View
-  if (userRole === 'ceo') {
-    return (
-      <AppLayout>
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold">{getTimeBasedGreeting()}, {getFirstName()}!</h1>
-              <p className="text-muted-foreground">Strategic overview of your organization</p>
-            </div>
-            {/* Presence Status Selector */}
-            <div className="flex items-center gap-3">
-              <Circle className={`h-3 w-3 ${getPresenceColor(presenceStatus)} rounded-full`} fill="currentColor" />
-              <Select value={presenceStatus} onValueChange={handlePresenceChange}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="online">
-                    <div className="flex items-center gap-2">
-                      <Circle className="h-2 w-2 text-green-500" fill="currentColor" />
-                      Online
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="away">
-                    <div className="flex items-center gap-2">
-                      <Circle className="h-2 w-2 text-red-500" fill="currentColor" />
-                      Away
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="break">
-                    <div className="flex items-center gap-2">
-                      <Circle className="h-2 w-2 text-yellow-500" fill="currentColor" />
-                      Break
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="out_of_office">
-                    <div className="flex items-center gap-2">
-                      <Circle className="h-2 w-2 text-blue-500" fill="currentColor" />
-                      Out of Office
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Key Metrics - Interactive Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="transition-all hover:shadow-lg cursor-pointer group" onClick={() => navigate('/employees')}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Total Employees</CardTitle>
-                <Users className="h-4 w-4 text-primary group-hover:scale-110 transition-transform" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">{ceoStats.totalEmployees}</div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                  <ArrowUpRight className="h-3 w-3 text-green-500" />
-                  <span>Active workforce</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="transition-all hover:shadow-lg cursor-pointer group" onClick={() => navigate('/ceo/dashboard')}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Active Projects</CardTitle>
-                <Briefcase className="h-4 w-4 text-primary group-hover:scale-110 transition-transform" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">{ceoStats.activeProjects}</div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                  <Target className="h-3 w-3 text-blue-500" />
-                  <span>In progress</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="transition-all hover:shadow-lg cursor-pointer group" onClick={() => navigate('/timesheet-approvals')}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Pending Timesheets</CardTitle>
-                <Clock className="h-4 w-4 text-warning group-hover:scale-110 transition-transform" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">{ceoStats.pendingTimesheets}</div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                  <AlertCircle className="h-3 w-3 text-orange-500" />
-                  <span>Requires action</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="transition-all hover:shadow-lg cursor-pointer group" onClick={() => navigate('/leaves')}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Pending Leaves</CardTitle>
-                <Calendar className="h-4 w-4 text-warning group-hover:scale-110 transition-transform" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">{ceoStats.pendingLeaves}</div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                  <AlertCircle className="h-3 w-3 text-orange-500" />
-                  <span>Needs review</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Department Distribution & Project Utilization */}
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-primary" />
-                    Top Departments
-                  </CardTitle>
-                  <Button variant="ghost" size="sm" onClick={() => navigate('/employees')}>
-                    View All
-                    <ArrowUpRight className="h-3 w-3 ml-1" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {ceoStats.topDepartments.length > 0 ? (
-                    ceoStats.topDepartments.map((dept, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer">
-                        <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-                            <Users className="h-4 w-4 text-primary" />
-                          </div>
-                          <div>
-                            <p className="font-medium">{dept.name}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold">{dept.count}</span>
-                          <span className="text-xs text-muted-foreground">employees</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No department data available</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-primary" />
-                    Project Utilization
-                  </CardTitle>
-                  <Button variant="ghost" size="sm" onClick={() => navigate('/ceo/dashboard')}>
-                    View All
-                    <ArrowUpRight className="h-3 w-3 ml-1" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {ceoStats.projectUtilization.length > 0 ? (
-                    ceoStats.projectUtilization.slice(0, 5).map((project: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{project.project_name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {project.assigned_employees || 0} employees
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold">
-                            {Number(project.avg_allocation || 0).toFixed(0)}%
-                          </span>
-                          <div className="h-8 w-1 bg-primary rounded-full" />
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Building2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No project data available</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Quick Actions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Target className="h-5 w-5 text-primary" />
-                Quick Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-4">
-                <Button variant="outline" className="justify-start h-auto py-3 flex-col items-start hover:bg-primary/5" asChild>
-                  <Link to="/employees/new">
-                    <UserCheck className="h-5 w-5 mb-2" />
-                    <span className="font-semibold">Add Employee</span>
-                    <span className="text-xs text-muted-foreground">Onboard new team member</span>
-                  </Link>
-                </Button>
-                <Button variant="outline" className="justify-start h-auto py-3 flex-col items-start hover:bg-primary/5" asChild>
-                  <Link to="/projects/new">
-                    <Briefcase className="h-5 w-5 mb-2" />
-                    <span className="font-semibold">New Project</span>
-                    <span className="text-xs text-muted-foreground">Start a new initiative</span>
-                  </Link>
-                </Button>
-                <Button variant="outline" className="justify-start h-auto py-3 flex-col items-start hover:bg-primary/5" asChild>
-                  <Link to="/analytics">
-                    <BarChart3 className="h-5 w-5 mb-2" />
-                    <span className="font-semibold">View Analytics</span>
-                    <span className="text-xs text-muted-foreground">Deep dive into data</span>
-                  </Link>
-                </Button>
-                <Button variant="outline" className="justify-start h-auto py-3 flex-col items-start hover:bg-primary/5" asChild>
-                  <Link to="/employee-stats">
-                    <Activity className="h-5 w-5 mb-2" />
-                    <span className="font-semibold">Employee Stats</span>
-                    <span className="text-xs text-muted-foreground">Performance insights</span>
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Strategic Overview */}
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card className="bg-primary/5 border-primary/20">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Active Assignments</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-primary">{ceoStats.activeAssignments}</div>
-                <p className="text-xs text-muted-foreground mt-1">Current project assignments</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-success/5 border-success/20">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Analytics Dashboard</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">View comprehensive insights</span>
-                  <Button variant="ghost" size="sm" onClick={() => navigate('/analytics')}>
-                    <ArrowUpRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-warning/5 border-warning/20">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">CEO Staffing</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Manage project staffing</span>
-                  <Button variant="ghost" size="sm" onClick={() => navigate('/ceo/dashboard')}>
-                    <ArrowUpRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </AppLayout>
-    );
-  }
-
-  // Regular Dashboard View
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">{getTimeBasedGreeting()}, {getFirstName()}!</h1>
-            <p className="text-muted-foreground">Overview of your organization</p>
-          </div>
-          {/* Presence Status Selector */}
-          <div className="flex items-center gap-3">
-            <Circle className={`h-3 w-3 ${getPresenceColor(presenceStatus)} rounded-full`} fill="currentColor" />
-            <Select value={presenceStatus} onValueChange={handlePresenceChange}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="online">
-                  <div className="flex items-center gap-2">
-                    <Circle className="h-2 w-2 text-green-500" fill="currentColor" />
-                    Online
-                  </div>
-                </SelectItem>
-                <SelectItem value="away">
-                  <div className="flex items-center gap-2">
-                    <Circle className="h-2 w-2 text-red-500" fill="currentColor" />
-                    Away
-                  </div>
-                </SelectItem>
-                <SelectItem value="break">
-                  <div className="flex items-center gap-2">
-                    <Circle className="h-2 w-2 text-yellow-500" fill="currentColor" />
-                    Break
-                  </div>
-                </SelectItem>
-                <SelectItem value="out_of_office">
-                  <div className="flex items-center gap-2">
-                    <Circle className="h-2 w-2 text-blue-500" fill="currentColor" />
-                    Out of Office
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+      <div className="space-y-6 p-6">
+        {/* Welcome Section */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold mb-2">Welcome back, {getFirstName()}!</h1>
+          <p className="text-muted-foreground">
+            You are {presenceStatus === 'online' ? 'online' : presenceStatus.replace('_', ' ')}
+          </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="transition-all hover:shadow-medium">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Employees
-              </CardTitle>
-              <Users className="h-4 w-4 text-primary" />
+        {/* KPI Cards */}
+        <div className="grid gap-4 md:grid-cols-3">
+          {/* Timesheet Card */}
+          <Card className="shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Timesheet</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.totalEmployees}</div>
-              <p className="text-xs text-muted-foreground mt-1">Active employees</p>
+              <div className="text-4xl font-bold mb-4">{stats.timesheetHours}</div>
+              <Button 
+                onClick={handleSubmitTimesheet}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Submit
+              </Button>
             </CardContent>
           </Card>
 
-          <Card className="transition-all hover:shadow-medium">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Pending Approvals
-              </CardTitle>
-              <Clock className="h-4 w-4 text-primary" />
+          {/* Leave Balance Card */}
+          <Card className="shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Leave Balance</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.pendingApprovals}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {stats.pendingApprovals > 0 ? 'Awaiting review' : 'No pending items'}
-              </p>
+              <div className="text-4xl font-bold mb-4">{stats.leaveBalance}</div>
+              <Button 
+                onClick={handleApplyLeave}
+                variant="outline"
+                className="w-full border-blue-200 text-blue-600 hover:bg-blue-50"
+              >
+                Apply
+              </Button>
             </CardContent>
           </Card>
 
-          <Card className="transition-all hover:shadow-medium">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Leave Balance
-              </CardTitle>
-              <Calendar className="h-4 w-4 text-primary" />
+          {/* Next Holiday Card */}
+          <Card className="shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Next Holiday</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.leaveBalance}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {stats.leaveBalance > 0 ? 'Days remaining' : 'No leave balance'}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="transition-all hover:shadow-medium">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Avg. Attendance
-              </CardTitle>
-              <TrendingUp className="h-4 w-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.avgAttendance}%</div>
-              <p className="text-xs text-muted-foreground mt-1">Timesheet approval rate</p>
+              {stats.nextHoliday ? (
+                <>
+                  <div className="text-3xl font-bold mb-1">
+                    {formatHolidayDate(stats.nextHoliday.date)}
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-4">{stats.nextHoliday.name}</p>
+                </>
+              ) : (
+                <>
+                  <div className="text-3xl font-bold mb-1">No upcoming</div>
+                  <p className="text-sm text-muted-foreground mb-4">holiday</p>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
 
+        {/* My Projects and AI Assistant */}
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertCircle className="h-5 w-5 text-warning" />
-                Quick Info
-              </CardTitle>
+          {/* My Projects */}
+          <Card className="shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-lg font-semibold">My Projects</CardTitle>
+              <Link to="/projects" className="text-sm text-blue-600 hover:underline">
+                View All
+              </Link>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="text-center py-8 text-muted-foreground">
-                <p className="text-sm">
-                  {stats.pendingApprovals > 0 
-                    ? `You have ${stats.pendingApprovals} pending approval${stats.pendingApprovals > 1 ? 's' : ''}`
-                    : 'All caught up! No pending approvals'}
-                </p>
-              </div>
+            <CardContent>
+              {stats.projects.length > 0 ? (
+                <div className="space-y-3">
+                  {stats.projects.map((project) => (
+                    <div 
+                      key={project.id}
+                      className="p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/projects/${project.id}`)}
+                    >
+                      <p className="font-medium">{project.name}</p>
+                      <p className="text-sm text-muted-foreground">{project.category}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p className="text-sm">No projects assigned</p>
+                </div>
+              )}
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-success" />
-                System Status
-              </CardTitle>
+          {/* AI Assistant */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-semibold">AI Assistant</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="text-center py-8 text-muted-foreground">
-                <p className="text-sm">All systems operational</p>
-              </div>
+            <CardContent className="flex flex-col items-center justify-center py-8">
+              <Bot className="h-12 w-12 text-muted-foreground mb-4" />
+              <p className="text-sm text-muted-foreground mb-4 text-center">
+                Need help? Ask AI to assist you.
+              </p>
+              <Button 
+                onClick={() => navigate('/ai-assistant')}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Ask AI
+              </Button>
             </CardContent>
           </Card>
         </div>
-
-        {(userRole === 'hr' || userRole === 'director' || userRole === 'ceo') && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-4">
-                <Button variant="outline" className="justify-start" asChild>
-                  <Link to="/employees/new">
-                    <Users className="mr-2 h-4 w-4" />
-                    Add Employee
-                  </Link>
-                </Button>
-                <Button variant="outline" className="justify-start" asChild>
-                  <Link to="/employees/import">
-                    <Users className="mr-2 h-4 w-4" />
-                    Import CSV
-                  </Link>
-                </Button>
-                <Button variant="outline" className="justify-start" asChild>
-                  <Link to="/workflows/new">
-                    <Users className="mr-2 h-4 w-4" />
-                    Create Workflow
-                  </Link>
-                </Button>
-                <Button variant="outline" className="justify-start" asChild>
-                  <Link to="/policies">
-                    <Users className="mr-2 h-4 w-4" />
-                    Configure Policies
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </div>
     </AppLayout>
   );
