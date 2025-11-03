@@ -30,8 +30,11 @@ import migrationsRoutes from './routes/migrations.js';
 import aiRoutes from './routes/ai.js';
 import importsRoutes from './routes/imports.js';
 import checkInOutRoutes from './routes/check-in-out.js';
+import opalMiniAppsRoutes from './routes/opal-mini-apps.js';
+import attendanceRoutes from './routes/attendance.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications } from './services/cron.js';
+import { createAttendanceTables } from './utils/createAttendanceTables.js';
 
 dotenv.config();
 
@@ -87,6 +90,8 @@ app.use('/api/analytics', authenticateToken, analyticsRoutes);
 app.use('/api/employee-stats', authenticateToken, employeeStatsRoutes);
 app.use('/api/migrations', migrationsRoutes);
 app.use('/api/check-in-out', checkInOutRoutes);
+app.use('/api/v1/attendance', attendanceRoutes);
+app.use('/api/opal-mini-apps', authenticateToken, setTenantContext, opalMiniAppsRoutes);
 
 // Public discovery endpoint for AI tools (requires API key in header)
 app.get('/discovery', (req, res, next) => {
@@ -97,6 +102,28 @@ app.get('/discovery', (req, res, next) => {
 // Initialize database pool
 createPool().then(async () => {
   console.log('✅ Database connection pool created');
+  
+  // Ensure attendance tables exist
+  try {
+    const tableCheck = await dbQuery(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'attendance_events'
+      );
+    `);
+    
+    if (!tableCheck.rows[0]?.exists) {
+      console.log('⚠️  Attendance tables not found. Creating tables...');
+      await createAttendanceTables();
+      console.log('✅ Attendance tables created');
+    } else {
+      console.log('✅ Attendance tables found');
+    }
+  } catch (error) {
+    console.error('Error checking/creating attendance tables:', error);
+    console.warn('⚠️  Please manually run the migration: server/db/migrations/20251103_add_attendance_system.sql');
+  }
   // Ensure payments/subscriptions tables exist
   await dbQuery(`
     DO $$ BEGIN
@@ -176,6 +203,12 @@ createPool().then(async () => {
     );
   `);
   
+  // Error handling middleware (should be last)
+  app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  });
+
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
   });

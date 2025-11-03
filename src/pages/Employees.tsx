@@ -101,6 +101,51 @@ export default function Employees() {
     }
   };
 
+  const handleDownload = () => {
+    if (employees.length === 0) {
+      return;
+    }
+
+    // Prepare CSV data
+    const headers = ['Employee ID', 'First Name', 'Last Name', 'Email', 'Position', 'Department', 'Status', 'Join Date', 'Presence Status'];
+    const rows = employees.map(emp => [
+      emp.employee_id || '',
+      emp.profiles?.first_name || '',
+      emp.profiles?.last_name || '',
+      emp.profiles?.email || '',
+      emp.position || '',
+      emp.department || '',
+      emp.status || '',
+      emp.join_date ? new Date(emp.join_date).toLocaleDateString() : '',
+      emp.presence_status || ''
+    ]);
+
+    // Create CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => {
+        // Escape commas and quotes in cell values
+        const cellStr = String(cell || '');
+        if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+          return `"${cellStr.replace(/"/g, '""')}"`;
+        }
+        return cellStr;
+      }).join(','))
+    ].join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `employees_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -143,7 +188,7 @@ export default function Employees() {
                   className="pl-9"
                 />
               </div>
-              <Button variant="outline" size="icon">
+              <Button variant="outline" size="icon" onClick={handleDownload} disabled={employees.length === 0}>
                 <Download className="h-4 w-4" />
               </Button>
             </div>

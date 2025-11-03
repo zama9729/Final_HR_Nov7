@@ -17,6 +17,8 @@ import MyAppraisal from "./pages/MyAppraisal";
 import ShiftManagement from "./pages/ShiftManagement";
 import AIAssistantPage from "./pages/AIAssistantPage";
 import EmployeeImport from "./pages/EmployeeImport";
+import AttendanceUpload from "./pages/AttendanceUpload";
+import AttendanceUploadHistory from "./pages/AttendanceUploadHistory";
 import Workflows from "./pages/Workflows";
 import WorkflowEditor from "./pages/WorkflowEditor";
 import Timesheets from "./pages/Timesheets";
@@ -96,6 +98,8 @@ const App = () => (
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
             <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><ShiftManagement /></ProtectedRoute>} />
             <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
+            <Route path="/attendance/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><AttendanceUpload /></ProtectedRoute>} />
+            <Route path="/attendance/history" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo']}><AttendanceUploadHistory /></ProtectedRoute>} />
             
             {/* Redirects */}
             <Route path="/" element={<Navigate to="/dashboard" />} />

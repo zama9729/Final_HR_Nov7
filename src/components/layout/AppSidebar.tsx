@@ -1,11 +1,11 @@
 import { 
-  LayoutDashboard, 
-  Users, 
-  FileText, 
-  Calendar, 
-  Clock, 
-  Workflow, 
-  Settings, 
+  LayoutDashboard,
+  Users,
+  FileText,
+  Calendar,
+  Clock,
+  Workflow,
+  Settings,
   BarChart3,
   Building2,
   Network,
@@ -13,7 +13,9 @@ import {
   CalendarClock,
   Award,
   Bot,
-  CheckSquare
+  CheckSquare,
+  Upload,
+  History,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -42,6 +44,8 @@ const hrItems = [
   { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
   { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
   { title: "Shift Management", url: "/shifts", icon: CalendarClock, showBadge: false },
+  { title: "Attendance Upload", url: "/attendance/upload", icon: Upload, showBadge: false },
+  { title: "Upload History", url: "/attendance/history", icon: History, showBadge: false },
   { title: "Workflows", url: "/workflows", icon: Workflow, showBadge: false },
   { title: "Skills", url: "/profile/skills", icon: Award, showBadge: false },
   { title: "New Project", url: "/projects/new", icon: Building2, showBadge: false },

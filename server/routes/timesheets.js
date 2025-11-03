@@ -312,31 +312,72 @@ router.get('/', authenticateToken, async (req, res) => {
     const employee = empRes.rows[0] || {};
     const month = String(weekStart).slice(0,7); // YYYY-MM
     
+    // Get attendance entries for this week (even if timesheet doesn't exist yet)
+    const attendanceEntriesResult = await query(
+      `SELECT * FROM timesheet_entries 
+       WHERE employee_id = $1 
+         AND work_date >= $2 
+         AND work_date <= $3 
+         AND source IN ('api', 'upload')
+       ORDER BY work_date`,
+      [employeeId, weekStart, weekEnd]
+    );
+
     if (timesheetResult.rows.length === 0) {
-      // No timesheet exists yet, but return holidays so they show in the UI
-      const { holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, []);
+      // No timesheet exists yet, but return attendance entries and holidays so they show in the UI
+      const allEntries = attendanceEntriesResult.rows;
+      const { holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, allEntries);
+      
+      // Calculate total hours from attendance entries
+      const totalHours = allEntries.reduce((sum, e) => {
+        return sum + parseFloat(e.hours || 0);
+      }, 0);
+      
       return res.json({ 
-        entries: [], 
+        entries: allEntries, 
         holidayCalendar,
         // Return a minimal timesheet structure for the frontend
         week_start_date: weekStart,
         week_end_date: weekEnd,
-        total_hours: 0,
+        total_hours: totalHours,
         status: 'pending'
       });
     }
 
     const timesheet = timesheetResult.rows[0];
 
-    // Get entries
-    const entriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date', [timesheet.id]);
+    // Get entries - include both timesheet entries and attendance entries for this week
+    const timesheetEntriesResult = await query(
+      `SELECT * FROM timesheet_entries 
+       WHERE timesheet_id = $1 
+       ORDER BY work_date`,
+      [timesheet.id]
+    );
 
-    // Auto-persist holiday entries that don't exist in DB
-    await persistHolidayEntries(timesheet.id, orgId, employee, month, entriesResult.rows);
+    // Get attendance entries for this week that aren't linked to the timesheet yet
+    const attendanceEntriesForWeek = await query(
+      `SELECT * FROM timesheet_entries 
+       WHERE employee_id = $1 
+         AND work_date >= $2 
+         AND work_date <= $3 
+         AND source IN ('api', 'upload')
+         AND (timesheet_id IS NULL OR timesheet_id != $4)
+       ORDER BY work_date`,
+      [employeeId, weekStart, weekEnd, timesheet.id]
+    );
+
+    // Combine timesheet entries and attendance entries
+    const allEntries = [...timesheetEntriesResult.rows, ...attendanceEntriesForWeek.rows];
     
-    // Fetch entries again after persisting holidays
+    // Auto-persist holiday entries that don't exist in DB
+    await persistHolidayEntries(timesheet.id, orgId, employee, month, allEntries);
+    
+    // Fetch entries again after persisting holidays (only timesheet entries)
     const updatedEntriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date', [timesheet.id]);
-    const { rows: withHolidays, holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, updatedEntriesResult.rows);
+    
+    // Combine with attendance entries again
+    const finalEntries = [...updatedEntriesResult.rows, ...attendanceEntriesForWeek.rows];
+    const { rows: withHolidays, holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, finalEntries);
 
     res.json({ ...timesheet, entries: withHolidays, holidayCalendar });
   } catch (error) {

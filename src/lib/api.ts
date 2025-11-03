@@ -25,12 +25,16 @@ class ApiClient {
     }
   }
 
-  private async request(endpoint: string, options: RequestInit = {}) {
+  private async request(endpoint: string, options: RequestInit = {}, isFormData = false) {
     const url = `${this.baseURL}${endpoint}`;
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
       ...options.headers,
     };
+
+    // Don't set Content-Type for FormData, let browser set it with boundary
+    if (!isFormData) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (this._token) {
       headers['Authorization'] = `Bearer ${this._token}`;
@@ -472,6 +476,53 @@ class ApiClient {
 
   async getCheckInStatus() {
     return this.request('/api/check-in-out/status');
+  }
+
+  // Attendance methods
+  async punchAttendance(data: {
+    employee_id: string;
+    timestamp: string;
+    type: 'IN' | 'OUT';
+    device_id?: string;
+    metadata?: any;
+  }) {
+    return this.request('/api/v1/attendance/punch', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async uploadAttendance(file: File, mapping?: any) {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (mapping) {
+      formData.append('mapping', JSON.stringify(mapping));
+    }
+
+    return this.request('/api/v1/attendance/upload', {
+      method: 'POST',
+      body: formData,
+      headers: {} as HeadersInit, // Let browser set Content-Type with boundary
+    }, true);
+  }
+
+  async getUploadStatus(uploadId: string) {
+    return this.request(`/api/v1/attendance/upload/${uploadId}/status`);
+  }
+
+  async retryUpload(uploadId: string, force?: boolean) {
+    return this.request(`/api/v1/attendance/upload/${uploadId}/retry`, {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    });
+  }
+
+  async getEmployeeAttendanceTimesheet(employeeId: string, from: string, to: string) {
+    return this.request(`/api/v1/attendance/employee/${employeeId}/timesheet?from=${from}&to=${to}`);
+  }
+
+  async getAttendanceUploads() {
+    return this.request('/api/v1/attendance/uploads');
   }
 }
 
