@@ -1,10 +1,10 @@
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { Clock, Save, Check, X, Calendar as CalendarIcon, RotateCcw, Plus, Trash2 } from "lucide-react";
+import { Clock, Save, Check, X, Calendar as CalendarIcon, RotateCcw, Plus, Trash2, CheckCircle2, XCircle, Hourglass } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -13,6 +13,9 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DateRange } from "react-day-picker";
 
 interface TimesheetEntry {
   id?: string;
@@ -58,12 +61,58 @@ export default function Timesheets() {
   const [assignedProjects, setAssignedProjects] = useState<Array<{id: string; project_id: string; project_name: string}>>([]);
   const [reopenDialogOpen, setReopenDialogOpen] = useState(false);
   const [reopenComment, setReopenComment] = useState("");
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>({
+    from: startOfWeek(new Date(), { weekStartsOn: 1 }),
+    to: addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 6),
+  });
   const { user } = useAuth();
   const { toast } = useToast();
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
   }, [currentWeek]);
+
+  // Sync dateRange with currentWeek
+  useEffect(() => {
+    setDateRange({
+      from: currentWeek,
+      to: addDays(currentWeek, 6),
+    });
+  }, [currentWeek]);
+
+  // Handle date range selection from calendar
+  const handleDateRangeSelect = (range: DateRange | undefined) => {
+    if (range?.from) {
+      const weekStart = startOfWeek(range.from, { weekStartsOn: 1 });
+      const weekEnd = addDays(weekStart, 6);
+      
+      // If only 'from' is selected, auto-select the full week
+      if (!range.to) {
+        const fullWeekRange: DateRange = {
+          from: weekStart,
+          to: weekEnd,
+        };
+        setDateRange(fullWeekRange);
+        setCurrentWeek(weekStart);
+        setCalendarOpen(false);
+        return;
+      }
+      
+      // If range has both from and to, set currentWeek to start of week containing 'from'
+      setDateRange(range);
+      setCurrentWeek(weekStart);
+      
+      // If the range spans multiple weeks, ensure we show the week containing the start date
+      const toWeekStart = startOfWeek(range.to, { weekStartsOn: 1 });
+      if (toWeekStart.getTime() !== weekStart.getTime()) {
+        // If selection spans multiple weeks, use the week containing the start date
+        setCurrentWeek(weekStart);
+      }
+      
+      setCalendarOpen(false);
+    }
+  };
 
   const fetchEmployeeInfo = async () => {
     try {
@@ -878,33 +927,79 @@ export default function Timesheets() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">Timesheets</h1>
-          <p className="text-muted-foreground">Track your work hours for the week</p>
+      <div className="space-y-8 p-6">
+      {/* Header Section */}
+      <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-6 pb-6 border-b border-border/40">
+        <div className="space-y-1">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+            Timesheets
+          </h1>
+          <p className="text-muted-foreground text-lg">Track and manage your work hours for the week</p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           {timesheet?.status && (
-            <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+            <div className={`px-5 py-3 rounded-xl text-sm font-bold flex items-center gap-2.5 shadow-lg border-2 backdrop-blur-sm ${
               timesheet.status === "approved" 
-                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                ? "bg-gradient-to-r from-green-50 to-emerald-50 text-green-700 border-green-300 dark:from-green-950/40 dark:to-emerald-950/40 dark:text-green-400 dark:border-green-700"
                 : timesheet.status === "rejected"
-                ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                ? "bg-gradient-to-r from-red-50 to-rose-50 text-red-700 border-red-300 dark:from-red-950/40 dark:to-rose-950/40 dark:text-red-400 dark:border-red-700"
+                : "bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-700 border-amber-300 dark:from-amber-950/40 dark:to-yellow-950/40 dark:text-amber-400 dark:border-amber-700"
             }`}>
-              {timesheet.status === "approved" && <Check className="inline h-4 w-4 mr-1" />}
-              {timesheet.status === "rejected" && <X className="inline h-4 w-4 mr-1" />}
-              {timesheet.status === "pending" && <Clock className="inline h-4 w-4 mr-1" />}
-              {timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}
+              {timesheet.status === "approved" && (
+                <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
+              )}
+              {timesheet.status === "rejected" && (
+                <XCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
+              )}
+              {timesheet.status === "pending" && (
+                <Hourglass className="h-6 w-6 text-amber-600 dark:text-amber-400 animate-pulse" />
+              )}
+              <span className="text-base">
+                {timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}
+              </span>
             </div>
           )}
           
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap gap-2 items-center">
+            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-2 bg-background/50 backdrop-blur-sm"
+                >
+                  <CalendarIcon className="h-4 w-4" />
+                  {dateRange?.from ? (
+                    dateRange.to ? (
+                      <>
+                        {format(dateRange.from, "MMM dd")} - {format(dateRange.to, "MMM dd, yyyy")}
+                      </>
+                    ) : (
+                      format(dateRange.from, "MMM dd, yyyy")
+                    )
+                  ) : (
+                    "Pick a date range"
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  initialFocus
+                  mode="range"
+                  defaultMonth={dateRange?.from}
+                  selected={dateRange}
+                  onSelect={handleDateRangeSelect}
+                  numberOfMonths={2}
+                  weekStartsOn={1}
+                />
+              </PopoverContent>
+            </Popover>
+
             <Button
               variant="outline"
               size="sm"
               onClick={() => setCurrentWeek(startOfWeek(new Date(), { weekStartsOn: 1 }))}
+              className="border-2 bg-background/50 backdrop-blur-sm"
             >
               Today
             </Button>
@@ -913,6 +1008,7 @@ export default function Timesheets() {
               variant="outline"
               size="sm"
               onClick={() => setCurrentWeek(addDays(currentWeek, -7))}
+              className="border-2 bg-background/50 backdrop-blur-sm"
             >
               ← Prev
             </Button>
@@ -921,6 +1017,7 @@ export default function Timesheets() {
               variant="outline"
               size="sm"
               onClick={() => setCurrentWeek(addDays(currentWeek, 7))}
+              className="border-2 bg-background/50 backdrop-blur-sm"
             >
               Next →
             </Button>
@@ -928,260 +1025,358 @@ export default function Timesheets() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>
+      <Card className="border-2 shadow-lg bg-card/50 backdrop-blur-sm">
+        <CardHeader className="bg-gradient-to-r from-primary/5 via-primary/3 to-transparent border-b-2 pb-4">
+          <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <span className="text-xl font-bold text-foreground">
               Week of {format(currentWeek, "MMM dd")} - {format(addDays(currentWeek, 6), "MMM dd, yyyy")}
             </span>
-            <span className="text-2xl font-bold">
-              {(totalHours || 0).toFixed(1)} hrs
-            </span>
+            <div className="flex items-center gap-3 px-4 py-2 bg-primary/10 rounded-lg border border-primary/20">
+              <span className="text-sm font-medium text-muted-foreground">Total Hours:</span>
+              <span className="text-3xl font-bold text-primary">
+                {(totalHours || 0).toFixed(1)} hrs
+              </span>
+            </div>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
+                        <CardContent className="p-6">
+          <div className="overflow-x-auto rounded-lg">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b">
-                  <th className="text-left p-3 font-semibold w-32">Day</th>
-                  <th className="text-center p-3 font-semibold min-w-[100px]">Hours</th>
-                  <th className="text-center p-3 font-semibold min-w-[200px]">Project / Task</th>
-                  <th className="text-center p-3 font-semibold w-28">Total</th>
+                <tr className="border-b-2 bg-muted/30">
+                  <th className="text-left p-4 font-bold w-32 sticky left-0 bg-muted/50 backdrop-blur-sm z-10 border-r">Entry</th>
+                                    {weekDays.map((day) => {
+                    const dateStr = format(day, "yyyy-MM-dd");
+                    const hasShift = shifts[dateStr];
+                    const isHoliday = isDateHoliday(dateStr);
+                    return (
+                      <th key={dateStr} className={`text-center p-4 font-bold min-w-[180px] border-r last:border-r-0 ${isToday(day) ? "bg-primary/15 ring-2 ring-primary/30" : ""}`}>
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-base">{format(day, "EEE")}</span>
+                            {hasShift && (
+                              <CalendarIcon className="h-4 w-4 text-primary" />
+                            )}
+                          </div>
+                          <div className="text-sm font-medium text-muted-foreground">
+                            {format(day, "MMM dd")}
+                          </div>
+                          {isHoliday && (
+                            <Badge variant="outline" className="mt-1 text-xs bg-green-100 text-green-700 border-green-300 dark:bg-green-900/40 dark:text-green-400 dark:border-green-700">
+                              <CalendarIcon className="h-3 w-3 mr-1" />
+                              Holiday
+                            </Badge>
+                          )}
+                        </div>
+                      </th>
+                    );
+                  })}
+                  <th className="text-center p-4 font-bold w-28 bg-muted/30">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {/* Render entries for each day - multiple entries per day */}
-                {weekDays.map((day) => {
-                  const dateStr = format(day, "yyyy-MM-dd");
-                  const dayEntries = entries[dateStr] || [{ work_date: dateStr, hours: 0, description: "", project_id: null, project_type: null, is_holiday: false }];
-                  const hasShift = shifts[dateStr];
-                  const isHoliday = isDateHoliday(dateStr);
-                  
-                  // Calculate day total
-                  const dayTotal = dayEntries.reduce((sum, e) => sum + (Number(e.hours) || 0), 0);
-                  
-                  return dayEntries.map((entry, entryIndex) => {
-                    const isFirstEntry = entryIndex === 0;
-                    const isLastEntry = entryIndex === dayEntries.length - 1;
-                    
-                    // Determine current value for select
-                    let currentValue = '';
-                    if (isHoliday && entry.is_holiday) {
-                      currentValue = 'holiday';
-                    } else if (entry.project_id) {
-                      currentValue = `project-${entry.project_id}`;
-                    } else if (entry.project_type === 'non-billable') {
-                      currentValue = 'non-billable';
-                    } else if (entry.project_type === 'internal') {
-                      currentValue = 'internal';
-                    } else {
-                      currentValue = '';
-                    }
-                    
+                {/* Calculate max entries across all days */}
+                {(() => {
+                  const maxEntries = Math.max(...weekDays.map(day => {
+                    const dateStr = format(day, "yyyy-MM-dd");
+                    return (entries[dateStr] || []).length;
+                  }), 1);
+
+                  // Create rows for each entry index
+                  return Array.from({ length: maxEntries }, (_, entryIndex) => {
+                    // Check if this is the last row with any data
+                    const hasAnyData = weekDays.some(day => {
+                      const dateStr = format(day, "yyyy-MM-dd");
+                      const dayEntries = entries[dateStr] || [];
+                      return dayEntries[entryIndex];
+                    });
+
+                    if (!hasAnyData && entryIndex > 0) return null;
+
                     return (
-                      <tr key={`${dateStr}-${entryIndex}`} className="border-b">
-                        {/* Day label - only show on first entry per day */}
-                        {isFirstEntry && (
-                          <td rowSpan={dayEntries.length} className="p-3 font-medium align-top">
-                            <div className="flex items-center gap-1">
-                              {format(day, "EEE")}
-                              {hasShift && (
-                                <CalendarIcon className="h-3 w-3 text-primary" title="Scheduled shift" />
-                              )}
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {format(day, "MMM dd")}
-                            </div>
-                            {isHoliday && entry.is_holiday && (
-                              <Badge variant="outline" className="mt-2 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                                <CalendarIcon className="h-3 w-3 mr-1" />
-                                Holiday
-                              </Badge>
-                            )}
-                          </td>
-                        )}
-                        
-                        {/* Hours input */}
-                        <td className={`p-2 align-top ${isToday(day) ? "bg-primary/10" : ""} ${isHoliday && entry.is_holiday ? "bg-green-50 dark:bg-green-950/20" : ""}`}>
-                          {isFirstEntry && hasShift && (
-                            <Badge variant="outline" className="mb-1 text-xs">
-                              {shifts[dateStr].shift_type}
-                            </Badge>
-                          )}
-                          <Input
-                            type="number"
-                            step="0.5"
-                            min="0"
-                            max="24"
-                            value={entry.hours || ""}
-                            onChange={(e) => updateEntry(dateStr, entryIndex, "hours", e.target.value)}
-                            className="text-center"
-                            disabled={!isEditable || (isHoliday && entry.is_holiday)}
-                            placeholder="0"
-                          />
-                        </td>
-                        
-                        {/* Project/Task select */}
-                        <td className={`p-2 align-top ${isToday(day) ? "bg-primary/10" : ""} ${isHoliday && entry.is_holiday ? "bg-green-50 dark:bg-green-950/20" : ""}`}>
-                          {isHoliday && entry.is_holiday ? (
-                            <Input
-                              type="text"
-                              value="Holiday"
-                              disabled
-                              className="text-green-700 dark:text-green-400 font-medium"
-                              readOnly
-                            />
-                          ) : (
-                            <div className="space-y-1">
-                              <Select
-                                value={currentValue}
-                                onValueChange={(value) => {
-                                  if (value === 'holiday') return;
-                                  
-                                  if (value.startsWith('project-')) {
-                                    const projectId = value.replace('project-', '');
-                                    const project = assignedProjects.find(p => p.project_id === projectId);
-                                    updateEntry(dateStr, entryIndex, "project_id", projectId);
-                                    updateEntry(dateStr, entryIndex, "project_type", null);
-                                    updateEntry(dateStr, entryIndex, "description", project?.project_name || '');
-                                  } else if (value === 'non-billable') {
-                                    updateEntry(dateStr, entryIndex, "project_id", null);
-                                    updateEntry(dateStr, entryIndex, "project_type", 'non-billable');
-                                    updateEntry(dateStr, entryIndex, "description", 'Non-billable project');
-                                  } else if (value === 'internal') {
-                                    updateEntry(dateStr, entryIndex, "project_id", null);
-                                    updateEntry(dateStr, entryIndex, "project_type", 'internal');
-                                    updateEntry(dateStr, entryIndex, "description", 'Internal project');
-                                  } else {
-                                    updateEntry(dateStr, entryIndex, "project_id", null);
-                                    updateEntry(dateStr, entryIndex, "project_type", null);
-                                    updateEntry(dateStr, entryIndex, "description", '');
-                                  }
-                                }}
-                                disabled={!isEditable}
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Select project" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {assignedProjects.length > 0 && (
-                                    <>
-                                      {assignedProjects.map((proj) => (
-                                        <SelectItem key={proj.project_id} value={`project-${proj.project_id}`}>
-                                          {proj.project_name}
-                                        </SelectItem>
-                                      ))}
-                                      <div className="border-t my-1" />
-                                    </>
-                                  )}
-                                  <SelectItem value="non-billable">Non-billable project</SelectItem>
-                                  <SelectItem value="internal">Internal project</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              
-                              {/* Add/Remove buttons */}
-                              {isEditable && (
-                                <div className="flex items-center gap-1">
-                                  {isLastEntry && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 w-7 p-0"
-                                      onClick={() => addEntry(dateStr)}
-                                      title="Add another entry for this day"
-                                    >
-                                      <Plus className="h-3.5 w-3.5" />
-                                    </Button>
-                                  )}
-                                  {dayEntries.length > 1 && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 w-7 p-0 text-red-600 hover:text-red-700"
-                                      onClick={() => removeEntry(dateStr, entryIndex)}
-                                      title="Remove this entry"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        
-                        {/* Total column - only show on first entry per day */}
-                        {isFirstEntry && (
-                          <td rowSpan={dayEntries.length} className="p-3 text-center font-bold text-lg align-top">
-                            {dayTotal.toFixed(1)}
-                          </td>
-                        )}
-                      </tr>
+                      <React.Fragment key={`entry-row-${entryIndex}`}>
+                                                 {/* Hours row */}
+                         <tr className="border-b hover:bg-muted/20 transition-colors">
+                           <td className="p-3 font-bold sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
+                             {entryIndex === 0 ? "Hours" : ""}
+                           </td>
+                          {weekDays.map((day) => {
+                            const dateStr = format(day, "yyyy-MM-dd");
+                            const dayEntries = entries[dateStr] || [{ work_date: dateStr, hours: 0, description: "", project_id: null, project_type: null, is_holiday: false }];
+                            const entry = dayEntries[entryIndex];
+                            const isHoliday = isDateHoliday(dateStr);
+                            const hasShift = shifts[dateStr];
+
+                            if (!entry && entryIndex === 0) {
+                              // Create empty entry for first row if missing
+                              return (
+                                                               <td key={dateStr} className={`p-3 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                   {hasShift && (
+                                     <Badge variant="outline" className="mb-2 text-xs border-2">
+                                       {shifts[dateStr].shift_type}
+                                     </Badge>
+                                   )}
+                                                                     <Input
+                                     type="number"
+                                     step="0.5"
+                                     min="0"
+                                     max="24"
+                                     value=""
+                                     onChange={(e) => {
+                                       // Add new entry
+                                       addEntry(dateStr);
+                                       // Update the new entry
+                                       setTimeout(() => {
+                                         const newEntries = entries[dateStr] || [];
+                                         if (newEntries.length > 0) {
+                                           updateEntry(dateStr, newEntries.length - 1, "hours", e.target.value);
+                                         }
+                                       }, 0);
+                                     }}
+                                     className="text-center border-2 transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
+                                     disabled={!isEditable || (isHoliday && entry?.is_holiday)}
+                                     placeholder="0"
+                                   />
+                                </td>
+                              );
+                            }
+
+                                                         if (!entry) {
+                               return (
+                                 <td key={dateStr} className={`p-3 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}></td>
+                               );
+                             }
+
+                             return (
+                                                               <td key={dateStr} className={`p-3 align-top border-r ${isToday(day) ? "bg-primary/5" : ""} ${isHoliday && entry.is_holiday ? "bg-green-50/50 dark:bg-green-950/20" : ""}`}>
+                                 {entryIndex === 0 && hasShift && (
+                                   <Badge variant="outline" className="mb-2 text-xs border-2">
+                                     {shifts[dateStr].shift_type}
+                                   </Badge>
+                                 )}
+                                                                 <Input
+                                   type="number"
+                                   step="0.5"
+                                   min="0"
+                                   max="24"
+                                   value={entry.hours || ""}
+                                   onChange={(e) => updateEntry(dateStr, entryIndex, "hours", e.target.value)}
+                                   className="text-center border-2 transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
+                                   disabled={!isEditable || (isHoliday && entry.is_holiday)}
+                                   placeholder="0"
+                                 />
+                              </td>
+                            );
+                          })}
+                                                     <td className="p-3 text-center font-bold border-l bg-muted/20">
+                             {entryIndex === 0 ? (totalHours || 0).toFixed(1) : ""}
+                           </td>
+                        </tr>
+
+                                                 {/* Project/Task row */}
+                         <tr className="border-b hover:bg-muted/20 transition-colors">
+                           <td className="p-3 font-bold sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
+                             {entryIndex === 0 ? "Project / Task" : ""}
+                           </td>
+                          {weekDays.map((day) => {
+                            const dateStr = format(day, "yyyy-MM-dd");
+                            const dayEntries = entries[dateStr] || [{ work_date: dateStr, hours: 0, description: "", project_id: null, project_type: null, is_holiday: false }];
+                            const entry = dayEntries[entryIndex];
+                            const isHoliday = isDateHoliday(dateStr);
+                            const isLastEntry = entryIndex === (dayEntries.length - 1);
+
+                                                         if (!entry) {
+                               return (
+                                 <td key={dateStr} className={`p-3 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}></td>
+                               );
+                             }
+
+                            // Determine current value for select
+                            let currentValue = '';
+                            if (isHoliday && entry.is_holiday) {
+                              currentValue = 'holiday';
+                            } else if (entry.project_id) {
+                              currentValue = `project-${entry.project_id}`;
+                            } else if (entry.project_type === 'non-billable') {
+                              currentValue = 'non-billable';
+                            } else if (entry.project_type === 'internal') {
+                              currentValue = 'internal';
+                            } else {
+                              currentValue = '';
+                            }
+
+                            return (
+                              <td key={dateStr} className={`p-2 align-top ${isToday(day) ? "bg-primary/10" : ""} ${isHoliday && entry.is_holiday ? "bg-green-50 dark:bg-green-950/20" : ""}`}>
+                                                                 {isHoliday && entry.is_holiday ? (
+                                   <Input
+                                     type="text"
+                                     value="Holiday"
+                                     disabled
+                                     className="text-green-700 dark:text-green-400 font-medium border-2 border-green-200 dark:border-green-800"
+                                     readOnly
+                                   />
+                                 ) : (
+                                   <div className="space-y-2">
+                                     <Select
+                                       value={currentValue}
+                                       onValueChange={(value) => {
+                                        if (value === 'holiday') return;
+
+                                        if (value.startsWith('project-')) {
+                                          const projectId = value.replace('project-', '');
+                                          const project = assignedProjects.find(p => p.project_id === projectId);
+                                          updateEntry(dateStr, entryIndex, "project_id", projectId);
+                                          updateEntry(dateStr, entryIndex, "project_type", null);
+                                          updateEntry(dateStr, entryIndex, "description", project?.project_name || '');
+                                        } else if (value === 'non-billable') {
+                                          updateEntry(dateStr, entryIndex, "project_id", null);
+                                          updateEntry(dateStr, entryIndex, "project_type", 'non-billable');
+                                          updateEntry(dateStr, entryIndex, "description", 'Non-billable project');
+                                        } else if (value === 'internal') {
+                                          updateEntry(dateStr, entryIndex, "project_id", null);
+                                          updateEntry(dateStr, entryIndex, "project_type", 'internal');
+                                          updateEntry(dateStr, entryIndex, "description", 'Internal project');
+                                        } else {
+                                          updateEntry(dateStr, entryIndex, "project_id", null);
+                                          updateEntry(dateStr, entryIndex, "project_type", null);
+                                          updateEntry(dateStr, entryIndex, "description", '');
+                                        }
+                                      }}
+                                                                             disabled={!isEditable}
+                                     >
+                                       <SelectTrigger className="w-full border-2 transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
+                                         <SelectValue placeholder="Select project" />
+                                       </SelectTrigger>
+                                      <SelectContent>
+                                        {assignedProjects.length > 0 && (
+                                          <>
+                                            {assignedProjects.map((proj) => (
+                                              <SelectItem key={proj.project_id} value={`project-${proj.project_id}`}>
+                                                {proj.project_name}
+                                              </SelectItem>
+                                            ))}
+                                            <div className="border-t my-1" />
+                                          </>
+                                        )}
+                                        <SelectItem value="non-billable">Non-billable project</SelectItem>
+                                        <SelectItem value="internal">Internal project</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+
+                                    {/* Add/Remove buttons */}
+                                    {isEditable && (
+                                      <div className="flex items-center gap-1">
+                                        {isLastEntry && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 w-7 p-0"
+                                            onClick={() => addEntry(dateStr)}
+                                            title="Add another entry for this day"
+                                          >
+                                            <Plus className="h-3.5 w-3.5" />
+                                          </Button>
+                                        )}
+                                        {dayEntries.length > 1 && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 w-7 p-0 text-red-600 hover:text-red-700"
+                                            onClick={() => removeEntry(dateStr, entryIndex)}
+                                            title="Remove this entry"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </Button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                                                     <td className="p-3 border-l bg-muted/20"></td>
+                        </tr>
+                      </React.Fragment>
                     );
                   });
-                })}
-                
-                {/* Grand total row */}
-                <tr className="border-t-2 font-bold">
-                  <td colSpan={3} className="p-3 text-right">Total Hours:</td>
-                  <td className="p-3 text-center text-lg">
-                    {(totalHours || 0).toFixed(1)}
-                  </td>
-                </tr>
+                })()}
+
+                                 {/* Day totals row */}
+                 <tr className="border-t-2 bg-muted/20 font-bold">
+                   <td className="p-4 text-right sticky left-0 bg-muted/50 backdrop-blur-sm z-10 border-r font-bold">Day Total</td>
+                   {weekDays.map((day) => {
+                     const dateStr = format(day, "yyyy-MM-dd");
+                     const dayEntries = entries[dateStr] || [];
+                     const dayTotal = dayEntries.reduce((sum, e) => sum + (Number(e.hours) || 0), 0);
+                     return (
+                       <td key={dateStr} className="p-4 text-center text-xl border-r bg-background/50">
+                         {dayTotal.toFixed(1)}
+                       </td>
+                     );
+                   })}
+                   <td className="p-4 text-center text-xl bg-primary/10 font-bold text-primary">
+                     {(totalHours || 0).toFixed(1)}
+                   </td>
+                 </tr>
               </tbody>
             </table>
           </div>
 
-          {isEditable && (
-            <div className="flex justify-end gap-2 mt-6">
-              <Button onClick={saveTimesheet} disabled={loading}>
-                <Save className="h-4 w-4 mr-2" />
-                {loading ? "Saving..." : "Save Timesheet"}
-              </Button>
-            </div>
-          )}
+                     {isEditable && (
+             <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-border/40">
+               <Button 
+                 onClick={saveTimesheet} 
+                 disabled={loading}
+                 className="px-6 py-2.5 text-base font-semibold border-2"
+                 size="lg"
+               >
+                 <Save className="h-5 w-5 mr-2" />
+                 {loading ? "Saving..." : "Save Timesheet"}
+               </Button>
+             </div>
+           )}
 
-          {timesheet?.status === "rejected" && (
-            <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg space-y-3">
-              <div>
-                <p className="font-semibold text-destructive">Rejection Reason:</p>
-                <p className="text-sm mt-1">{timesheet.rejection_reason}</p>
-              </div>
-              <Button onClick={handleReopen} variant="outline" size="sm">
-                <RotateCcw className="h-4 w-4 mr-2" />
-                Reopen for Editing
-              </Button>
-            </div>
-          )}
+                     {timesheet?.status === "rejected" && (
+             <div className="mt-6 p-5 bg-destructive/10 border-2 border-destructive/30 rounded-xl space-y-4 backdrop-blur-sm">
+               <div>
+                 <p className="font-bold text-lg text-destructive mb-2">Rejection Reason:</p>
+                 <p className="text-base mt-1 text-destructive/90">{timesheet.rejection_reason}</p>
+               </div>
+               <Button onClick={handleReopen} variant="outline" size="sm" className="border-2">
+                 <RotateCcw className="h-4 w-4 mr-2" />
+                 Reopen for Editing
+               </Button>
+             </div>
+           )}
 
-          {timesheet?.status === "approved" && (
-            <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg space-y-3">
-              <div>
-                <p className="font-semibold text-blue-900 dark:text-blue-200">Timesheet Approved</p>
-                <p className="text-sm mt-1 text-blue-800 dark:text-blue-300">This timesheet has been approved by your manager.</p>
-              </div>
-              <Button onClick={handleReopen} variant="outline" size="sm">
-                <RotateCcw className="h-4 w-4 mr-2" />
-                Request to Edit
-              </Button>
-            </div>
-          )}
+           {timesheet?.status === "approved" && (
+             <div className="mt-6 p-5 bg-blue-50 dark:bg-blue-950/30 border-2 border-blue-300 dark:border-blue-700 rounded-xl space-y-4 backdrop-blur-sm">
+               <div>
+                 <p className="font-bold text-lg text-blue-900 dark:text-blue-200">Timesheet Approved</p>
+                 <p className="text-base mt-1 text-blue-800 dark:text-blue-300">This timesheet has been approved by your manager.</p>
+               </div>
+               <Button onClick={handleReopen} variant="outline" size="sm" className="border-2">
+                 <RotateCcw className="h-4 w-4 mr-2" />
+                 Request to Edit
+               </Button>
+             </div>
+           )}
         </CardContent>
       </Card>
 
       {/* Holiday Calendar */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <CalendarIcon className="h-5 w-5" />
+      <Card className="border-2 shadow-lg bg-card/50 backdrop-blur-sm">
+        <CardHeader className="bg-gradient-to-r from-primary/5 via-primary/3 to-transparent border-b-2 pb-4">
+          <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <span className="flex items-center gap-3 text-xl font-bold">
+              <CalendarIcon className="h-6 w-6 text-primary" />
               Holiday Calendar ({new Date().getFullYear()})
             </span>
-            <Select value={selectedState || 'all'} onValueChange={(v) => setSelectedState(v)}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select State" />
-              </SelectTrigger>
+                        <Select value={selectedState || 'all'} onValueChange={(v) => setSelectedState(v)}>
+               <SelectTrigger className="w-[200px] border-2 transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
+                 <SelectValue placeholder="Select State" />
+               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All States</SelectItem>
                 {availableStates.map(state => (
@@ -1198,19 +1393,19 @@ export default function Timesheets() {
                 const stateHolidays = holidayCalendar.holidaysByState[state] || [];
                 if (stateHolidays.length === 0) return null;
                 return (
-                  <div key={state} className="border rounded-lg p-4">
-                    <h3 className="font-semibold text-lg mb-3">{state} ({stateHolidays.length} holidays)</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {stateHolidays.map((holiday: any) => {
-                        const holidayDate = new Date(holiday.date);
-                        const isInCurrentWeek = weekDays.some(d => isSameDay(d, holidayDate));
-                        return (
-                          <div
-                            key={holiday.id}
-                            className={`p-2 rounded border text-sm ${
-                              isInCurrentWeek ? 'bg-primary/10 border-primary' : ''
-                            }`}
-                          >
+                                                   <div key={state} className="border-2 rounded-xl p-5 bg-card/30 backdrop-blur-sm">
+                     <h3 className="font-bold text-xl mb-4 text-foreground">{state} ({stateHolidays.length} holidays)</h3>
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                       {stateHolidays.map((holiday: any) => {
+                         const holidayDate = new Date(holiday.date);
+                         const isInCurrentWeek = weekDays.some(d => isSameDay(d, holidayDate));
+                         return (
+                           <div
+                             key={holiday.id}
+                             className={`p-3 rounded-lg border-2 text-sm transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] ${
+                               isInCurrentWeek ? 'bg-primary/15 border-primary ring-2 ring-primary/30' : 'border-border/50'
+                             }`}
+                           >
                             <div className="font-medium">{holiday.name}</div>
                             <div className="text-muted-foreground text-xs mt-1">
                               {format(holidayDate, 'MMM dd, yyyy (EEE)')}
