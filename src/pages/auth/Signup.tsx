@@ -13,6 +13,7 @@ export default function Signup() {
   const [formData, setFormData] = useState({
     orgName: "",
     domain: "",
+    subdomain: "",
     adminName: "",
     adminEmail: "",
     password: "",
@@ -53,6 +54,7 @@ export default function Signup() {
         {
           orgName: formData.orgName,
           domain: formData.domain,
+          subdomain: formData.subdomain,
           companySize: formData.companySize,
           industry: formData.industry,
           timezone: formData.timezone
@@ -114,6 +116,27 @@ export default function Signup() {
                   required
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="subdomain">
+                Payroll Subdomain <span className="text-muted-foreground text-xs">(Optional)</span>
+              </Label>
+              <Input
+                id="subdomain"
+                placeholder="acme"
+                value={formData.subdomain}
+                onChange={(e) => {
+                  const value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+                  setFormData({ ...formData, subdomain: value });
+                }}
+                pattern="[a-z0-9-]{3,32}"
+                maxLength={32}
+              />
+              <p className="text-xs text-muted-foreground">
+                Used for Payroll access. 3-32 lowercase letters, numbers, or hyphens only.
+                If empty, you can still access Payroll but without a custom subdomain.
+              </p>
             </div>
 
             <div className="grid md:grid-cols-2 gap-4">

@@ -76,10 +76,28 @@ const upload = multer({
 // Create organization (public, for signup)
 router.post('/', async (req, res) => {
   try {
-    const { name, domain, companySize, industry, timezone } = req.body;
+    const { name, domain, companySize, industry, timezone, subdomain, adminEmail } = req.body;
 
     if (!name || !domain) {
       return res.status(400).json({ error: 'Name and domain are required' });
+    }
+
+    // Validate payroll subdomain (optional but recommended)
+    let payrollSubdomain = (subdomain || '').toString().toLowerCase().trim();
+    if (payrollSubdomain) {
+      const subRegex = /^[a-z0-9-]{3,32}$/;
+      if (!subRegex.test(payrollSubdomain)) {
+        return res.status(400).json({ error: 'Invalid payroll subdomain format' });
+      }
+      // Ensure unique
+      await query(`
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS subdomain VARCHAR(64);
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_orgs_subdomain ON organizations(subdomain);
+      `);
+      const dup = await query(`SELECT 1 FROM organizations WHERE subdomain = $1`, [payrollSubdomain]);
+      if (dup.rows.length > 0) {
+        return res.status(400).json({ error: 'Payroll subdomain already taken' });
+      }
     }
 
     // Check if slug column exists
@@ -101,23 +119,50 @@ router.post('/', async (req, res) => {
     let result;
     if (hasSlugColumn) {
       result = await query(
-        `INSERT INTO organizations (name, domain, slug, company_size, industry, timezone)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, name, slug, domain, company_size, industry, timezone`,
-        [name, domain, slug, companySize || null, industry || null, timezone || 'Asia/Kolkata']
+        `INSERT INTO organizations (name, domain, slug, company_size, industry, timezone, subdomain)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, name, slug, domain, company_size, industry, timezone, subdomain`,
+        [name, domain, slug, companySize || null, industry || null, timezone || 'Asia/Kolkata', payrollSubdomain || null]
       );
     } else {
       result = await query(
-        `INSERT INTO organizations (name, domain, company_size, industry, timezone)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, domain, company_size, industry, timezone`,
-        [name, domain, companySize || null, industry || null, timezone || 'Asia/Kolkata']
+        `INSERT INTO organizations (name, domain, company_size, industry, timezone, subdomain)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, domain, company_size, industry, timezone, subdomain`,
+        [name, domain, companySize || null, industry || null, timezone || 'Asia/Kolkata', payrollSubdomain || null]
       );
       // Add slug as null for backward compatibility
       result.rows[0].slug = null;
     }
 
-    res.status(201).json(result.rows[0]);
+    const org = result.rows[0];
+
+    // Call Payroll provisioning API if subdomain provided
+    if (org.subdomain) {
+      try {
+        const provisionUrl = process.env.PAYROLL_PROVISION_URL;
+        const provisionToken = process.env.PAYROLL_PROVISION_TOKEN;
+        if (provisionUrl && provisionToken) {
+          await fetch(provisionUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${provisionToken}`
+            },
+            body: JSON.stringify({
+              org_id: org.id,
+              org_name: org.name,
+              subdomain: org.subdomain,
+              admin_email: (adminEmail || '').toString().toLowerCase().trim()
+            })
+          });
+        }
+      } catch (e) {
+        console.warn('⚠️  Payroll provisioning failed:', e);
+      }
+    }
+
+    res.status(201).json(org);
   } catch (error) {
     console.error('Error creating organization:', error);
     if (error.code === '23505') { // Unique violation

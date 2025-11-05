@@ -40,17 +40,32 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this._token}`;
     }
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Request failed' }));
+        throw new Error(error.error || `HTTP error! status: ${response.status}`);
+      }
+
+      return response.json();
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Request timeout. Please check your connection.');
+      }
+      throw error;
     }
-
-    return response.json();
   }
 
   // Auth methods
@@ -61,6 +76,7 @@ class ApiClient {
     lastName: string;
     orgName: string;
     domain: string;
+    subdomain?: string;
     companySize?: string;
     industry?: string;
     timezone?: string;
@@ -931,6 +947,11 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  // Payroll SSO
+  async getPayrollSso() {
+    return this.request('/api/payroll/sso');
   }
 }
 

@@ -38,6 +38,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 // Navigation items for different roles
 const hrItems = [
@@ -66,6 +67,7 @@ const hrItems = [
   { title: "Analytics", url: "/analytics", icon: BarChart3, showBadge: false },
   { title: "Employee Stats", url: "/employee-stats", icon: Users, showBadge: false },
   { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
+  { title: "Payroll", url: "/payroll", icon: DollarSign, showBadge: false, isExternal: true, sso: true },
 ];
 
 const managerItems = [
@@ -80,6 +82,7 @@ const managerItems = [
   { title: "Project Calendar", url: "/calendar", icon: CalendarClock, showBadge: false },
   { title: "Appraisals", url: "/appraisals", icon: Award, showBadge: false },
   { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
+  { title: "Payroll", url: "/payroll", icon: DollarSign, showBadge: false, isExternal: true, sso: true },
 ];
 
 const employeeItems = [
@@ -93,18 +96,27 @@ const employeeItems = [
   { title: "Org Chart", url: "/org-chart", icon: Network, showBadge: false },
   { title: "My Appraisal", url: "/my-appraisal", icon: Award, showBadge: false },
   { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
+  { title: "Payroll", url: "/payroll", icon: DollarSign, showBadge: false, isExternal: true, sso: true },
 ];
 
 export function AppSidebar() {
   const { user, userRole } = useAuth();
+  const { toast } = useToast();
   const [pendingCounts, setPendingCounts] = useState<{ timesheets: number; leaves: number }>({
     timesheets: 0,
     leaves: 0,
   });
   const [organization, setOrganization] = useState<{ name: string; logo_url: string | null } | null>(null);
   const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const [payrollIntegrationEnabled, setPayrollIntegrationEnabled] = useState(true); // Default to true
 
   useEffect(() => {
+    // Check if Payroll integration is enabled (default to true)
+    // Set to false by setting VITE_PAYROLL_INTEGRATION_ENABLED=false
+    const enabled = import.meta.env.VITE_PAYROLL_INTEGRATION_ENABLED !== 'false';
+    setPayrollIntegrationEnabled(enabled);
+    console.log('Payroll integration enabled:', enabled);
+    
     if (user) {
       fetchOrganization();
       fetchIsSuperadmin();
@@ -179,7 +191,7 @@ export function AppSidebar() {
       case 'accountant':
         return [
           { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, showBadge: false },
-          { title: "Payroll", url: "/payroll", icon: DollarSign, showBadge: false },
+          { title: "Payroll", url: "/payroll", icon: DollarSign, showBadge: false, isExternal: true, sso: true },
           { title: "Attendance Upload", url: "/attendance/upload", icon: Upload, showBadge: false },
           { title: "Upload History", url: "/attendance/history", icon: History, showBadge: false },
         ];
@@ -254,6 +266,55 @@ export function AppSidebar() {
               {navigationItems && navigationItems.length > 0 ? (
                 navigationItems.map((item) => {
                   const badgeCount = item.showBadge ? getBadgeCount(item.url) : 0;
+                  const isPayrollSso = (item as any).sso === true;
+                  
+                  // Skip Payroll if integration is not enabled
+                  if (isPayrollSso && !payrollIntegrationEnabled) {
+                    return null;
+                  }
+                  
+                  // Handle Payroll SSO separately
+                  if (isPayrollSso) {
+                    return (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton asChild>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const result = await api.getPayrollSso();
+                                if (result.redirectUrl) {
+                                  window.open(result.redirectUrl, '_blank');
+                                } else {
+                                  toast({
+                                    title: "Error",
+                                    description: "Failed to generate Payroll SSO link",
+                                    variant: "destructive",
+                                  });
+                                }
+                              } catch (error: any) {
+                                console.error('Payroll SSO error:', error);
+                                toast({
+                                  title: "Error",
+                                  description: error.message || "Failed to access Payroll",
+                                  variant: "destructive",
+                                });
+                              }
+                            }}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors text-slate-300 hover:bg-slate-800 hover:text-white w-full text-left"
+                          >
+                            <item.icon className="h-4 w-4 shrink-0" />
+                            <span className="flex-1 text-sm">{item.title}</span>
+                            {badgeCount > 0 && (
+                              <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-medium text-white shrink-0">
+                                {badgeCount > 9 ? '9+' : badgeCount}
+                              </span>
+                            )}
+                          </button>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  }
+                  
                   return (
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton asChild>

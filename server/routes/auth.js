@@ -18,12 +18,23 @@ router.post('/signup', async (req, res) => {
       domain,
       companySize,
       industry,
-      timezone
+      timezone,
+      subdomain
     } = req.body;
 
     // Validate input
     if (!email || !password || !firstName || !orgName || !domain) {
       return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Validate subdomain if provided
+    let payrollSubdomain = null;
+    if (subdomain) {
+      payrollSubdomain = subdomain.toString().toLowerCase().trim();
+      const subdomainRegex = /^[a-z0-9-]{3,32}$/;
+      if (!subdomainRegex.test(payrollSubdomain)) {
+        return res.status(400).json({ error: 'Invalid subdomain format. Must be 3-32 lowercase alphanumeric or hyphens.' });
+      }
     }
 
     // Check if user exists
@@ -89,6 +100,33 @@ router.post('/signup', async (req, res) => {
     await query('BEGIN');
 
     try {
+      // Ensure subdomain column exists
+      try {
+        await query(`
+          ALTER TABLE organizations 
+          ADD COLUMN IF NOT EXISTS subdomain VARCHAR(64)
+        `);
+        await query(`
+          CREATE UNIQUE INDEX IF NOT EXISTS ux_orgs_subdomain 
+          ON organizations(subdomain) 
+          WHERE subdomain IS NOT NULL
+        `);
+      } catch (error) {
+        // Column might already exist, continue
+        console.log('Subdomain column check:', error.message);
+      }
+
+      // Check if subdomain is already taken
+      if (payrollSubdomain) {
+        const dupCheck = await query(
+          `SELECT id FROM organizations WHERE subdomain = $1`,
+          [payrollSubdomain]
+        );
+        if (dupCheck.rows.length > 0) {
+          return res.status(400).json({ error: 'Subdomain already taken' });
+        }
+      }
+
       // Check if slug column exists
       const columnCheck = await query(`
         SELECT column_name 
@@ -104,21 +142,47 @@ router.post('/signup', async (req, res) => {
         const baseSlug = generateSlug(orgName);
         const slug = await generateUniqueSlug(baseSlug);
         
-        // Create organization with slug
+        // Create organization with slug and subdomain
         orgResult = await query(
-          `INSERT INTO organizations (name, domain, slug, company_size, industry, timezone)
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-          [orgName, domain, slug, companySize || null, industry || null, timezone || 'Asia/Kolkata']
+          `INSERT INTO organizations (name, domain, slug, subdomain, company_size, industry, timezone)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+          [orgName, domain, slug, payrollSubdomain, companySize || null, industry || null, timezone || 'Asia/Kolkata']
         );
       } else {
-        // Create organization without slug
+        // Create organization without slug but with subdomain
         orgResult = await query(
-          `INSERT INTO organizations (name, domain, company_size, industry, timezone)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-          [orgName, domain, companySize || null, industry || null, timezone || 'Asia/Kolkata']
+          `INSERT INTO organizations (name, domain, subdomain, company_size, industry, timezone)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [orgName, domain, payrollSubdomain, companySize || null, industry || null, timezone || 'Asia/Kolkata']
         );
       }
       const orgId = orgResult.rows[0].id;
+
+      // Provision Payroll tenant if subdomain provided
+      if (payrollSubdomain) {
+        try {
+          const provisionUrl = process.env.PAYROLL_PROVISION_URL || 'http://localhost:4000/api/provision/tenant';
+          const provisionToken = process.env.PAYROLL_PROVISION_TOKEN || 'your-shared-provisioning-secret';
+          
+          await fetch(provisionUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${provisionToken}`
+            },
+            body: JSON.stringify({
+              org_id: orgId.toString(),
+              org_name: orgName,
+              subdomain: payrollSubdomain,
+              admin_email: email
+            })
+          });
+          console.log(`✅ Payroll tenant provisioned for ${orgName} (${payrollSubdomain})`);
+        } catch (provisionError) {
+          console.error('⚠️  Failed to provision Payroll tenant:', provisionError);
+          // Continue with signup even if provisioning fails
+        }
+      }
 
       // Generate user ID (UUID)
       const userIdResult = await query('SELECT gen_random_uuid() as id');

@@ -14,6 +14,7 @@ export type AuthUser = {
 export interface OrganizationData {
   orgName: string;
   domain: string;
+  subdomain?: string;
   companySize?: string;
   industry?: string;
   timezone?: string;
@@ -79,8 +80,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUserRole(profile.role);
       setSession({ token: api.token || '' });
       setIsLoading(false);
-    } catch (error) {
-      // Token invalid, clear it
+    } catch (error: any) {
+      // Token invalid or API error, clear it
+      console.error('Failed to load user from token:', error);
       api.setToken(null);
       setUser(null);
       setSession(null);
@@ -120,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         lastName,
         orgName: orgData.orgName,
         domain: orgData.domain,
+        subdomain: orgData.subdomain,
         companySize: orgData.companySize,
         industry: orgData.industry,
         timezone: orgData.timezone,

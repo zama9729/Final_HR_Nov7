@@ -58,7 +58,8 @@ export function ProtectedRoute({
     }
   }, [user, userRole, isLoading, location.pathname, requireOnboarding]);
 
-  if (isLoading || checkingOnboarding || onboardingStatus.loading) {
+  // Show initial loading only while auth state is resolving
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-pulse">Loading...</div>
@@ -66,8 +67,18 @@ export function ProtectedRoute({
     );
   }
 
+  // If no authenticated user, redirect immediately to login
   if (!user) {
     return <Navigate to="/auth/login" replace />;
+  }
+
+  // For authenticated users, wait for any onboarding checks (if applicable)
+  if (checkingOnboarding || onboardingStatus.loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-pulse">Loading...</div>
+      </div>
+    );
   }
 
   // Check if user has required role

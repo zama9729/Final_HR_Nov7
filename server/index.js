@@ -41,6 +41,7 @@ import offboardingRoutes from './routes/offboarding.js';
 import rehireRoutes from './routes/rehire.js';
 import policiesRoutes from './routes/policies.js';
 import usersRoutes from './routes/users.js';
+import payrollSsoRoutes from './routes/payroll-sso.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules } from './services/cron.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
@@ -116,6 +117,8 @@ app.use('/api/orgs', organizationsRoutes);
 app.use('/api/policies', authenticateToken, setTenantContext, policiesRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/promotion', authenticateToken, setTenantContext, promotionsRoutes);
+// Payroll SSO integration (separate from payroll routes)
+app.use('/api/payroll/sso', payrollSsoRoutes);
 
 // Public discovery endpoint for AI tools (requires API key in header)
 app.get('/discovery', (req, res, next) => {
