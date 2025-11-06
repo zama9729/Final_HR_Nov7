@@ -28,3 +28,7 @@ node_modules/
 .env
 *.env
 supabase/config.toml
+
+# Temporary backup and cloned repos
+payroll-app-backup/
+payroll-repo-temp/
