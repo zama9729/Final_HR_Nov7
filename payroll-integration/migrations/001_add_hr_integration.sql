@@ -81,3 +81,4 @@ CREATE TRIGGER IF NOT EXISTS update_payroll_orgs_updated_at
 -- SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'users' AND column_name IN ('hr_user_id', 'org_id', 'payroll_role');
 -- SELECT table_name FROM information_schema.tables WHERE table_name IN ('payroll_user_ext', 'payroll_orgs');
 
+

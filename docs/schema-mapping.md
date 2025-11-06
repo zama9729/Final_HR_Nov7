@@ -131,3 +131,4 @@ CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_payroll_user_ext_hr_user_id ON payroll_user_ext(hr_user_id);
 ```
 
+

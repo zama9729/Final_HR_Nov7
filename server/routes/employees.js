@@ -423,6 +423,19 @@ router.post('/', authenticateToken, async (req, res) => {
 
       await query('COMMIT');
 
+      // Sync employee to Payroll system using sync service
+      const { syncUserToPayrollWithRetry } = await import('../services/payroll-sync.js');
+      
+      // This will automatically create the user in Payroll with correct role mapping
+      await syncUserToPayrollWithRetry({
+        hr_user_id: userId,
+        email: email.toLowerCase().trim(),
+        first_name: firstName,
+        last_name: lastName,
+        org_id: tenantId,
+        role: role || 'employee'
+      }, 3); // Retry up to 3 times
+
       res.status(201).json({
         success: true,
         email,

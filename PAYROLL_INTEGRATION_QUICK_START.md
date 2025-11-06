@@ -158,3 +158,4 @@ VITE_API_URL=http://localhost:4000
 - Automatically log in to Payroll
 - Access Payroll features based on your role
 
+

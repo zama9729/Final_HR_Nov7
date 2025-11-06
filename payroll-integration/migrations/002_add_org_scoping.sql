@@ -43,3 +43,4 @@ CREATE INDEX IF NOT EXISTS idx_payroll_runs_org_status ON payroll_runs(org_id, s
 -- UPDATE payroll_runs SET org_id = (SELECT org_id FROM users WHERE users.id = payroll_runs.created_by) WHERE org_id IS NULL;
 -- Similar updates for other tables
 
+

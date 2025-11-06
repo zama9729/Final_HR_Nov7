@@ -31,3 +31,4 @@ CREATE TRIGGER update_opal_mini_apps_updated_at
 
 
 
+

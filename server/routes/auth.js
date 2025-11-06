@@ -158,37 +158,11 @@ router.post('/signup', async (req, res) => {
       }
       const orgId = orgResult.rows[0].id;
 
-      // Provision Payroll tenant if subdomain provided
-      if (payrollSubdomain) {
-        try {
-          const provisionUrl = process.env.PAYROLL_PROVISION_URL || 'http://localhost:4000/api/provision/tenant';
-          const provisionToken = process.env.PAYROLL_PROVISION_TOKEN || 'your-shared-provisioning-secret';
-          
-          await fetch(provisionUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${provisionToken}`
-            },
-            body: JSON.stringify({
-              org_id: orgId.toString(),
-              org_name: orgName,
-              subdomain: payrollSubdomain,
-              admin_email: email
-            })
-          });
-          console.log(`✅ Payroll tenant provisioned for ${orgName} (${payrollSubdomain})`);
-        } catch (provisionError) {
-          console.error('⚠️  Failed to provision Payroll tenant:', provisionError);
-          // Continue with signup even if provisioning fails
-        }
-      }
-
       // Generate user ID (UUID)
       const userIdResult = await query('SELECT gen_random_uuid() as id');
       const userId = userIdResult.rows[0].id;
 
-      // Create profile
+      // Create profile FIRST (before Payroll sync)
       await query(
         `INSERT INTO profiles (id, email, first_name, last_name, tenant_id)
          VALUES ($1, $2, $3, $4, $5)`,
@@ -210,6 +184,49 @@ router.post('/signup', async (req, res) => {
       );
 
       await query('COMMIT');
+
+      // Provision Payroll tenant and create admin user simultaneously AFTER HR profile is created
+      // This ensures the user exists in HR before syncing to Payroll
+      if (payrollSubdomain) {
+        try {
+          const { syncOrganizationToPayroll, syncUserToPayroll } = await import('../services/payroll-sync.js');
+          
+          console.log(`🔄 Syncing organization to Payroll: ${orgName} (${payrollSubdomain})`);
+          
+          // Provision organization in Payroll
+          const orgSyncResult = await syncOrganizationToPayroll({
+            org_id: orgId.toString(),
+            org_name: orgName,
+            subdomain: payrollSubdomain,
+            admin_email: email
+          });
+          
+          if (orgSyncResult.success === false) {
+            console.error(`⚠️  Organization sync failed: ${orgSyncResult.error}`);
+          }
+          
+          // Create admin user in Payroll with retry
+          console.log(`🔄 Syncing admin user to Payroll: ${email} (${userId})`);
+          const userSyncResult = await syncUserToPayroll({
+            hr_user_id: userId.toString(),
+            email: email,
+            first_name: firstName,
+            last_name: lastName,
+            org_id: orgId.toString(),
+            role: 'admin' // Admin role for organization signup
+          });
+          
+          if (userSyncResult.success === false) {
+            console.error(`⚠️  User sync failed: ${userSyncResult.error}`);
+          } else {
+            console.log(`✅ Successfully synced organization and admin user to Payroll`);
+          }
+        } catch (syncError) {
+          // Log error but don't fail signup - user can still be created later
+          console.error('⚠️  Payroll sync error during signup:', syncError);
+          console.error('   User will need to be manually synced or will be created on first SSO login');
+        }
+      }
 
       // Generate JWT token with org_id
       const token = jwt.sign(

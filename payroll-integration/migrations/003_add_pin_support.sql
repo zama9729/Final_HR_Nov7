@@ -13,3 +13,4 @@ CREATE INDEX IF NOT EXISTS idx_users_pin_set ON users(pin_set_at) WHERE pin_hash
 COMMENT ON COLUMN users.pin_hash IS 'BCrypt hash of 6-digit PIN for Payroll authentication';
 COMMENT ON COLUMN users.pin_set_at IS 'Timestamp when PIN was set';
 
+
