@@ -1,0 +1,45 @@
+# This file is now correct.
+# The 'version' attribute is removed.
+# NOTE: Payroll now uses the unified HR database (hr_suite)
+# The main docker-compose.yml in the root directory handles the database
+# This file is kept for reference but payroll_db service is removed
+services:
+  # Payroll database is now in the main docker-compose.yml as 'postgres' service
+  # Both HR and Payroll use the same database: hr_suite
+  # Removed payroll_db service - use main docker-compose.yml instead
+
+  payroll_redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  payroll_api:
+    build:
+      context: ./server # Assumes your server's Dockerfile is in the 'server' folder
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    depends_on:
+      - payroll_redis
+    environment:
+      # Unified database: Payroll now uses HR database (hr_suite)
+      # Use main docker-compose.yml to start the postgres service
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/hr_suite"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: hr_suite
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      REDIS_URL: "redis://payroll_redis:6379"
+      PORT: 4000
+    command: npm run dev
+    # Mount source code for development - changes will be picked up by tsx watch
+    volumes:
+      - ./server/src:/usr/src/app/src
+      - ./server/tsconfig.json:/usr/src/app/tsconfig.json
+
+volumes:
+  # postgres_data removed - using main docker-compose.yml postgres service
+  redis_data:
