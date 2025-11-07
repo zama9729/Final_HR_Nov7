@@ -44,3 +44,5 @@ CREATE INDEX IF NOT EXISTS idx_payroll_runs_org_status ON payroll_runs(org_id, s
 -- Similar updates for other tables
 
 
+
+

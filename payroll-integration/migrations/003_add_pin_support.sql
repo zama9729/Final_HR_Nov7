@@ -14,3 +14,5 @@ COMMENT ON COLUMN users.pin_hash IS 'BCrypt hash of 6-digit PIN for Payroll auth
 COMMENT ON COLUMN users.pin_set_at IS 'Timestamp when PIN was set';
 
 
+
+

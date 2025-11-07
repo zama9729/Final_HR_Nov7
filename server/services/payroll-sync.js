@@ -38,6 +38,10 @@ function mapHrToPayrollRole(hrRole) {
  * @param {string} userData.last_name - Last name
  * @param {string} userData.org_id - Organization ID
  * @param {string} userData.role - HR role (ceo, hr, admin, director, manager, employee)
+ * @param {string} [userData.employee_id] - Employee ID from HR
+ * @param {string} [userData.department] - Department from HR
+ * @param {string} [userData.position] - Position/Designation from HR
+ * @param {string} [userData.join_date] - Join date from HR (YYYY-MM-DD format)
  * @returns {Promise<Object>} Payroll sync result
  */
 async function syncUserToPayroll(userData) {
@@ -47,7 +51,11 @@ async function syncUserToPayroll(userData) {
     first_name,
     last_name,
     org_id,
-    role
+    role,
+    employee_id,
+    department,
+    position,
+    join_date
   } = userData;
 
   if (!hr_user_id || !email || !org_id) {
@@ -69,7 +77,11 @@ async function syncUserToPayroll(userData) {
         first_name: first_name || '',
         last_name: last_name || '',
         org_id,
-        payroll_role: payrollRole
+        payroll_role: payrollRole,
+        employee_id: employee_id || null,
+        department: department || null,
+        designation: position || null, // HR uses 'position', Payroll uses 'designation'
+        date_of_joining: join_date || null
       })
       // Note: Timeout handled by fetch implementation or can be added with AbortController
     });

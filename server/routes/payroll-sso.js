@@ -81,6 +81,8 @@ router.get('/', authenticateToken, async (req, res) => {
       sub: userId.toString(), // HR user ID
       org_id: profile.org_id.toString(),
       email: profile.email,
+      first_name: profile.first_name || '',
+      last_name: profile.last_name || '',
       name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || profile.email,
       roles: hrRoles,
       payroll_role: payrollRole

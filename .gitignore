@@ -29,6 +29,10 @@ node_modules/
 *.env
 supabase/config.toml
 
+# RSA keys for SSO
+.keys/
+*.pem
+
 # Temporary backup and cloned repos
 payroll-app-backup/
 payroll-repo-temp/

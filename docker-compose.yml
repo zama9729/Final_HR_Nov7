@@ -103,7 +103,12 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=4000
-      - DATABASE_URL=postgresql://postgres:mysecretpassword@payroll-db:5432/payroll
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/hr_suite
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=hr_suite
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
       - REDIS_URL=redis://payroll-redis:6379
       - JWT_SECRET=your-super-secret-jwt-key-change-in-production
       - HR_JWT_SECRET=${PAYROLL_JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
@@ -111,35 +116,22 @@ services:
       - PAYROLL_FRONTEND_URL=http://localhost:3002
       - PAYROLL_BASE_DOMAIN=${PAYROLL_BASE_DOMAIN:-localhost:3002}
       - HR_BASE_URL=http://localhost:3001
+      - HR_API_URL=http://api:3001
       - PAYROLL_PROVISION_TOKEN=${PAYROLL_PROVISION_TOKEN:-your-shared-provisioning-secret}
       - HR_PAYROLL_JWT_PUBLIC_KEY=${HR_PAYROLL_JWT_PUBLIC_KEY}
       - DISABLE_PAYROLL_LOCAL_AUTH=${DISABLE_PAYROLL_LOCAL_AUTH:-true}
     depends_on:
-      - payroll-db
-      - payroll-redis
+      postgres:
+        condition: service_healthy
+      payroll-redis:
+        condition: service_started
     volumes:
       - ./payroll-app/server/src:/usr/src/app/src
       - ./payroll-app/server/tsconfig.json:/usr/src/app/tsconfig.json
     restart: unless-stopped
 
-  payroll-db:
-    image: postgres:16-alpine
-    ports:
-      - "5433:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: mysecretpassword
-      POSTGRES_DB: payroll
-    volumes:
-      - payroll_data:/var/lib/postgresql/data
-      - ./payroll-app/server/migrations:/docker-entrypoint-initdb.d
-      - ./payroll-integration/migrations:/docker-entrypoint-initdb.d-integration
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
+  # Payroll now uses the same database as HR (unified database)
+  # Removed separate payroll-db - both systems use 'postgres' service above
 
   payroll-redis:
     image: redis:7-alpine
@@ -183,5 +175,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  payroll_data:
   payroll_redis_data:
