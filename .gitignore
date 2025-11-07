@@ -1,0 +1,38 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Ignore node_modules and environment configs
+node_modules/
+.env
+*.env
+supabase/config.toml
+
+# RSA keys for SSO
+.keys/
+*.pem
+
+# Temporary backup and cloned repos
+payroll-app-backup/
+payroll-repo-temp/

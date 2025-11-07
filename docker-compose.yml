@@ -1,0 +1,178 @@
+# Docker Compose configuration for HR Suite
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: hr-suite-postgres
+    environment:
+      POSTGRES_DB: hr_suite
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/db/full-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: hr-suite-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Backend API Server
+  api:
+    build:
+      context: ./server
+      dockerfile: ../Dockerfile.api
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=hr_suite
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - PAYROLL_JWT_SECRET=${PAYROLL_JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - PAYROLL_API_URL=${PAYROLL_API_URL:-http://localhost:4000}
+      - PAYROLL_BASE_URL=${PAYROLL_BASE_URL:-http://localhost:3002}
+      - PAYROLL_BASE_DOMAIN=${PAYROLL_BASE_DOMAIN:-localhost:3002}
+      - PAYROLL_INTEGRATION_ENABLED=${PAYROLL_INTEGRATION_ENABLED:-true}
+      - PAYROLL_PROVISION_URL=${PAYROLL_PROVISION_URL:-http://localhost:4000/api/provision/tenant}
+      - PAYROLL_PROVISION_TOKEN=${PAYROLL_PROVISION_TOKEN:-your-shared-provisioning-secret}
+      - HR_PAYROLL_JWT_PRIVATE_KEY=${HR_PAYROLL_JWT_PRIVATE_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - FRONTEND_URL=http://localhost:3000
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - AI_TOOL_API_KEY=${AI_TOOL_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+  # Frontend application (development)
+  app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:8080"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:3001
+    depends_on:
+      - api
+    restart: unless-stopped
+    profiles:
+      - dev
+
+  # Payroll Application
+  payroll-api:
+    build:
+      context: ./payroll-app/server
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/hr_suite
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=hr_suite
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - REDIS_URL=redis://payroll-redis:6379
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - HR_JWT_SECRET=${PAYROLL_JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - PAYROLL_BASE_URL=http://localhost:4000
+      - PAYROLL_FRONTEND_URL=http://localhost:3002
+      - PAYROLL_BASE_DOMAIN=${PAYROLL_BASE_DOMAIN:-localhost:3002}
+      - HR_BASE_URL=http://localhost:3001
+      - HR_API_URL=http://api:3001
+      - PAYROLL_PROVISION_TOKEN=${PAYROLL_PROVISION_TOKEN:-your-shared-provisioning-secret}
+      - HR_PAYROLL_JWT_PUBLIC_KEY=${HR_PAYROLL_JWT_PUBLIC_KEY}
+      - DISABLE_PAYROLL_LOCAL_AUTH=${DISABLE_PAYROLL_LOCAL_AUTH:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      payroll-redis:
+        condition: service_started
+    volumes:
+      - ./payroll-app/server/src:/usr/src/app/src
+      - ./payroll-app/server/tsconfig.json:/usr/src/app/tsconfig.json
+    restart: unless-stopped
+
+  # Payroll now uses the same database as HR (unified database)
+  # Removed separate payroll-db - both systems use 'postgres' service above
+
+  payroll-redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - payroll_redis_data:/data
+    restart: unless-stopped
+
+  payroll-app:
+    build:
+      context: ./payroll-app
+      dockerfile: ../Dockerfile.dev
+    ports:
+      - "3002:8080"
+    volumes:
+      - ./payroll-app:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:4000
+      - VITE_PAYROLL_BASE_URL=http://localhost:3002
+    depends_on:
+      - payroll-api
+    restart: unless-stopped
+
+  # Frontend application (production build)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:3001
+    environment:
+      - VITE_API_URL=http://localhost:3001
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  payroll_redis_data:
