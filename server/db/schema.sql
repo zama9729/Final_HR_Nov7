@@ -270,9 +270,10 @@ CREATE TABLE tax_regimes (
   cess_percentage NUMERIC(5,2) DEFAULT 4,
   is_default BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (COALESCE(tenant_id::text, 'global'), financial_year, regime_type)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_tax_regimes_tenant_year ON tax_regimes(tenant_id, financial_year);
+CREATE UNIQUE INDEX ux_tax_regimes_scope_year
+  ON tax_regimes(COALESCE(tenant_id::text, 'global'), financial_year, regime_type);
 

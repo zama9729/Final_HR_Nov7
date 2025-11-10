@@ -665,6 +665,42 @@ CREATE TABLE IF NOT EXISTS payroll_components (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_payroll_components_tenant_name
   ON payroll_components(tenant_id, LOWER(name));
 
+CREATE TABLE IF NOT EXISTS payroll_runs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+  pay_period_start DATE NOT NULL,
+  pay_period_end DATE NOT NULL,
+  pay_date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'processing', 'completed', 'rolled_back', 'cancelled')),
+  total_employees INTEGER DEFAULT 0,
+  total_amount_cents BIGINT DEFAULT 0,
+  created_by UUID REFERENCES profiles(id),
+  processed_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS payroll_run_employees (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  payroll_run_id UUID REFERENCES payroll_runs(id) ON DELETE CASCADE NOT NULL,
+  employee_id UUID REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
+  hours DECIMAL(10,2) DEFAULT 0,
+  rate_cents BIGINT DEFAULT 0,
+  gross_pay_cents BIGINT DEFAULT 0,
+  deductions_cents BIGINT DEFAULT 0,
+  net_pay_cents BIGINT DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processed', 'excluded', 'exception')),
+  exception_reason TEXT,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_runs_tenant ON payroll_runs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(status);
+CREATE INDEX IF NOT EXISTS idx_payroll_run_employees_run ON payroll_run_employees(payroll_run_id);
+CREATE INDEX IF NOT EXISTS idx_payroll_run_employees_employee ON payroll_run_employees(employee_id);
+
 CREATE TABLE IF NOT EXISTS employee_salary_structure (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
@@ -761,11 +797,12 @@ CREATE TABLE IF NOT EXISTS tax_regimes (
   cess_percentage NUMERIC(5,2) DEFAULT 4,
   is_default BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (COALESCE(tenant_id::text, 'global'), financial_year, regime_type)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_tax_regimes_tenant_year ON tax_regimes(tenant_id, financial_year);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_tax_regimes_scope_year
+  ON tax_regimes(COALESCE(tenant_id::text, 'global'), financial_year, regime_type);
 
 DO $$
 BEGIN
