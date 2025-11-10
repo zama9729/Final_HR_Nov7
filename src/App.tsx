@@ -11,6 +11,8 @@ import Login from "./pages/auth/Login";
 import FirstTimeLogin from "./pages/auth/FirstTimeLogin";
 import FirstLoginWithToken from "./pages/auth/FirstLoginWithToken";
 import Signup from "./pages/auth/Signup";
+import ForgotPassword from "./pages/auth/ForgotPassword";
+import ResetPassword from "./pages/auth/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Employees from "./pages/Employees";
 import Appraisals from "./pages/Appraisals";
@@ -70,6 +72,8 @@ const App = () => (
             {/* Public routes */}
             <Route path="/auth/login" element={<PublicRoute><Login /></PublicRoute>} />
             <Route path="/auth/signup" element={<PublicRoute><Signup /></PublicRoute>} />
+            <Route path="/auth/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
+            <Route path="/auth/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
             <Route path="/auth/first-time-login" element={<FirstTimeLogin />} />
             <Route path="/auth/first-login" element={<FirstLoginWithToken />} />
             <Route path="/setup-password" element={<SetupPassword />} />

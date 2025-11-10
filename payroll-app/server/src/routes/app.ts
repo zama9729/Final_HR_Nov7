@@ -24,8 +24,8 @@ console.log("[ROUTES] POST /api/employees-test registered (test route)");
 // This function is defined once and used by the auth middleware
 // Payroll uses 'users' table, not 'profiles' table
 async function getUserTenant(userId: string) {
-  const user = await query<{ org_id: string; email: string }>(
-    "SELECT org_id as tenant_id, email FROM users WHERE id = $1",
+  const user = await query<{ org_id: string; email: string; hr_user_id: string | null }>(
+    "SELECT org_id as tenant_id, email, hr_user_id FROM users WHERE id = $1",
     [userId]
   );
   if (!user.rows[0]) {
@@ -106,8 +106,9 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
              ON CONFLICT (id) DO UPDATE SET
                email = COALESCE(EXCLUDED.email, users.email),
                org_id = COALESCE(EXCLUDED.org_id, users.org_id),
-               payroll_role = COALESCE(EXCLUDED.payroll_role, users.payroll_role)
-             RETURNING org_id as tenant_id, email`,
+               payroll_role = COALESCE(EXCLUDED.payroll_role, users.payroll_role),
+               hr_user_id = COALESCE(EXCLUDED.hr_user_id, users.hr_user_id)
+             RETURNING org_id as tenant_id, email, hr_user_id`,
             [userId, email, orgId, payrollRole, hrUserId]
           );
           
@@ -134,6 +135,7 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
       (req as any).tenantId = profile.tenant_id;
       (req as any).userEmail = profile.email;
+      (req as any).hrUserId = profile.hr_user_id || null;
 
       next();
     } catch (e: any) {
@@ -196,7 +198,8 @@ appRouter.get("/profile", requireAuth, async (req, res) => {
            ON CONFLICT (id) DO UPDATE SET
              email = COALESCE(EXCLUDED.email, users.email),
              org_id = COALESCE(EXCLUDED.org_id, users.org_id),
-             payroll_role = COALESCE(EXCLUDED.payroll_role, users.payroll_role)
+             payroll_role = COALESCE(EXCLUDED.payroll_role, users.payroll_role),
+             hr_user_id = COALESCE(EXCLUDED.hr_user_id, users.hr_user_id)
            RETURNING id, org_id as tenant_id, email,
              COALESCE(first_name || ' ' || last_name, email) as full_name,
              first_name, last_name, payroll_role, hr_user_id`,
@@ -1758,7 +1761,7 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
     }
 
     // Verify user is actually HR role in HR system
-    const hrUserId = userResult.rows[0].hr_user_id;
+    let hrUserId: string | null = userResult.rows[0].hr_user_id || null;
     if (hrUserId) {
       try {
         // In Docker, use service name 'api' instead of 'localhost'
@@ -1805,6 +1808,10 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    if (!hrUserId && (req as any).hrUserId) {
+      hrUserId = (req as any).hrUserId as string;
+    }
+
     const result = await query(
       `INSERT INTO compensation_structures (
         tenant_id, employee_id, effective_from, ctc, basic_salary, 
@@ -1826,7 +1833,7 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         bonus || 0,
         pf_contribution || 0,
         esi_contribution || 0,
-        userId // created_by
+        hrUserId || null // created_by (HR profile ID); allow null if not mapped
       ]
     );
     

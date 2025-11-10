@@ -120,6 +120,68 @@ app.use('/api/promotion', authenticateToken, setTenantContext, promotionsRoutes)
 // Payroll SSO integration (separate from payroll routes)
 app.use('/api/payroll/sso', payrollSsoRoutes);
 
+// Tenant info endpoint for payroll service compatibility
+app.get('/api/tenant', authenticateToken, async (req, res) => {
+  try {
+    const profileResult = await dbQuery(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [req.user.id]
+    );
+
+    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    const tenantId = profileResult.rows[0].tenant_id;
+
+    let orgQuery = `
+      SELECT id, name, domain, logo_url, company_size, industry, timezone
+      FROM organizations
+      WHERE id = $1
+    `;
+
+    // Attempt to include slug and subdomain if columns exist
+    try {
+      const columnCheck = await dbQuery(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'organizations'
+          AND column_name IN ('slug', 'subdomain')
+      `);
+
+      const columns = columnCheck.rows.map(row => row.column_name);
+
+      if (columns.includes('slug') || columns.includes('subdomain')) {
+        const extraColumns = [
+          columns.includes('slug') ? 'slug' : null,
+          columns.includes('subdomain') ? 'subdomain' : null,
+        ].filter(Boolean).join(', ');
+
+        if (extraColumns) {
+          orgQuery = `
+            SELECT id, name, domain, logo_url, company_size, industry, timezone, ${extraColumns}
+            FROM organizations
+            WHERE id = $1
+          `;
+        }
+      }
+    } catch (error) {
+      // Ignore column detection errors and fall back to base columns
+    }
+
+    const orgResult = await dbQuery(orgQuery, [tenantId]);
+
+    if (orgResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    res.json(orgResult.rows[0]);
+  } catch (error) {
+    console.error('Error fetching tenant info:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch tenant info' });
+  }
+});
+
 // Public discovery endpoint for AI tools (requires API key in header)
 app.get('/discovery', (req, res, next) => {
   req.url = '/api/ai/discovery';

@@ -47,6 +47,19 @@ CREATE TABLE user_auth (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
+-- Password reset tokens
+CREATE TABLE password_reset_tokens (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  token TEXT NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  used_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id);
+
 -- User roles table
 CREATE TABLE user_roles (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -435,6 +448,24 @@ CREATE TABLE ai_suggestion_logs (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   computed_by TEXT
 );
+
+-- Ensure updated_at trigger helper exists before creating triggers
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+    WHERE proname = 'update_updated_at_column'
+  ) THEN
+    CREATE OR REPLACE FUNCTION update_updated_at_column()
+    RETURNS TRIGGER AS $FUNC$
+    BEGIN
+      NEW.updated_at = now();
+      RETURN NEW;
+    END;
+    $FUNC$ LANGUAGE plpgsql;
+  END IF;
+END;
+$$;
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_assignments_updated_at') THEN

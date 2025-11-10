@@ -2,9 +2,44 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { query, queryWithOrg } from '../db/pool.js';
+import { query } from '../db/pool.js';
+import { sendPasswordResetEmail } from '../services/email.js';
 
 const router = express.Router();
+
+const BYPASS_PASSWORD_RESET_EMAIL = process.env.BYPASS_PASSWORD_RESET_EMAIL === 'true';
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+let passwordResetTableEnsured = false;
+
+async function ensurePasswordResetTable() {
+  if (passwordResetTableEnsured) {
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+      token TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_password_reset_tokens_token
+    ON password_reset_tokens(token)
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user
+    ON password_reset_tokens(user_id)
+  `);
+
+  passwordResetTableEnsured = true;
+}
 
 // Register/Signup
 router.post('/signup', async (req, res) => {
@@ -447,6 +482,220 @@ router.post('/first-login', async (req, res) => {
   } catch (error) {
     console.error('First login error:', error);
     res.status(500).json({ error: error.message || 'Failed to activate account' });
+  }
+});
+
+// Forgot password
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    await ensurePasswordResetTable();
+
+    const userResult = await query(
+      `SELECT id, first_name, last_name
+       FROM profiles
+       WHERE email = $1`,
+      [normalizedEmail]
+    );
+
+    // Always return success to avoid account enumeration
+    if (userResult.rows.length === 0) {
+      return res.json({ success: true, message: 'If the account exists, a reset email has been sent.' });
+    }
+
+    const user = userResult.rows[0];
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 60 minutes
+
+    await query('BEGIN');
+
+    try {
+      await query(
+        'DELETE FROM password_reset_tokens WHERE user_id = $1',
+        [user.id]
+      );
+
+      await query(
+        `INSERT INTO password_reset_tokens (user_id, token, expires_at)
+         VALUES ($1, $2, $3)`,
+        [user.id, token, expiresAt]
+      );
+
+      await query('COMMIT');
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
+    }
+
+    const responsePayload = {
+      success: true,
+      message: 'If the account exists, a reset email has been sent.'
+    };
+
+    if (BYPASS_PASSWORD_RESET_EMAIL) {
+      responsePayload.debugToken = token;
+      responsePayload.resetUrl = `${APP_BASE_URL}/auth/reset-password?token=${token}`;
+      console.warn('🔐 Password reset email bypass enabled. Token:', token);
+    } else {
+      try {
+        await sendPasswordResetEmail(normalizedEmail, token, {
+          firstName: user.first_name,
+          lastName: user.last_name
+        });
+      } catch (emailError) {
+        console.error('Failed to send password reset email:', emailError);
+        // Continue - we already created the token
+      }
+    }
+
+    res.json(responsePayload);
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: error.message || 'Failed to process password reset request' });
+  }
+});
+
+// Get password reset info
+router.get('/reset-password', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (typeof token !== 'string' || !token) {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    await ensurePasswordResetTable();
+
+    const tokenResult = await query(
+      `SELECT prt.id, prt.expires_at, prt.used_at,
+              p.security_question_1, p.security_question_2
+       FROM password_reset_tokens prt
+       JOIN profiles p ON p.id = prt.user_id
+       WHERE prt.token = $1`,
+      [token]
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Invalid or expired token' });
+    }
+
+    const resetRecord = tokenResult.rows[0];
+
+    if (resetRecord.used_at) {
+      return res.status(400).json({ error: 'Reset link has already been used' });
+    }
+
+    if (new Date(resetRecord.expires_at) < new Date()) {
+      return res.status(400).json({ error: 'Reset link has expired' });
+    }
+
+    res.json({
+      success: true,
+      securityQuestions: [
+        resetRecord.security_question_1,
+        resetRecord.security_question_2
+      ].filter(Boolean)
+    });
+  } catch (error) {
+    console.error('Password reset token lookup error:', error);
+    res.status(500).json({ error: error.message || 'Failed to validate reset token' });
+  }
+});
+
+// Complete password reset
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, password, securityAnswer1, securityAnswer2 } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({ error: 'Token and password are required' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+    }
+
+    await ensurePasswordResetTable();
+
+    const tokenResult = await query(
+      `SELECT prt.id, prt.user_id, prt.expires_at, prt.used_at,
+              p.security_answer_1, p.security_answer_2
+       FROM password_reset_tokens prt
+       JOIN profiles p ON p.id = prt.user_id
+       WHERE prt.token = $1`,
+      [token]
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Invalid or expired token' });
+    }
+
+    const resetRecord = tokenResult.rows[0];
+
+    if (resetRecord.used_at) {
+      return res.status(400).json({ error: 'Reset link has already been used' });
+    }
+
+    if (new Date(resetRecord.expires_at) < new Date()) {
+      return res.status(400).json({ error: 'Reset link has expired' });
+    }
+
+    // Validate security answers (if present)
+    const expectedAnswer1 = resetRecord.security_answer_1 ? resetRecord.security_answer_1.trim().toLowerCase() : null;
+    const expectedAnswer2 = resetRecord.security_answer_2 ? resetRecord.security_answer_2.trim().toLowerCase() : null;
+
+    if (expectedAnswer1) {
+      const providedAnswer1 = (securityAnswer1 || '').trim().toLowerCase();
+      if (!providedAnswer1 || providedAnswer1 !== expectedAnswer1) {
+        return res.status(400).json({ error: 'Security answer 1 is incorrect' });
+      }
+    }
+
+    if (expectedAnswer2) {
+      const providedAnswer2 = (securityAnswer2 || '').trim().toLowerCase();
+      if (!providedAnswer2 || providedAnswer2 !== expectedAnswer2) {
+        return res.status(400).json({ error: 'Security answer 2 is incorrect' });
+      }
+    }
+
+    const bcryptModule = await import('bcryptjs');
+    const bcryptInstance = bcryptModule.default;
+    const hashedPassword = await bcryptInstance.hash(password, 10);
+
+    await query('BEGIN');
+
+    try {
+      await query(
+        `UPDATE user_auth
+         SET password_hash = $1, updated_at = now()
+         WHERE user_id = $2`,
+        [hashedPassword, resetRecord.user_id]
+      );
+
+      await query(
+        `UPDATE password_reset_tokens
+         SET used_at = now()
+         WHERE id = $1`,
+        [resetRecord.id]
+      );
+
+      await query('COMMIT');
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
+    }
+
+    res.json({ success: true, message: 'Password has been reset successfully' });
+  } catch (error) {
+    console.error('Password reset error:', error);
+    res.status(500).json({ error: error.message || 'Failed to reset password' });
   }
 });
 

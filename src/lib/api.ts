@@ -102,6 +102,29 @@ class ApiClient {
     return result;
   }
 
+  async requestPasswordReset(email: string) {
+    return this.request('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async getPasswordResetInfo(token: string) {
+    return this.request(`/api/auth/reset-password?token=${encodeURIComponent(token)}`);
+  }
+
+  async resetPassword(data: {
+    token: string;
+    password: string;
+    securityAnswer1?: string;
+    securityAnswer2?: string;
+  }) {
+    return this.request('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Employee methods
   async getEmployees() {
     return this.request('/api/employees');
