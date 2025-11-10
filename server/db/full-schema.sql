@@ -314,7 +314,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER IF NOT EXISTS update_approvals_updated_at
+DROP TRIGGER IF EXISTS update_approvals_updated_at ON approvals;
+
+CREATE TRIGGER update_approvals_updated_at
   BEFORE UPDATE ON approvals
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 

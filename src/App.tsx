@@ -17,6 +17,7 @@ import Appraisals from "./pages/Appraisals";
 import MyAppraisal from "./pages/MyAppraisal";
 import ShiftManagement from "./pages/ShiftManagement";
 import AIAssistantPage from "./pages/AIAssistantPage";
+import RAGDocumentUpload from "./pages/RAGDocumentUpload";
 import EmployeeImport from "./pages/EmployeeImport";
 import AttendanceUpload from "./pages/AttendanceUpload";
 import AttendanceUploadHistory from "./pages/AttendanceUploadHistory";
@@ -111,6 +112,7 @@ const App = () => (
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
             <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><ShiftManagement /></ProtectedRoute>} />
             <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
+            <Route path="/rag/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><RAGDocumentUpload /></ProtectedRoute>} />
             <Route path="/attendance/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><AttendanceUpload /></ProtectedRoute>} />
             <Route path="/attendance/history" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><AttendanceUploadHistory /></ProtectedRoute>} />
             <Route path="/payroll" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin']}><Payroll /></ProtectedRoute>} />

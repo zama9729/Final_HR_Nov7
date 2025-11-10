@@ -22,6 +22,7 @@ import {
   Inbox,
   LogOut,
   ClipboardList,
+  FileUp,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -67,6 +68,7 @@ const hrItems = [
   { title: "Analytics", url: "/analytics", icon: BarChart3, showBadge: false },
   { title: "Employee Stats", url: "/employee-stats", icon: Users, showBadge: false },
   { title: "AI Assistant", url: "/ai-assistant", icon: Bot, showBadge: false },
+  { title: "RAG Document Upload", url: "/rag/upload", icon: FileUp, showBadge: false },
   { title: "Payroll", url: "/payroll", icon: DollarSign, showBadge: false, isExternal: true, sso: true },
 ];
 

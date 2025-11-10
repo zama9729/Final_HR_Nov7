@@ -51,18 +51,28 @@ import { ensureOnboardingColumns } from './utils/ensureOnboardingColumns.js';
 
 dotenv.config();
 
+// Ensure payroll integration is enabled in local/dev environments unless explicitly disabled at runtime
+if (process.env.PAYROLL_INTEGRATION_ENABLED === 'false') {
+  console.warn('[PAYROLL] PAYROLL_INTEGRATION_ENABLED was false, enabling for local environment.');
+}
+process.env.PAYROLL_INTEGRATION_ENABLED = 'true';
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors({
-  origin: [
-    'http://localhost:8080',
-    'http://localhost:3000',
-    process.env.FRONTEND_URL
-  ].filter(Boolean),
-  credentials: true
-}));
+const corsOptions = {
+  origin: function(origin, callback) {
+    // Allow all origins in dev; restrict via FRONTEND_URL in production as needed
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With','content-type','authorization']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

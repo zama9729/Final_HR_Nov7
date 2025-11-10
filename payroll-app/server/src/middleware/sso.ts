@@ -61,21 +61,33 @@ export async function verifyHrSsoToken(
       });
     }
 
-    // Get JWT public key for RS256 verification (must match HR system's HR_PAYROLL_JWT_PRIVATE_KEY)
+    // Get JWT verification material. Prefer RS256 public key, fallback to shared secret.
     const publicKey = (process.env.HR_PAYROLL_JWT_PUBLIC_KEY || '').replace(/\\n/g, '\n');
+    const sharedSecret = process.env.HR_JWT_SECRET || process.env.PAYROLL_JWT_SECRET || process.env.JWT_SECRET || process.env.DEV_PAYROLL_SSO_SECRET;
 
-    if (!publicKey || publicKey.trim() === '' || !publicKey.includes('BEGIN PUBLIC KEY')) {
-      console.error('⚠️  HR_PAYROLL_JWT_PUBLIC_KEY not configured. Set HR_PAYROLL_JWT_PUBLIC_KEY environment variable.');
-      return res.status(500).json({ 
-        error: 'SSO configuration error',
-        message: 'JWT public key not configured'
-      });
+    let verificationKey: string | undefined = publicKey && publicKey.trim() !== '' && publicKey.includes('BEGIN PUBLIC KEY')
+      ? publicKey
+      : undefined;
+    let algorithms: jwt.Algorithm[] = ['RS256'];
+
+    if (!verificationKey) {
+      if (sharedSecret && sharedSecret.trim() !== '') {
+        console.warn('⚠️  HR_PAYROLL_JWT_PUBLIC_KEY not configured. Falling back to shared secret for HS256 verification.');
+        verificationKey = sharedSecret;
+        algorithms = ['HS256'];
+      } else {
+        console.error('⚠️  No payroll SSO verification key/secret configured.');
+        return res.status(500).json({ 
+          error: 'SSO configuration error',
+          message: 'JWT public key or shared secret not configured'
+        });
+      }
     }
 
     // Verify JWT token
     let payload: any;
     try {
-             payload = jwt.verify(token, publicKey, { algorithms: ['RS256'] }) as any;
+      payload = jwt.verify(token, verificationKey, { algorithms }) as any;
     } catch (jwtError: any) {
       if (jwtError.name === 'TokenExpiredError') {
         return res.status(401).json({ 

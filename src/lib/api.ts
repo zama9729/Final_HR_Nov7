@@ -953,6 +953,106 @@ class ApiClient {
   async getPayrollSso() {
     return this.request('/api/payroll/sso');
   }
+
+  // RAG Service methods
+  async queryRAG(query: string, top_k?: number, use_tools: boolean = true) {
+    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
+    const token = this._token || localStorage.getItem('auth_token');
+    
+    const response = await fetch(`${RAG_API_URL}/api/v1/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token || ''}`,
+      },
+      body: JSON.stringify({ query, top_k, use_tools }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async ingestDocument(file: File, isConfidential: boolean = false) {
+    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
+    const token = this._token || localStorage.getItem('auth_token');
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('is_confidential', String(isConfidential));
+
+    const response = await fetch(`${RAG_API_URL}/api/v1/ingest`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token || ''}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async getRAGAuditLogs(limit: number = 100) {
+    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
+    const token = this._token || localStorage.getItem('auth_token');
+    
+    const response = await fetch(`${RAG_API_URL}/api/v1/audit?limit=${limit}`, {
+      headers: {
+        'Authorization': `Bearer ${token || ''}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async getRAGDocumentStatus(documentId: string) {
+    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
+    const token = this._token || localStorage.getItem('auth_token');
+
+    const response = await fetch(`${RAG_API_URL}/api/v1/documents/${documentId}/status`, {
+      headers: {
+        'Authorization': `Bearer ${token || ''}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async getRAGDocumentProgress(documentId: string) {
+    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
+    const token = this._token || localStorage.getItem('auth_token');
+
+    const response = await fetch(`${RAG_API_URL}/api/v1/documents/${documentId}/progress`, {
+      headers: {
+        'Authorization': `Bearer ${token || ''}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
 }
 
 export const api = new ApiClient(API_URL);
