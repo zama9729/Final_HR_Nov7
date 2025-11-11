@@ -120,21 +120,33 @@ class LLMService:
         """Generate response with RAG context."""
         # Build prompt with context
         context_text = "\n\n".join([
-            f"[Document {i+1}]\n{chunk}"
+            f"[Document Section {i+1}]\n{chunk}"
             for i, chunk in enumerate(context_chunks)
         ])
         
-        system_prompt = """You are a helpful HR assistant. Answer questions based on the provided context documents.
-Always cite which document you're referencing (e.g., "According to Document 1...").
-If the information is not in the context, say so clearly.
-Be concise and accurate."""
+        system_prompt = """You are a helpful HR assistant with access to multiple company policy documents. Your role is to answer questions using the provided context documents.
+
+IMPORTANT INSTRUCTIONS:
+1. ALWAYS use the provided context documents to answer questions - they contain the information you need
+2. Extract and present information directly from the context, even if you need to infer or summarize
+3. If the context contains relevant information (even if not an exact match), use it to provide a helpful answer
+4. Cite which document section you're referencing when possible (e.g., "According to Document Section 1...")
+5. Be thorough and extract all relevant details from the context
+6. Only say "information not available" if the context is completely irrelevant to the question
+7. If the question asks about specific criteria, requirements, policies, or procedures, carefully search through ALL provided context sections
+8. You have access to MULTIPLE documents - information may be spread across different document sections, so check all of them
+
+Be confident and helpful - the context documents are your source of truth."""
         
-        user_prompt = f"""Context documents:
+        user_prompt = f"""You have access to the following document sections from multiple uploaded company documents:
+
 {context_text}
+
+---
 
 Question: {query}
 
-Please provide a helpful answer based on the context above."""
+Please answer the question using the information from the document sections above. Extract all relevant details, criteria, requirements, or information that relates to the question. Be thorough and cite specific sections when possible. Remember that information may be spread across multiple document sections."""
         
         messages = [
             {"role": "system", "content": system_prompt},

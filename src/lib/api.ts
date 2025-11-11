@@ -1053,6 +1053,43 @@ class ApiClient {
 
     return response.json();
   }
+
+  async listRAGDocuments(limit: number = 50) {
+    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
+    const token = this._token || localStorage.getItem('auth_token');
+
+    const response = await fetch(`${RAG_API_URL}/api/v1/documents?limit=${limit}`, {
+      headers: {
+        'Authorization': `Bearer ${token || ''}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async reprocessRAGDocument(documentId: string) {
+    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
+    const token = this._token || localStorage.getItem('auth_token');
+
+    const response = await fetch(`${RAG_API_URL}/api/v1/documents/${documentId}/reprocess`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token || ''}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  }
 }
 
 export const api = new ApiClient(API_URL);

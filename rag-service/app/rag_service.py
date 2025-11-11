@@ -57,21 +57,32 @@ class RAGService:
             
             # Fetch chunk records from DB for metadata
             chunks = []
+            unique_doc_ids = set()
             if chunk_ids:
-                chunk_records = self.db.query(DocumentChunk).filter(
-                    DocumentChunk.id.in_([uuid.UUID(cid) for cid in chunk_ids if cid])
-                ).all()
-                
-                chunk_map = {str(c.id): c for c in chunk_records}
-                for cid, doc, meta, dist in zip(chunk_ids, chunk_docs, chunk_metas, distances):
-                    if cid in chunk_map:
-                        chunks.append({
-                            "id": cid,
-                            "content": chunk_map[cid].content_redacted or doc,
-                            "metadata": {**meta, **chunk_map[cid].chunk_metadata},
-                            "distance": dist,
-                            "document_id": str(chunk_map[cid].document_id)
-                        })
+                # Filter out None/empty IDs
+                valid_ids = [uuid.UUID(cid) for cid in chunk_ids if cid]
+                if valid_ids:
+                    chunk_records = self.db.query(DocumentChunk).filter(
+                        DocumentChunk.id.in_(valid_ids),
+                        DocumentChunk.tenant_id == tenant_id  # Ensure tenant isolation
+                    ).all()
+                    
+                    chunk_map = {str(c.id): c for c in chunk_records}
+                    for cid, doc, meta, dist in zip(chunk_ids, chunk_docs, chunk_metas, distances):
+                        if cid and cid in chunk_map:
+                            # Use original content (not redacted) for better context
+                            content = chunk_map[cid].content or doc
+                            doc_id = str(chunk_map[cid].document_id)
+                            unique_doc_ids.add(doc_id)
+                            chunks.append({
+                                "id": cid,
+                                "content": content,
+                                "metadata": {**meta, **chunk_map[cid].chunk_metadata},
+                                "distance": dist,
+                                "document_id": doc_id
+                            })
+            
+            logger.info(f"Found {len(chunks)} valid chunks from {len(unique_doc_ids)} unique document(s) after DB lookup")
             
             # Rerank if enabled (simple distance-based for now)
             if settings.rerank_enabled and len(chunks) > settings.top_k_final:

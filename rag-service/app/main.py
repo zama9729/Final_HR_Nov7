@@ -428,6 +428,85 @@ async def get_audit_logs(
     ]
 
 
+@app.get("/api/v1/documents")
+async def list_documents(
+    user: Employee = Depends(get_current_user),
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+    limit: int = 50
+):
+    """List all documents for the tenant with their ingestion status."""
+    documents = db.query(Document).filter(
+        Document.tenant_id == tenant.id
+    ).order_by(Document.created_at.desc()).limit(limit).all()
+    
+    result = []
+    for doc in documents:
+        chunks = db.query(DocumentChunk).filter(
+            DocumentChunk.document_id == doc.id
+        ).all()
+        
+        chunks_with_embeddings = sum(1 for c in chunks if c.embedding_id is not None)
+        
+        result.append({
+            "document_id": str(doc.id),
+            "filename": doc.filename,
+            "file_type": doc.file_type,
+            "file_size": doc.file_size,
+            "status": doc.ingestion_status,
+            "is_confidential": doc.is_confidential,
+            "total_chunks": len(chunks),
+            "chunks_with_embeddings": chunks_with_embeddings,
+            "percent_complete": int((chunks_with_embeddings / len(chunks) * 100)) if chunks else 0,
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None
+        })
+    
+    return {
+        "tenant_id": str(tenant.id),
+        "total_documents": len(result),
+        "documents": result
+    }
+
+
+@app.post("/api/v1/documents/{document_id}/reprocess")
+async def reprocess_document(
+    document_id: str = Path(..., description="Document ID (UUID)"),
+    user: Employee = Depends(require_permission("query")),
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """Reprocess a document to generate missing embeddings."""
+    try:
+        doc = db.query(Document).filter(
+            Document.id == uuid.UUID(document_id),
+            Document.tenant_id == tenant.id
+        ).first()
+        
+        if not doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        
+        # Reset status to allow reprocessing
+        doc.ingestion_status = "processing"
+        db.commit()
+        
+        # Trigger Celery task
+        from app.celery_app import ingest_document_task
+        job = ingest_document_task.delay(document_id)
+        
+        logger.info(f"Reprocessing document {document_id}, job ID: {job.id}")
+        
+        return {
+            "document_id": document_id,
+            "job_id": job.id,
+            "status": "reprocessing",
+            "message": "Document reprocessing started"
+        }
+    except Exception as e:
+        logger.error(f"Failed to reprocess document: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reprocess document: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -36,9 +36,24 @@ def ingest_document_task(document_id: str):
             logger.error(f"Document {document_id} not found")
             return {"status": "error", "message": "Document not found"}
         
-        if doc.ingestion_status == "completed":
-            logger.info(f"Document {document_id} already processed")
+        # Check if document is truly completed (all chunks have embeddings)
+        chunks_with_embeddings = db.query(DocumentChunk).filter(
+            DocumentChunk.document_id == doc.id,
+            DocumentChunk.embedding_id.isnot(None)
+        ).count()
+        total_chunks = db.query(DocumentChunk).filter(
+            DocumentChunk.document_id == doc.id
+        ).count()
+        
+        if doc.ingestion_status == "completed" and chunks_with_embeddings == total_chunks and total_chunks > 0:
+            logger.info(f"Document {document_id} already processed with {chunks_with_embeddings}/{total_chunks} chunks")
             return {"status": "completed", "document_id": document_id}
+        
+        # If status is "completed" but chunks are missing embeddings, reprocess
+        if doc.ingestion_status == "completed" and chunks_with_embeddings < total_chunks:
+            logger.warning(f"Document {document_id} marked as completed but only {chunks_with_embeddings}/{total_chunks} chunks have embeddings. Reprocessing...")
+            doc.ingestion_status = "processing"
+            db.commit()
         
         # Get chunks
         chunks = db.query(DocumentChunk).filter(
