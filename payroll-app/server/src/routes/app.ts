@@ -1390,7 +1390,7 @@ appRouter.post("/tax-declarations", requireAuth, async (req, res) => {
   try {
     const tenantId = (req as any).tenantId as string;
     const email = (req as any).userEmail as string;
-    const { financial_year, declaration_data } = req.body;
+    const { financial_year, declaration_data, chosen_regime: bodyRegime } = req.body;
 
     if (!financial_year || !declaration_data) {
       return res.status(400).json({ error: "Missing financial_year or declaration_data" });
@@ -1406,13 +1406,143 @@ appRouter.post("/tax-declarations", requireAuth, async (req, res) => {
     }
     const employeeId = emp.rows[0].id;
 
-    const result = await query(
-      `INSERT INTO tax_declarations 
-        (employee_id, tenant_id, financial_year, declaration_data, status, submitted_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [employeeId, tenantId, financial_year, declaration_data, 'submitted', new Date().toISOString()]
+    const { rows: columnRows } = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_schema = 'public' AND table_name = 'tax_declarations'`
     );
+
+    const existingColumns = columnRows.map((row) => row.column_name);
+    let chosenRegime = typeof bodyRegime === 'string' ? bodyRegime.toLowerCase() : undefined;
+    const allowedRegimes = new Set(['old', 'new']);
+
+    if (!chosenRegime && declaration_data && typeof declaration_data.chosen_regime === 'string') {
+      chosenRegime = declaration_data.chosen_regime.toLowerCase();
+    }
+
+    if (!allowedRegimes.has(chosenRegime || '')) {
+      chosenRegime = 'old';
+    }
+    const nowIso = new Date().toISOString();
+
+    let result;
+
+    if (existingColumns.includes('declaration_data')) {
+      const columns: string[] = ['employee_id', 'tenant_id', 'financial_year'];
+      const values: any[] = [employeeId, tenantId, financial_year];
+      const placeholders: string[] = ['$1', '$2', '$3'];
+      let index = 4;
+
+      columns.push('declaration_data');
+      values.push(declaration_data);
+      placeholders.push(`$${index++}`);
+
+      if (existingColumns.includes('chosen_regime')) {
+        columns.push('chosen_regime');
+        values.push(chosenRegime);
+        placeholders.push(`$${index++}`);
+      }
+
+      if (existingColumns.includes('status')) {
+        columns.push('status');
+        values.push('submitted');
+        placeholders.push(`$${index++}`);
+      }
+
+      if (existingColumns.includes('submitted_at')) {
+        columns.push('submitted_at');
+        values.push(nowIso);
+        placeholders.push(`$${index++}`);
+      }
+
+      if (existingColumns.includes('updated_at')) {
+        columns.push('updated_at');
+        values.push(nowIso);
+        placeholders.push(`$${index++}`);
+      }
+
+      const insertQuery = `
+        INSERT INTO tax_declarations (${columns.join(', ')})
+        VALUES (${placeholders.join(', ')})
+        ON CONFLICT (employee_id, financial_year)
+        DO UPDATE SET
+          ${columns
+            .slice(3)
+            .map((col, idx) => `${col} = EXCLUDED.${col}`)
+            .join(', ')}
+        RETURNING *
+      `;
+
+      result = await query(insertQuery, values);
+    } else {
+      const normalizedDeclaration = {
+        section_80c: Number(declaration_data.section80C) || 0,
+        section_80d: Number(declaration_data.section80D) || 0,
+        section_24b: Number(declaration_data.homeLoanInterest) || 0,
+        section_80g: Number(declaration_data.section80G) || 0,
+        section_80e: Number(declaration_data.section80E) || 0,
+        other_deductions: Number(declaration_data.otherDeductions) || 0,
+        hra: Number(declaration_data.hra) || 0,
+      };
+
+      // For legacy schemas without dedicated columns, fold HRA into other deductions
+      if (existingColumns.includes('other_deductions')) {
+        normalizedDeclaration.other_deductions += normalizedDeclaration.hra;
+      }
+
+      const totalDeductions =
+        (existingColumns.includes('section_80c') ? normalizedDeclaration.section_80c : 0) +
+        (existingColumns.includes('section_80d') ? normalizedDeclaration.section_80d : 0) +
+        (existingColumns.includes('section_24b') ? normalizedDeclaration.section_24b : 0) +
+        (existingColumns.includes('section_80g') ? normalizedDeclaration.section_80g : 0) +
+        (existingColumns.includes('section_80e') ? normalizedDeclaration.section_80e : 0) +
+        (existingColumns.includes('other_deductions') ? normalizedDeclaration.other_deductions : 0);
+
+      const columns: string[] = ['employee_id', 'tenant_id', 'financial_year'];
+      const values: any[] = [employeeId, tenantId, financial_year];
+      const placeholders: string[] = ['$1', '$2', '$3'];
+      let index = 4;
+
+      const addColumn = (column: string, value: any) => {
+        columns.push(column);
+        values.push(value);
+        placeholders.push(`$${index++}`);
+      };
+
+      if (existingColumns.includes('section_80c')) addColumn('section_80c', normalizedDeclaration.section_80c);
+      if (existingColumns.includes('section_80d')) addColumn('section_80d', normalizedDeclaration.section_80d);
+      if (existingColumns.includes('section_24b')) addColumn('section_24b', normalizedDeclaration.section_24b);
+      if (existingColumns.includes('section_80g')) addColumn('section_80g', normalizedDeclaration.section_80g);
+      if (existingColumns.includes('section_80e')) addColumn('section_80e', normalizedDeclaration.section_80e);
+      if (existingColumns.includes('other_deductions')) addColumn('other_deductions', normalizedDeclaration.other_deductions);
+      if (existingColumns.includes('total_deductions')) addColumn('total_deductions', totalDeductions);
+      if (existingColumns.includes('chosen_regime')) addColumn('chosen_regime', chosenRegime);
+      if (existingColumns.includes('submitted_at')) addColumn('submitted_at', nowIso);
+      if (existingColumns.includes('approved_by')) addColumn('approved_by', null);
+      if (existingColumns.includes('approved_at')) addColumn('approved_at', null);
+      if (existingColumns.includes('updated_at')) addColumn('updated_at', nowIso);
+
+      const updateAssignments = columns
+        .slice(3)
+        .map((column) => `${column} = EXCLUDED.${column}`);
+
+      const insertQuery = `
+        INSERT INTO tax_declarations (${columns.join(', ')})
+        VALUES (${placeholders.join(', ')})
+        ON CONFLICT (employee_id, financial_year)
+        ${updateAssignments.length > 0 ? `DO UPDATE SET ${updateAssignments.join(', ')}` : 'DO NOTHING'}
+        RETURNING *
+      `;
+
+      result = await query(insertQuery, values);
+
+      if (result.rows.length === 0) {
+        result = await query(
+          `SELECT * FROM tax_declarations WHERE employee_id = $1 AND tenant_id = $2 AND financial_year = $3`,
+          [employeeId, tenantId, financial_year]
+        );
+      }
+    }
 
     return res.status(201).json({ declaration: result.rows[0] });
 
@@ -1819,7 +1949,21 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         created_by
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-      ) RETURNING *`,
+      )
+      ON CONFLICT (employee_id, effective_from)
+      DO UPDATE SET
+        ctc = EXCLUDED.ctc,
+        basic_salary = EXCLUDED.basic_salary,
+        hra = EXCLUDED.hra,
+        special_allowance = EXCLUDED.special_allowance,
+        da = EXCLUDED.da,
+        lta = EXCLUDED.lta,
+        bonus = EXCLUDED.bonus,
+        pf_contribution = EXCLUDED.pf_contribution,
+        esi_contribution = EXCLUDED.esi_contribution,
+        created_by = COALESCE(compensation_structures.created_by, EXCLUDED.created_by),
+        updated_at = NOW()
+      RETURNING *`,
       [
         tenantId,
         employeeId,

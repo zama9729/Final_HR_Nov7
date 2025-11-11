@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { Upload, Download, FileSpreadsheet, FileText, CheckCircle2, XCircle, Clock, AlertCircle } from 'lucide-react';
 import {
@@ -52,6 +52,37 @@ export default function AttendanceUpload() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showMapping, setShowMapping] = useState(false);
   const [tenantTimezone, setTenantTimezone] = useState('Asia/Kolkata');
+
+  const columnOptions = useMemo(() => {
+    return columnHeaders.map((header, index) => {
+      const raw = header ?? '';
+      const isBlank = raw.trim() === '';
+      return {
+        raw,
+        value: isBlank ? `__blank__${index}` : raw,
+        label: isBlank ? `Unnamed Column ${index + 1}` : raw,
+        index,
+      };
+    });
+  }, [columnHeaders]);
+
+  const toSelectValue = useCallback(
+    (raw: string | undefined) => {
+      if (!raw) return '__none__';
+      const match = columnOptions.find((option) => option.raw === raw);
+      return match ? match.value : raw;
+    },
+    [columnOptions]
+  );
+
+  const fromSelectValue = useCallback(
+    (value: string) => {
+      if (value === '__none__') return '';
+      const match = columnOptions.find((option) => option.value === value);
+      return match ? match.raw : value;
+    },
+    [columnOptions]
+  );
 
   // Required fields for mapping
   const requiredFields = [
@@ -409,19 +440,22 @@ export default function AttendanceUpload() {
                               <Label>{field.label}</Label>
                               <p className="text-xs text-muted-foreground mb-1">{field.description}</p>
                               <Select
-                                value={mapping[field.key as keyof ColumnMapping] || ''}
+                                value={toSelectValue(mapping[field.key as keyof ColumnMapping])}
                                 onValueChange={(value) =>
-                                  setMapping({ ...mapping, [field.key]: value })
+                                  setMapping({
+                                    ...mapping,
+                                    [field.key]: fromSelectValue(value),
+                                  })
                                 }
                               >
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select column" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="">-- None --</SelectItem>
-                                  {columnHeaders.map((header) => (
-                                    <SelectItem key={header} value={header}>
-                                      {header}
+                                  <SelectItem value="__none__">-- None --</SelectItem>
+                                  {columnOptions.map((option) => (
+                                    <SelectItem key={`${option.value}-${option.index}`} value={option.value}>
+                                      {option.label}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -439,19 +473,22 @@ export default function AttendanceUpload() {
                               <Label>{field.label}</Label>
                               <p className="text-xs text-muted-foreground mb-1">{field.description}</p>
                               <Select
-                                value={mapping[field.key as keyof ColumnMapping] || ''}
+                                value={toSelectValue(mapping[field.key as keyof ColumnMapping])}
                                 onValueChange={(value) =>
-                                  setMapping({ ...mapping, [field.key]: value })
+                                  setMapping({
+                                    ...mapping,
+                                    [field.key]: fromSelectValue(value),
+                                  })
                                 }
                               >
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select column (optional)" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="">-- None --</SelectItem>
-                                  {columnHeaders.map((header) => (
-                                    <SelectItem key={header} value={header}>
-                                      {header}
+                                  <SelectItem value="__none__">-- None --</SelectItem>
+                                  {columnOptions.map((option) => (
+                                    <SelectItem key={`${option.value}-${option.index}`} value={option.value}>
+                                      {option.label}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>

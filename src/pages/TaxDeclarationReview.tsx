@@ -85,7 +85,7 @@ export default function TaxDeclarationReview() {
       setLoading(true);
       const result = await api.getTaxDeclarations({
         financial_year: financialYear,
-        status: statusFilter || undefined,
+        status: statusFilter === "all" ? undefined : statusFilter,
       });
       setDeclarations(result.declarations || []);
       setItems(result.items || []);
@@ -235,7 +235,7 @@ export default function TaxDeclarationReview() {
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
                   <SelectItem value="submitted">Submitted</SelectItem>
                   <SelectItem value="approved">Approved</SelectItem>
                   <SelectItem value="rejected">Rejected</SelectItem>

@@ -4,7 +4,110 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-const Select = SelectPrimitive.Root;
+const EMPTY_VALUE_PREFIX = "__radix-empty__";
+
+const normalizeIn = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined) return undefined;
+  const str = typeof value === "string" ? value : String(value);
+  const trimmed = str.trim();
+  return trimmed === "" ? EMPTY_VALUE_PREFIX : trimmed;
+};
+
+const normalizeOut = (value: string) =>
+  value.startsWith(EMPTY_VALUE_PREFIX) ? "" : value;
+
+const ensureSafeValue = (
+  value: unknown,
+  getFallback: () => string,
+): string => {
+  if (value === null || value === undefined) {
+    return getFallback();
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? getFallback() : trimmed;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return String(value ?? "");
+};
+
+const sanitizeSelectChildren = (
+  nodes: React.ReactNode,
+  getFallback: () => string,
+): React.ReactNode => {
+  return React.Children.map(nodes, (child) => {
+    if (!React.isValidElement(child)) return child;
+
+    let nextProps: Record<string, unknown> | undefined;
+
+    if ("value" in (child.props as { value?: unknown })) {
+      const safeValue = ensureSafeValue(
+        (child.props as { value?: unknown }).value,
+        getFallback,
+      );
+      if (safeValue !== (child.props as { value?: unknown }).value) {
+        console.warn("[Select] Coercing empty select item value", {
+          original: (child.props as { value?: unknown }).value,
+          safeValue,
+        });
+        nextProps = { ...(nextProps ?? {}), value: safeValue };
+      }
+    }
+
+    if (child.props?.children) {
+      const sanitizedChildren = sanitizeSelectChildren(
+        child.props.children,
+        getFallback,
+      );
+      if (sanitizedChildren !== child.props.children) {
+        nextProps = { ...(nextProps ?? {}), children: sanitizedChildren };
+      }
+    }
+
+    return nextProps ? React.cloneElement(child, nextProps) : child;
+  });
+};
+
+const Select = ({
+  value,
+  defaultValue,
+  onValueChange,
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Root>) => {
+  const handleValueChange = React.useCallback(
+    (nextValue: string) => {
+      onValueChange?.(normalizeOut(nextValue));
+    },
+    [onValueChange],
+  );
+
+  const fallbackCounter = React.useRef(0);
+  const getFallbackValue = React.useCallback(
+    () => `${EMPTY_VALUE_PREFIX}::${fallbackCounter.current++}`,
+    [],
+  );
+
+  const sanitizedChildren = React.useMemo(
+    () => sanitizeSelectChildren(children, getFallbackValue),
+    [children, getFallbackValue],
+  );
+
+  return (
+    <SelectPrimitive.Root
+      value={value !== undefined ? normalizeIn(value as any) : undefined}
+      defaultValue={
+        defaultValue !== undefined ? normalizeIn(defaultValue as any) : undefined
+      }
+      onValueChange={handleValueChange}
+      {...props}
+    >
+      {sanitizedChildren}
+    </SelectPrimitive.Root>
+  );
+};
 
 const SelectGroup = SelectPrimitive.Group;
 
@@ -101,24 +204,52 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName;
 const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
-  <SelectPrimitive.Item
-    ref={ref}
-    className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
-      className,
-    )}
-    {...props}
-  >
-    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
-      <SelectPrimitive.ItemIndicator>
-        <Check className="h-4 w-4" />
-      </SelectPrimitive.ItemIndicator>
-    </span>
+>(({ className, children, value, ...props }, ref) => {
+  const normalizedValue =
+    value === undefined || value === null
+      ? `${EMPTY_VALUE_PREFIX}::item`
+      : typeof value === "number"
+      ? String(value)
+      : typeof value === "string"
+      ? value.trim() === ""
+        ? `${EMPTY_VALUE_PREFIX}::item`
+        : value
+      : String(value);
 
-    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-  </SelectPrimitive.Item>
-));
+  if (process.env.NODE_ENV === "development") {
+    console.debug("[SelectItem] value normalization", {
+      raw: value,
+      normalizedValue,
+    });
+  }
+
+  if (value === "" || value === " ") {
+    console.error("[SelectItem] received explicit empty string value", {
+      children,
+      props,
+    });
+  }
+
+  return (
+    <SelectPrimitive.Item
+      ref={ref}
+      className={cn(
+        "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+        className,
+      )}
+      {...props}
+      value={normalizedValue}
+    >
+      <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+        <SelectPrimitive.ItemIndicator>
+          <Check className="h-4 w-4" />
+        </SelectPrimitive.ItemIndicator>
+      </span>
+
+      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+    </SelectPrimitive.Item>
+  );
+});
 SelectItem.displayName = SelectPrimitive.Item.displayName;
 
 const SelectSeparator = React.forwardRef<
