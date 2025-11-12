@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 import { createPool, query as dbQuery } from './db/pool.js';
 import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
@@ -67,6 +69,11 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const proofsDirectory =
+  process.env.TAX_PROOFS_DIR || path.resolve(process.cwd(), 'uploads', 'tax-proofs');
+fs.mkdirSync(proofsDirectory, { recursive: true });
+app.use('/tax-proofs', express.static(proofsDirectory));
 
 // Health check
 app.get('/health', (req, res) => {

@@ -117,6 +117,39 @@ export default function TaxDeclarationReview() {
     [items, selectedId]
   );
 
+  const selectedSummary = useMemo(() => {
+    if (!selectedId) {
+      return { declared: 0, approved: 0, hasApproved: false };
+    }
+    let declared = 0;
+    let approved = 0;
+    let hasApproved = false;
+    selectedItems.forEach((item) => {
+      declared += Number(item.declared_amount || 0);
+      const approvedAmount = item.approved_amount !== undefined && item.approved_amount !== null
+        ? Number(item.approved_amount)
+        : NaN;
+      if (!Number.isNaN(approvedAmount)) {
+        hasApproved = true;
+        approved += approvedAmount;
+      }
+    });
+    return { declared, approved, hasApproved };
+  }, [selectedId, selectedItems]);
+
+  const statusChipStyles = (status?: string) => {
+    switch (status) {
+      case "approved":
+        return "bg-emerald-100 text-emerald-700";
+      case "rejected":
+        return "bg-rose-100 text-rose-700";
+      case "submitted":
+        return "bg-blue-100 text-blue-700";
+      default:
+        return "bg-slate-100 text-slate-700";
+    }
+  };
+
   const handleApproveAmountChange = (itemId: string, value: string) => {
     setApprovedValues((prev) => ({
       ...prev,
@@ -159,6 +192,12 @@ export default function TaxDeclarationReview() {
       });
 
       await loadDeclarations();
+
+      setRemarks("");
+      setApprovedValues({});
+
+      window.dispatchEvent(new Event("taxDeclarations:updated"));
+
     } catch (error: any) {
       console.error("Failed to review tax declaration", error);
       toast({
@@ -299,15 +338,52 @@ export default function TaxDeclarationReview() {
                 <div className="text-muted-foreground">Select an employee declaration to review.</div>
               ) : (
                 <>
-                  <div className="space-y-3">
-                    <Label>Reviewer Remarks</Label>
+                <div className="grid gap-3 rounded-lg border p-4 bg-muted/40 text-sm sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Status
+                    </p>
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusChipStyles(selectedDeclaration.status)}`}
+                    >
+                      {selectedDeclaration.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Total Declared
+                    </p>
+                    <p className="text-base font-semibold">
+                      ₹{selectedSummary.declared.toLocaleString("en-IN")}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Total Approved
+                    </p>
+                    <p className="text-base font-semibold">
+                      {selectedSummary.hasApproved
+                        ? `₹${selectedSummary.approved.toLocaleString("en-IN")}`
+                        : "Pending review"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Label>Reviewer Remarks</Label>
+                  {selectedDeclaration.status === "submitted" ? (
                     <Textarea
                       placeholder="Provide remarks for the employee (visible after review)"
                       value={remarks}
                       onChange={(event) => setRemarks(event.target.value)}
                       disabled={reviewing}
                     />
-                  </div>
+                  ) : (
+                    <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+                      {selectedDeclaration.remarks?.trim() || "No reviewer remarks recorded."}
+                    </p>
+                  )}
+                </div>
 
                   <div className="space-y-4">
                     {selectedItems.length === 0 ? (
@@ -342,7 +418,7 @@ export default function TaxDeclarationReview() {
                                 </p>
                               )}
                             </div>
-                            {selectedDeclaration.status !== "approved" && (
+                            {selectedDeclaration.status === "submitted" && (
                               <Input
                                 className="w-32"
                                 type="number"
@@ -373,19 +449,23 @@ export default function TaxDeclarationReview() {
                       <Download className="mr-2 h-4 w-4" />
                       Download Form 16
                     </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleReview("rejected")}
-                      disabled={reviewing || !selectedId}
-                    >
-                      Reject
-                    </Button>
-                    <Button
-                      onClick={() => handleReview("approved")}
-                      disabled={reviewing || !selectedId}
-                    >
-                      Approve
-                    </Button>
+                  {selectedDeclaration.status === "submitted" && (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => handleReview("rejected")}
+                        disabled={reviewing || !selectedId}
+                      >
+                        Reject
+                      </Button>
+                      <Button
+                        onClick={() => handleReview("approved")}
+                        disabled={reviewing || !selectedId}
+                      >
+                        Approve
+                      </Button>
+                    </>
+                  )}
                   </div>
                 </>
               )}

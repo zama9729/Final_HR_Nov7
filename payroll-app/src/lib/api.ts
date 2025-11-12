@@ -287,6 +287,14 @@ export const api = {
     
     save: (data) =>
       client.post<{ settings: any }>("/api/payroll-settings", data),
+
+    getTaxRegimes: (financialYear: string) =>
+      client.get<{ financial_year: string; regimes: Record<string, any> }>(
+        `/api/payroll-settings/tax-regimes?financial_year=${encodeURIComponent(financialYear)}`
+      ),
+
+    saveTaxRegimes: (data: { financial_year: string; regimes: Array<any> }) =>
+      client.post("/api/payroll-settings/tax-regimes", data),
   },
 
   // Leave and Attendance removed - handled by HR system

@@ -37,7 +37,7 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -122,31 +122,57 @@ export function AppSidebar() {
   const [isSuperadmin, setIsSuperadmin] = useState(false);
   const [payrollIntegrationEnabled, setPayrollIntegrationEnabled] = useState(true); // Default to true
 
+  const fetchPendingCounts = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const counts = await api.getPendingCounts();
+      setPendingCounts({
+        timesheets: counts.timesheets || 0,
+        leaves: counts.leaves || 0,
+        taxDeclarations: counts.taxDeclarations || 0,
+      });
+    } catch (error) {
+      console.error('Error fetching pending counts:', error);
+    }
+  }, [user]);
+
   useEffect(() => {
-    // Check if Payroll integration is enabled (default to true)
-    // Set to false by setting VITE_PAYROLL_INTEGRATION_ENABLED=false
     const enabled = import.meta.env.VITE_PAYROLL_INTEGRATION_ENABLED !== 'false';
     setPayrollIntegrationEnabled(enabled);
     console.log('Payroll integration enabled:', enabled);
-    
+
+    let interval: ReturnType<typeof setInterval> | undefined;
+
     if (user) {
       fetchOrganization();
       fetchIsSuperadmin();
-      
+
       if (userRole && ['manager', 'hr', 'director', 'ceo', 'admin'].includes(userRole)) {
         fetchPendingCounts();
-        
-        // Poll for updates every 30 seconds (replaces realtime)
-        const interval = setInterval(() => {
+
+        interval = setInterval(() => {
           fetchPendingCounts();
         }, 30000);
-
-        return () => {
-          clearInterval(interval);
-        };
       }
     }
-  }, [user, userRole]);
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [user, userRole, fetchPendingCounts]);
+
+  useEffect(() => {
+    const handler = () => {
+      fetchPendingCounts();
+    };
+    window.addEventListener("taxDeclarations:updated", handler);
+    return () => {
+      window.removeEventListener("taxDeclarations:updated", handler);
+    };
+  }, [fetchPendingCounts]);
 
   const fetchOrganization = async () => {
     if (!user) return;
@@ -176,21 +202,6 @@ export function AppSidebar() {
     }
   };
 
-  const fetchPendingCounts = async () => {
-    if (!user) return;
-
-    try {
-      const counts = await api.getPendingCounts();
-      setPendingCounts({
-        timesheets: counts.timesheets || 0,
-        leaves: counts.leaves || 0,
-        taxDeclarations: counts.taxDeclarations || 0,
-      });
-    } catch (error) {
-      console.error('Error fetching pending counts:', error);
-    }
-  };
-  
   // Determine which navigation items to show based on role
   const getNavigationItems = () => {
     switch (userRole) {

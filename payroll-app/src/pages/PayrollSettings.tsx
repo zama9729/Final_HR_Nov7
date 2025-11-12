@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Save, Loader2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ArrowLeft, Save, Loader2, Plus, Trash2 } from "lucide-react";
 // Fix: Use relative path for the API client
 import { api } from "../lib/api";
 import { toast } from "sonner";
@@ -20,6 +21,80 @@ type PayrollSettingsData = {
   basic_salary_percentage: string;
 };
 
+type TaxSlabForm = {
+  from: string;
+  to: string;
+  rate: string;
+};
+
+type TaxRegimeForm = {
+  regime_type: "old" | "new";
+  standard_deduction: string;
+  cess_percentage: string;
+  slabs: TaxSlabForm[];
+};
+
+const getCurrentFinancialYear = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const startYear = now.getMonth() >= 3 ? year : year - 1;
+  return `${startYear}-${startYear + 1}`;
+};
+
+const defaultSlabs: Record<"old" | "new", TaxSlabForm[]> = {
+  old: [
+    { from: "0", to: "250000", rate: "0" },
+    { from: "250000", to: "500000", rate: "5" },
+    { from: "500000", to: "1000000", rate: "20" },
+    { from: "1000000", to: "", rate: "30" },
+  ],
+  new: [
+    { from: "0", to: "300000", rate: "0" },
+    { from: "300000", to: "600000", rate: "5" },
+    { from: "600000", to: "900000", rate: "10" },
+    { from: "900000", to: "1200000", rate: "15" },
+    { from: "1200000", to: "1500000", rate: "20" },
+    { from: "1500000", to: "", rate: "30" },
+  ],
+};
+
+const buildDefaultRegime = (regime: "old" | "new"): TaxRegimeForm => ({
+  regime_type: regime,
+  standard_deduction: regime === "new" ? "75000" : "50000",
+  cess_percentage: "4",
+  slabs: defaultSlabs[regime].map((slab) => ({ ...slab })),
+});
+
+const financialYearOptions = () => {
+  const currentStart = parseInt(getCurrentFinancialYear().split("-")[0], 10);
+  return [currentStart - 1, currentStart, currentStart + 1].map((start) => `${start}-${start + 1}`);
+};
+
+const mapRegimeToState = (data: any, regime: "old" | "new"): TaxRegimeForm => {
+  const defaults = buildDefaultRegime(regime);
+  const standardDeduction =
+    data && data.standard_deduction !== undefined
+      ? Number(data.standard_deduction).toFixed(2)
+      : defaults.standard_deduction;
+  const cess =
+    data && data.cess_percentage !== undefined
+      ? Number(data.cess_percentage).toString()
+      : defaults.cess_percentage;
+
+  const slabsSource = Array.isArray(data?.slabs) ? data.slabs : defaults.slabs;
+
+  return {
+    regime_type: regime,
+    standard_deduction: standardDeduction,
+    cess_percentage: cess,
+    slabs: slabsSource.map((slab: any) => ({
+      from: slab?.from !== undefined && slab?.from !== null ? String(slab.from) : "",
+      to: slab?.to !== undefined && slab?.to !== null && slab.to !== "" ? String(slab.to) : "",
+      rate: slab?.rate !== undefined && slab?.rate !== null ? String(slab.rate) : "0",
+    })),
+  };
+};
+
 const PayrollSettings = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -33,6 +108,12 @@ const PayrollSettings = () => {
     special_allowance_percentage: "30.00",
     basic_salary_percentage: "40.00"
   });
+  const [financialYear, setFinancialYear] = useState<string>(getCurrentFinancialYear());
+  const [taxRegimes, setTaxRegimes] = useState<Record<"old" | "new", TaxRegimeForm>>({
+    old: buildDefaultRegime("old"),
+    new: buildDefaultRegime("new"),
+  });
+  const [savingRegimes, setSavingRegimes] = useState(false);
 
   // Helper function to format numbers from the DB
   const formatForInput = (data: any) => {
@@ -43,6 +124,24 @@ const PayrollSettings = () => {
     }
     return formatted as PayrollSettingsData;
   };
+
+  const fetchTaxRegimes = useCallback(async (fy: string) => {
+    try {
+      const result = await api.payrollSettings.getTaxRegimes(fy);
+      const regimes = result?.regimes || {};
+      setTaxRegimes({
+        old: mapRegimeToState(regimes.old, "old"),
+        new: mapRegimeToState(regimes.new, "new"),
+      });
+    } catch (error) {
+      console.error("Error fetching tax regimes:", error);
+      toast.error("Failed to load tax regime settings. Using defaults.");
+      setTaxRegimes({
+        old: buildDefaultRegime("old"),
+        new: buildDefaultRegime("new"),
+      });
+    }
+  }, []);
 
 
   useEffect(() => {
@@ -80,6 +179,10 @@ const PayrollSettings = () => {
     fetchData();
   }, [navigate]);
 
+  useEffect(() => {
+    fetchTaxRegimes(financialYear);
+  }, [financialYear, fetchTaxRegimes]);
+
   const handleSave = async () => {
     // Validate percentage sum before submitting
     const total = (parseFloat(settings.basic_salary_percentage || '0') + 
@@ -112,6 +215,93 @@ const PayrollSettings = () => {
   const handleSettingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
     setSettings(prev => ({ ...prev, [id]: value }));
+  };
+
+  const handleRegimeFieldChange = (regime: "old" | "new", field: "standard_deduction" | "cess_percentage", value: string) => {
+    setTaxRegimes((prev) => ({
+      ...prev,
+      [regime]: {
+        ...prev[regime],
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleSlabChange = (regime: "old" | "new", index: number, field: keyof TaxSlabForm, value: string) => {
+    setTaxRegimes((prev) => {
+      const slabs = [...prev[regime].slabs];
+      slabs[index] = { ...slabs[index], [field]: value };
+      return {
+        ...prev,
+        [regime]: {
+          ...prev[regime],
+          slabs,
+        },
+      };
+    });
+  };
+
+  const handleAddSlab = (regime: "old" | "new") => {
+    setTaxRegimes((prev) => {
+      const slabs = [
+        ...prev[regime].slabs,
+        {
+          from: prev[regime].slabs.length ? prev[regime].slabs[prev[regime].slabs.length - 1].to || "0" : "0",
+          to: "",
+          rate: "0",
+        },
+      ];
+      return {
+        ...prev,
+        [regime]: {
+          ...prev[regime],
+          slabs,
+        },
+      };
+    });
+  };
+
+  const handleRemoveSlab = (regime: "old" | "new", index: number) => {
+    setTaxRegimes((prev) => {
+      if (prev[regime].slabs.length <= 1) {
+        return prev;
+      }
+      const slabs = prev[regime].slabs.filter((_, idx) => idx !== index);
+      return {
+        ...prev,
+        [regime]: {
+          ...prev[regime],
+          slabs,
+        },
+      };
+    });
+  };
+
+  const handleSaveTaxRegimes = async () => {
+    setSavingRegimes(true);
+    try {
+      const payload = {
+        financial_year: financialYear,
+        regimes: (["old", "new"] as const).map((regime) => ({
+          regime_type: regime,
+          standard_deduction: parseFloat(taxRegimes[regime].standard_deduction || "0"),
+          cess_percentage: parseFloat(taxRegimes[regime].cess_percentage || "0"),
+          slabs: taxRegimes[regime].slabs.map((slab) => ({
+            from: slab.from ? Number(slab.from) : 0,
+            to: slab.to ? Number(slab.to) : null,
+            rate: slab.rate ? Number(slab.rate) : 0,
+          })).sort((a, b) => a.from - b.from),
+        })),
+      };
+
+      await api.payrollSettings.saveTaxRegimes(payload);
+      toast.success("Tax regimes saved successfully!");
+    } catch (error: any) {
+      console.error("Error saving tax regimes:", error);
+      toast.error(error?.message || "Failed to save tax regimes");
+    } finally {
+      setSavingRegimes(false);
+    }
   };
 
   if (isFetching) {
@@ -275,6 +465,150 @@ const PayrollSettings = () => {
                   );
                 })()}
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Tax Regime Configuration */}
+          <Card className="shadow-md md:col-span-2">
+            <CardHeader>
+              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <CardTitle>Income Tax (TDS) Regimes</CardTitle>
+                  <CardDescription>Configure the tax slabs used for monthly TDS calculations</CardDescription>
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div>
+                    <Label htmlFor="fy">Financial Year</Label>
+                    <Select value={financialYear} onValueChange={setFinancialYear}>
+                      <SelectTrigger id="fy" className="w-40">
+                        <SelectValue placeholder="Select FY" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {financialYearOptions().map((fy) => (
+                          <SelectItem key={fy} value={fy}>
+                            {fy}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={handleSaveTaxRegimes} disabled={savingRegimes}>
+                    {savingRegimes ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="mr-2 h-4 w-4" />
+                    )}
+                    Save Tax Regimes
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {(["old", "new"] as const).map((regime) => {
+                const regimeState = taxRegimes[regime];
+                const title = regime === "old" ? "Old Regime" : "New Regime";
+
+                return (
+                  <div key={regime} className="rounded-lg border p-4 space-y-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold uppercase tracking-wide">{title}</h3>
+                        <p className="text-xs text-muted-foreground">
+                          Define the tax slabs and deductions for the {title.toLowerCase()}.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <div>
+                        <Label>Standard Deduction (₹)</Label>
+                        <Input
+                          value={regimeState.standard_deduction}
+                          onChange={(event) =>
+                            handleRegimeFieldChange(regime, "standard_deduction", event.target.value)
+                          }
+                          type="number"
+                          step="0.01"
+                        />
+                      </div>
+                      <div>
+                        <Label>Cess (%)</Label>
+                        <Input
+                          value={regimeState.cess_percentage}
+                          onChange={(event) =>
+                            handleRegimeFieldChange(regime, "cess_percentage", event.target.value)
+                          }
+                          type="number"
+                          step="0.01"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label>Tax Slabs</Label>
+                        <Button variant="outline" size="sm" onClick={() => handleAddSlab(regime)}>
+                          <Plus className="mr-2 h-4 w-4" />
+                          Add Slab
+                        </Button>
+                      </div>
+                      <div className="space-y-3">
+                        {regimeState.slabs.map((slab, index) => (
+                          <div
+                            key={`${regime}-slab-${index}`}
+                            className="grid gap-3 sm:grid-cols-[repeat(3,minmax(0,1fr))_auto] items-end"
+                          >
+                            <div>
+                              <Label>From (₹)</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={slab.from}
+                                onChange={(event) =>
+                                  handleSlabChange(regime, index, "from", event.target.value)
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label>To (₹)</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                placeholder="Leave blank for no limit"
+                                value={slab.to}
+                                onChange={(event) =>
+                                  handleSlabChange(regime, index, "to", event.target.value)
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label>Rate (%)</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={slab.rate}
+                                onChange={(event) =>
+                                  handleSlabChange(regime, index, "rate", event.target.value)
+                                }
+                              />
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRemoveSlab(regime, index)}
+                              disabled={regimeState.slabs.length <= 1}
+                              className="h-10 w-10"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span className="sr-only">Remove slab</span>
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
 

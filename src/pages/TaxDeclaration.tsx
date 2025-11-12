@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { useNavigate } from "react-router-dom";
 import { Download } from "lucide-react";
 
 interface TaxComponentDefinition {
@@ -27,6 +24,7 @@ interface TaxDeclaration {
   chosen_regime: "old" | "new";
   status: "draft" | "submitted" | "approved" | "rejected";
   remarks?: string;
+  updated_at?: string;
 }
 
 interface TaxDeclarationItem {
@@ -35,20 +33,29 @@ interface TaxDeclarationItem {
   declared_amount: string;
   approved_amount?: string;
   proof_url?: string;
-  notes?: string;
 }
 
-type FormItemState = {
-  declaredAmount: string;
+interface TaxDeclarationResponse {
+  declaration: TaxDeclaration | null;
+  items: TaxDeclarationItem[];
+}
+
+interface ComponentSummary {
+  id: string;
+  label: string;
+  section: string;
+  section_group?: string;
+  max_limit?: string;
+  declared: number;
+  approved: number | null;
   proofUrl: string;
-  include: boolean;
-};
+}
 
 const getCurrentFinancialYear = () => {
   const now = new Date();
   const year = now.getFullYear();
-  const month = now.getMonth(); // 0-based
-  const startYear = month >= 3 ? year : year - 1; // Financial year starts in April
+  const month = now.getMonth();
+  const startYear = month >= 3 ? year : year - 1;
   return `${startYear}-${startYear + 1}`;
 };
 
@@ -57,22 +64,63 @@ const financialYearOptions = () => {
   return [startYear - 1, startYear, startYear + 1].map((year) => `${year}-${year + 1}`);
 };
 
+const formatCurrency = (value: number | null | undefined) => {
+  if (!value || Number.isNaN(value)) {
+    return "—";
+  }
+  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+};
+
+const statusBadge = (status?: string) => {
+  if (!status) return null;
+  let variant: "default" | "secondary" | "outline" = "default";
+  if (status === "draft") variant = "secondary";
+  if (status === "rejected") variant = "outline";
+  return <Badge variant={variant}>{status.toUpperCase()}</Badge>;
+};
+
 export default function TaxDeclaration() {
   const { toast } = useToast();
-  const [financialYear, setFinancialYear] = useState<string>(getCurrentFinancialYear());
+  const [financialYear, setFinancialYear] = useState(getCurrentFinancialYear());
   const [definitions, setDefinitions] = useState<TaxComponentDefinition[]>([]);
   const [declaration, setDeclaration] = useState<TaxDeclaration | null>(null);
   const [items, setItems] = useState<TaxDeclarationItem[]>([]);
-  const [formItems, setFormItems] = useState<Record<string, FormItemState>>({});
-  const [regime, setRegime] = useState<"old" | "new">("old");
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [showOnlyMarked, setShowOnlyMarked] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [financialYear]);
+  }, [financialYear, refreshToken]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        setRefreshToken((token) => token + 1);
+      }
+    };
+
+    window.addEventListener("focus", handleVisibility);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("focus", handleVisibility);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshToken((token) => token + 1);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setRefreshToken((token) => token + 1);
+    window.addEventListener("taxDeclarations:updated", handler);
+    return () => window.removeEventListener("taxDeclarations:updated", handler);
+  }, []);
 
   const loadData = async () => {
     try {
@@ -81,21 +129,13 @@ export default function TaxDeclaration() {
         api.getTaxDefinitions(financialYear),
         api.getMyTaxDeclaration(financialYear),
       ]);
-      setDefinitions(defs || []);
-      setDeclaration(declResult.declaration);
-      setItems(declResult.items || []);
-      setRegime(declResult.declaration?.chosen_regime || "old");
+      const normalizedDefs = Array.isArray(defs) ? (defs as TaxComponentDefinition[]) : [];
+      const normalizedDecl = (declResult || {}) as TaxDeclarationResponse;
+      const normalizedItems = Array.isArray(normalizedDecl.items) ? normalizedDecl.items : [];
 
-      const draftState: Record<string, FormItemState> = {};
-      defs?.forEach((def: TaxComponentDefinition) => {
-        const existing = (declResult.items || []).find((item: TaxDeclarationItem) => item.component_id === def.id);
-        draftState[def.id] = {
-          declaredAmount: existing ? (parseFloat(existing.declared_amount).toString() || "0") : "",
-          proofUrl: existing?.proof_url || "",
-          include: existing ? parseFloat(existing.declared_amount) > 0 : false,
-        };
-      });
-      setFormItems(draftState);
+      setDefinitions(normalizedDefs);
+      setDeclaration(normalizedDecl.declaration || null);
+      setItems(normalizedItems);
     } catch (error: any) {
       console.error("Failed to load tax declaration data", error);
       toast({
@@ -108,124 +148,91 @@ export default function TaxDeclaration() {
     }
   };
 
-  const filteredDefinitions = useMemo(() => {
-    if (!showOnlyMarked) {
-      return definitions;
+  const componentSummaries = useMemo<ComponentSummary[]>(() => {
+    const byId = new Map(items.map((item) => [item.component_id, item]));
+
+    if (definitions.length === 0 && items.length > 0) {
+      // No definitions returned—fallback to items only
+      return items.map<ComponentSummary>((item) => ({
+        id: item.component_id,
+        label: "Declared Component",
+        section: "-",
+        section_group: undefined,
+        declared: Number(item.declared_amount || 0),
+        approved: item.approved_amount ? Number(item.approved_amount) : null,
+        proofUrl: item.proof_url || "",
+      }));
     }
-    return definitions.filter((def) => formItems[def.id]?.include);
-  }, [definitions, formItems, showOnlyMarked]);
 
-  const handleToggleInclude = (componentId: string, checked: boolean) => {
-    setFormItems((prev) => ({
-      ...prev,
-      [componentId]: {
-        ...prev[componentId],
-        include: checked,
-        declaredAmount: checked ? prev[componentId]?.declaredAmount || "" : "",
-      },
-    }));
-  };
+    return definitions.map<ComponentSummary>((definition) => {
+      const record = byId.get(definition.id);
+      return {
+        id: definition.id,
+        label: definition.label,
+        section: definition.section,
+        section_group: definition.section_group,
+        max_limit: definition.max_limit,
+        declared: record ? Number(record.declared_amount || 0) : 0,
+        approved: record?.approved_amount ? Number(record.approved_amount) : null,
+        proofUrl: record?.proof_url || "",
+      };
+    });
+  }, [definitions, items]);
 
-  const handleAmountChange = (componentId: string, value: string) => {
-    setFormItems((prev) => ({
-      ...prev,
-      [componentId]: {
-        ...prev[componentId],
-        declaredAmount: value,
-        include: true,
-      },
-    }));
-  };
-
-  const handleProofChange = (componentId: string, value: string) => {
-    setFormItems((prev) => ({
-      ...prev,
-      [componentId]: {
-        ...prev[componentId],
-        proofUrl: value,
-      },
-    }));
-  };
-
-  const buildPayloadItems = () => {
-    const payloadItems: Array<{
-      component_id: string;
-      declared_amount: number;
-      proof_url?: string;
-    }> = [];
-    definitions.forEach((def) => {
-      const itemState = formItems[def.id];
-      if (!itemState) return;
-      const declared = Number(itemState.declaredAmount || 0);
-      if (itemState.include && declared > 0) {
-        payloadItems.push({
-          component_id: def.id,
-          declared_amount: declared,
-          proof_url: itemState.proofUrl || undefined,
-        });
+  const totals = useMemo(() => {
+    let declared = 0;
+    let approved = 0;
+    let hasApproved = false;
+    componentSummaries.forEach((component) => {
+      declared += component.declared || 0;
+      if (component.approved !== null && component.approved !== undefined) {
+        hasApproved = true;
+        approved += component.approved || 0;
       }
     });
-    return payloadItems;
-  };
+    return { declared, approved, hasApproved };
+  }, [componentSummaries]);
 
-  const handleSave = async (targetStatus: "draft" | "submitted") => {
-    if (targetStatus === "submitted" && definitions.length === 0) {
-      toast({
-        title: "Missing definitions",
-        description: "No tax components defined for this financial year.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const payloadItems = buildPayloadItems();
-
-    if (targetStatus === "submitted" && payloadItems.length === 0) {
-      toast({
-        title: "No deductions",
-        description: "Add at least one tax component before submitting.",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  const handleDownloadForm16 = async () => {
     try {
-      setSaving(true);
-      await api.saveTaxDeclaration({
-        financial_year: financialYear,
-        chosen_regime: regime,
-        status: targetStatus,
-        items: payloadItems,
-      });
-
-      toast({
-        title: targetStatus === "submitted" ? "Declaration submitted" : "Draft saved",
-        description:
-          targetStatus === "submitted"
-            ? "Your declaration has been submitted for approval."
-            : "Your draft was saved successfully.",
-      });
-
-      await loadData();
+      setDownloading(true);
+      const blob = await api.downloadForm16(financialYear);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Form16-${financialYear}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
     } catch (error: any) {
-      console.error("Failed to save tax declaration", error);
+      console.error("Failed to download Form 16", error);
       toast({
-        title: "Error",
-        description: error?.message || "Unable to save tax declaration",
+        title: "Download failed",
+        description: error?.message || "Unable to download Form 16.",
         variant: "destructive",
       });
     } finally {
-      setSaving(false);
+      setDownloading(false);
     }
   };
 
-  const statusBadge = (status?: string) => {
-    if (!status) return null;
-    let variant: "default" | "secondary" | "outline" = "default";
-    if (status === "draft") variant = "secondary";
-    if (status === "rejected") variant = "outline";
-    return <Badge variant={variant}>{status.toUpperCase()}</Badge>;
-  };
+  const statusMessage = useMemo(() => {
+    const status = declaration?.status;
+    if (!status) {
+      return "Submit your declaration through the payroll portal to see the latest status here.";
+    }
+    if (status === "approved") {
+      return "Your declaration has been approved. Keep this summary for your records.";
+    }
+    if (status === "rejected") {
+      return "Your declaration was rejected. Review the remarks above and submit corrections in the payroll portal.";
+    }
+    if (status === "submitted") {
+      return "Your declaration is awaiting review. HR will update the status once it is processed.";
+    }
+    return "Draft saved. Complete submission from the payroll portal when you are ready.";
+  }, [declaration?.status]);
 
   return (
     <AppLayout>
@@ -233,22 +240,15 @@ export default function TaxDeclaration() {
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-3xl font-bold">Tax Declaration</h1>
-            <p className="text-muted-foreground">
-              Declare your tax-saving investments for the selected financial year.
+            <p className="text-muted-foreground max-w-prose">
+              Employees now submit their declarations in the payroll portal. This page provides a read-only summary of
+              the latest information on record.
             </p>
           </div>
           <div className="flex items-end gap-3 flex-wrap">
-            <Button variant="outline" onClick={() => navigate("/reports/form16")} className="flex-shrink-0">
-              <Download className="mr-2 h-4 w-4" />
-              Download Form 16
-            </Button>
             <div className="space-y-1">
               <Label htmlFor="financialYear">Financial Year</Label>
-              <Select
-                value={financialYear}
-                onValueChange={(value) => setFinancialYear(value)}
-                disabled={saving}
-              >
+              <Select value={financialYear} onValueChange={setFinancialYear}>
                 <SelectTrigger id="financialYear" className="w-40">
                   <SelectValue placeholder="Select FY" />
                 </SelectTrigger>
@@ -261,22 +261,13 @@ export default function TaxDeclaration() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="regime">Tax Regime</Label>
-              <Select
-                value={regime}
-                onValueChange={(value: "old" | "new") => setRegime(value)}
-                disabled={saving || declaration?.status === "approved"}
-              >
-                <SelectTrigger id="regime" className="w-32">
-                  <SelectValue placeholder="Select" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="old">Old Regime</SelectItem>
-                  <SelectItem value="new">New Regime</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Button variant="outline" onClick={() => setRefreshToken((token) => token + 1)}>
+              Refresh
+            </Button>
+            <Button variant="outline" onClick={handleDownloadForm16} disabled={downloading}>
+              <Download className="mr-2 h-4 w-4" />
+              {downloading ? "Preparing…" : "Download Form 16"}
+            </Button>
           </div>
         </div>
 
@@ -287,21 +278,25 @@ export default function TaxDeclaration() {
               {statusBadge(declaration?.status)}
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="showOnlyMarked"
-                checked={showOnlyMarked}
-                onCheckedChange={setShowOnlyMarked}
-              />
-              <Label htmlFor="showOnlyMarked">Show only components I have declared</Label>
-            </div>
+          <CardContent className="space-y-2 text-sm">
+            <p>
+              <span className="font-medium">Tax Regime:</span>{" "}
+              {declaration?.chosen_regime ? declaration.chosen_regime.toUpperCase() : "OLD"}
+            </p>
+            <p>
+              <span className="font-medium">Total Declared:</span> {formatCurrency(totals.declared)}
+            </p>
+            <p>
+              <span className="font-medium">Total Approved:</span>{" "}
+              {totals.hasApproved ? formatCurrency(totals.approved) : "Pending review"}
+            </p>
             {declaration?.remarks && (
-              <div className="bg-muted/40 border border-muted p-3 rounded-md">
-                <p className="text-sm font-semibold">Reviewer Remarks</p>
-                <p className="text-sm text-muted-foreground">{declaration.remarks}</p>
+              <div className="mt-3 rounded-md border border-muted bg-muted/40 p-3 text-sm">
+                <p className="font-medium">Reviewer Remarks</p>
+                <p className="text-muted-foreground">{declaration.remarks}</p>
               </div>
             )}
+            <p className="mt-3 text-muted-foreground">{statusMessage}</p>
           </CardContent>
         </Card>
 
@@ -311,109 +306,63 @@ export default function TaxDeclaration() {
           </CardHeader>
           <CardContent className="space-y-4">
             {loading ? (
-              <div className="text-muted-foreground">Loading tax components…</div>
-            ) : filteredDefinitions.length === 0 ? (
-              <div className="text-muted-foreground">No tax components defined for this financial year.</div>
-            ) : (
-              <div className="space-y-6">
-                {filteredDefinitions.map((definition) => {
-                  const state = formItems[definition.id] || { declaredAmount: "", proofUrl: "", include: false };
-                  const existing = items.find((item) => item.component_id === definition.id);
-                  const approvedAmount = existing?.approved_amount
-                    ? `Approved: ₹${parseFloat(existing.approved_amount).toFixed(2)}`
-                    : undefined;
-
-                  return (
-                    <div key={definition.id} className="border rounded-lg p-4 space-y-3">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <h3 className="text-lg font-semibold">{definition.label}</h3>
-                          <p className="text-sm text-muted-foreground">
-                            Section {definition.section}
-                            {definition.section_group ? ` • Group ${definition.section_group}` : ""}
-                            {definition.max_limit ? ` • Max ₹${Number(definition.max_limit).toLocaleString()}` : ""}
-                          </p>
-                          {approvedAmount && (
-                            <p className="text-sm text-emerald-600 mt-1">{approvedAmount}</p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            checked={state.include}
-                            onCheckedChange={(checked) => handleToggleInclude(definition.id, checked)}
-                            disabled={declaration?.status === "approved"}
-                          />
-                          <Label className="text-sm text-muted-foreground">Include</Label>
-                        </div>
-                      </div>
-
-                      {state.include && (
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <div className="space-y-2">
-                            <Label>Declared Amount (₹)</Label>
-                            <Input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={state.declaredAmount}
-                              onChange={(event) => handleAmountChange(definition.id, event.target.value)}
-                              disabled={declaration?.status === "approved"}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Proof Document URL</Label>
-                            <Input
-                              type="url"
-                              placeholder="https://"
-                              value={state.proofUrl}
-                              onChange={(event) => handleProofChange(definition.id, event.target.value)}
-                              disabled={declaration?.status === "approved"}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-3">
-            <Button
-              variant="outline"
-              onClick={() => handleSave("draft")}
-              disabled={saving || declaration?.status === "approved"}
-            >
-              Save Draft
-            </Button>
-            <Button
-              onClick={() => handleSave("submitted")}
-              disabled={saving || declaration?.status === "approved"}
-            >
-              Submit for Approval
-            </Button>
-            {declaration?.status === "approved" && (
-              <p className="text-sm text-emerald-600">
-                Your declaration has been approved. Reach out to HR if further changes are required.
+              <Skeleton className="h-32 w-full" />
+            ) : componentSummaries.length === 0 ? (
+              <p className="text-muted-foreground">
+                No declarations are on file for this financial year. Ask employees to submit their details from the
+                payroll portal.
               </p>
-            )}
-            {declaration?.status === "rejected" && (
-              <div className="space-y-2 w-full">
-                <p className="text-sm text-destructive">
-                  Your declaration was rejected. Review the remarks above and resubmit once updated.
-                </p>
-                <Textarea
-                  value={declaration.remarks || ""}
-                  disabled
-                  className="text-sm text-muted-foreground"
-                />
-              </div>
+            ) : (
+              componentSummaries.map((component) => (
+                <div key={component.id} className="border rounded-lg p-4 space-y-3">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold">{component.label}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Section {component.section}
+                        {component.section_group ? ` • Group ${component.section_group}` : ""}
+                        {component.max_limit ? ` • Max ₹${Number(component.max_limit).toLocaleString()}` : ""}
+                      </p>
+                    </div>
+                    {component.declared > 0 ? (
+                      <Badge variant="outline">Declared</Badge>
+                    ) : (
+                      <Badge variant="secondary">Not Declared</Badge>
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                      <p className="font-medium text-muted-foreground">Declared Amount</p>
+                      <p className="text-base">{formatCurrency(component.declared)}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-muted-foreground">Approved Amount</p>
+                      <p className="text-base">
+                        {component.approved !== null && component.approved !== undefined
+                          ? formatCurrency(component.approved)
+                          : "Pending review"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-sm">
+                    <p className="font-medium text-muted-foreground">Proof Document</p>
+                    {component.proofUrl ? (
+                      <a
+                        href={component.proofUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline underline-offset-2"
+                      >
+                        View proof
+                      </a>
+                    ) : (
+                      <p className="text-muted-foreground">No proof uploaded.</p>
+                    )}
+                  </div>
+                </div>
+              ))
             )}
           </CardContent>
         </Card>
@@ -421,5 +370,4 @@ export default function TaxDeclaration() {
     </AppLayout>
   );
 }
-
 

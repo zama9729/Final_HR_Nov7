@@ -1,4 +1,7 @@
 import express from 'express';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 import { query } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { requireCapability, CAPABILITIES } from '../policy/authorize.js';
@@ -13,6 +16,60 @@ const safeAudit = async (payload) => {
     console.warn('[AUDIT] audit log skipped:', err?.message || err);
   }
 };
+
+const PROOFS_DIRECTORY =
+  process.env.TAX_PROOFS_DIR || path.resolve(process.cwd(), 'uploads', 'tax-proofs');
+const PROOFS_BASE_URL = process.env.TAX_PROOFS_BASE_URL || '/tax-proofs';
+fs.mkdirSync(PROOFS_DIRECTORY, { recursive: true });
+
+const proofStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, PROOFS_DIRECTORY),
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const sanitized = file.originalname.replace(/\s+/g, '_');
+    cb(null, `${uniqueSuffix}-${sanitized}`);
+  },
+});
+
+const proofUpload = multer({
+  storage: proofStorage,
+  limits: {
+    fileSize: Number(process.env.TAX_PROOF_MAX_SIZE || 5 * 1024 * 1024),
+  },
+});
+
+router.post('/proofs', authenticateToken, proofUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'File is required' });
+    }
+
+    const { component_id: componentId, financial_year: financialYear } = req.body;
+
+    if (!componentId) {
+      return res.status(400).json({ error: 'component_id is required' });
+    }
+
+    if (!financialYear) {
+      return res.status(400).json({ error: 'financial_year is required' });
+    }
+
+    const basePath = PROOFS_BASE_URL.startsWith('http')
+      ? PROOFS_BASE_URL
+      : `${req.protocol}://${req.get('host')}${PROOFS_BASE_URL}`;
+    const url = `${basePath.replace(/\/+$/, '')}/${req.file.filename}`;
+
+    res.json({
+      url,
+      fileName: req.file.originalname,
+      size: req.file.size,
+      mimeType: req.file.mimetype,
+    });
+  } catch (error) {
+    console.error('Error uploading tax declaration proof:', error);
+    res.status(500).json({ error: error.message || 'Failed to upload proof' });
+  }
+});
 
 const getTenantIdForUser = async (userId) => {
   const result = await query(

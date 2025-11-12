@@ -66,6 +66,41 @@ const TAX_COMPONENT_MAP = [
   },
 ] as const;
 
+const defaultTaxRegimeSlabs: Record<"old" | "new", Array<{ from: number; to: number | null; rate: number }>> = {
+  old: [
+    { from: 0, to: 250000, rate: 0 },
+    { from: 250000, to: 500000, rate: 5 },
+    { from: 500000, to: 1000000, rate: 20 },
+    { from: 1000000, to: null, rate: 30 },
+  ],
+  new: [
+    { from: 0, to: 300000, rate: 0 },
+    { from: 300000, to: 600000, rate: 5 },
+    { from: 600000, to: 900000, rate: 10 },
+    { from: 900000, to: 1200000, rate: 15 },
+    { from: 1200000, to: 1500000, rate: 20 },
+    { from: 1500000, to: null, rate: 30 },
+  ],
+};
+
+function getCurrentFinancialYearString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const startYear = now.getMonth() >= 3 ? year : year - 1;
+  return `${startYear}-${startYear + 1}`;
+}
+
+function buildDefaultTaxRegime(regime: "old" | "new", financialYear: string) {
+  return {
+    regime_type: regime,
+    financial_year: financialYear,
+    standard_deduction: regime === "new" ? 75000 : 50000,
+    cess_percentage: 4,
+    slabs: defaultTaxRegimeSlabs[regime],
+    surcharge_rules: [],
+  };
+}
+
 export const appRouter = Router();
 appRouter.get("/test", (req, res) => {
   res.json({ message: "Router is working!" });
@@ -3453,6 +3488,61 @@ appRouter.get("/payroll-settings", requireAuth, async (req: Request, res: Respon
   }
 });
 
+appRouter.get("/payroll-settings/tax-regimes", requireAuth, async (req: Request, res: Response) => {
+  const tenantId = (req as any).tenantId as string;
+  if (!tenantId) {
+    return res.status(403).json({ error: "You are not part of a tenant." });
+  }
+
+  const financialYearParam = req.query.financial_year;
+  const financialYear =
+    typeof financialYearParam === "string" && financialYearParam.trim().length > 0
+      ? financialYearParam.trim()
+      : getCurrentFinancialYearString();
+
+  try {
+    const { rows } = await query(
+      `SELECT tenant_id, financial_year, regime_type, slabs, standard_deduction, surcharge_rules, cess_percentage
+       FROM tax_regimes
+       WHERE financial_year = $1
+         AND (tenant_id = $2 OR tenant_id IS NULL)
+       ORDER BY tenant_id DESC NULLS LAST`,
+      [financialYear, tenantId]
+    );
+
+    const regimeMap = new Map<string, any>();
+    rows.forEach((row) => {
+      const key = row.regime_type;
+      if (!regimeMap.has(key) || row.tenant_id === tenantId) {
+        regimeMap.set(key, row);
+      }
+    });
+
+    const oldRegime = regimeMap.get("old") || buildDefaultTaxRegime("old", financialYear);
+    const newRegime = regimeMap.get("new") || buildDefaultTaxRegime("new", financialYear);
+
+    const formatRegime = (regime: any, type: "old" | "new") => ({
+      regime_type: type,
+      financial_year: financialYear,
+      standard_deduction: Number(regime.standard_deduction ?? buildDefaultTaxRegime(type, financialYear).standard_deduction),
+      cess_percentage: Number(regime.cess_percentage ?? 4),
+      slabs: Array.isArray(regime.slabs) ? regime.slabs : buildDefaultTaxRegime(type, financialYear).slabs,
+      surcharge_rules: Array.isArray(regime.surcharge_rules) ? regime.surcharge_rules : [],
+    });
+
+    return res.json({
+      financial_year: financialYear,
+      regimes: {
+        old: formatRegime(oldRegime, "old"),
+        new: formatRegime(newRegime, "new"),
+      },
+    });
+  } catch (error: any) {
+    console.error("Error fetching tax regimes:", error);
+    return res.status(500).json({ error: error.message || "Failed to fetch tax regimes" });
+  }
+});
+
 appRouter.post("/payroll-settings", requireAuth, async (req: Request, res: Response) => {
   const tenantId = (req as any).tenantId as string; // Get from middleware
 
@@ -3523,6 +3613,80 @@ appRouter.post("/payroll-settings", requireAuth, async (req: Request, res: Respo
   } catch (error) {
     console.error("Error saving payroll settings:", error);
     return res.status(500).json({ error: "Failed to save settings" });
+  }
+});
+
+appRouter.post("/payroll-settings/tax-regimes", requireAuth, async (req: Request, res: Response) => {
+  const tenantId = (req as any).tenantId as string;
+  if (!tenantId) {
+    return res.status(403).json({ error: "You are not part of a tenant." });
+  }
+
+  const { financial_year: financialYearRaw, regimes } = req.body;
+  if (!Array.isArray(regimes) || regimes.length === 0) {
+    return res.status(400).json({ error: "regimes payload is required" });
+  }
+
+  const financialYear =
+    typeof financialYearRaw === "string" && financialYearRaw.trim().length > 0
+      ? financialYearRaw.trim()
+      : getCurrentFinancialYearString();
+
+  try {
+    for (const regime of regimes) {
+      if (!regime?.regime_type || !["old", "new"].includes(regime.regime_type)) {
+        return res.status(400).json({ error: "Invalid regime_type supplied" });
+      }
+
+      const slabs =
+        Array.isArray(regime.slabs) && regime.slabs.length > 0
+          ? regime.slabs.map((slab: any) => ({
+              from: Number(slab.from || 0),
+              to: slab.to === null || slab.to === "" ? null : Number(slab.to),
+              rate: Number(slab.rate || 0),
+            }))
+          : defaultTaxRegimeSlabs[regime.regime_type as "old" | "new"];
+
+      await query(
+        `
+        INSERT INTO tax_regimes (
+          tenant_id,
+          financial_year,
+          regime_type,
+          slabs,
+          standard_deduction,
+          surcharge_rules,
+          cess_percentage,
+          is_default,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW())
+        ON CONFLICT ON CONSTRAINT ux_tax_regimes_scope_year
+        DO UPDATE SET
+          slabs = EXCLUDED.slabs,
+          standard_deduction = EXCLUDED.standard_deduction,
+          surcharge_rules = EXCLUDED.surcharge_rules,
+          cess_percentage = EXCLUDED.cess_percentage,
+          tenant_id = EXCLUDED.tenant_id,
+          is_default = false,
+          updated_at = NOW()
+        `,
+        [
+          tenantId,
+          financialYear,
+          regime.regime_type,
+          JSON.stringify(slabs),
+          Number(regime.standard_deduction ?? 0),
+          JSON.stringify(Array.isArray(regime.surcharge_rules) ? regime.surcharge_rules : []),
+          Number(regime.cess_percentage ?? 4),
+        ]
+      );
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error("Error saving tax regimes:", error);
+    return res.status(500).json({ error: error.message || "Failed to save tax regimes" });
   }
 });
 

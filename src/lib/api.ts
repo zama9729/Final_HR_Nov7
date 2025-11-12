@@ -1046,6 +1046,23 @@ class ApiClient {
     });
   }
 
+  async uploadTaxProof(params: { componentId: string; financialYear: string; file: File }) {
+    const formData = new FormData();
+    formData.append('component_id', params.componentId);
+    formData.append('financial_year', params.financialYear);
+    formData.append('file', params.file);
+
+    return this.request(
+      '/api/tax/declarations/proofs',
+      {
+        method: 'POST',
+        body: formData,
+        headers: {} as HeadersInit,
+      },
+      true,
+    );
+  }
+
   async getTaxDeclarations(params?: { financial_year?: string; status?: string }) {
     const searchParams = new URLSearchParams();
     if (params?.financial_year) searchParams.append('financial_year', params.financial_year);

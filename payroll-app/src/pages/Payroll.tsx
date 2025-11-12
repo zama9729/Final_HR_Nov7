@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Calendar, Settings } from "lucide-react";
 // Use relative paths assuming /pages is not in /src
@@ -73,9 +74,11 @@ const Payroll = () => {
               <p className="text-muted-foreground">Manage monthly payroll runs</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => navigate("/payroll/settings")}>
-                <Settings className="mr-2 h-4 w-4" />
-                Configure Payroll
+              <Button variant="outline" asChild>
+                <Link to="/payroll/settings">
+                  <Settings className="mr-2 h-4 w-4" />
+                  Configure Payroll
+                </Link>
               </Button>
               {/* Remove tenantId and userId props */}
               {isAdmin && (
