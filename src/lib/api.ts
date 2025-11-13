@@ -954,6 +954,28 @@ class ApiClient {
     return this.request('/api/payroll/sso');
   }
 
+  // AI Action Assistant methods
+  async listAIConversations() {
+    return this.request('/api/ai/conversations');
+  }
+
+  async getAIConversation(conversationId: string) {
+    return this.request(`/api/ai/conversations/${conversationId}`);
+  }
+
+  async deleteAIConversation(conversationId: string) {
+    return this.request(`/api/ai/conversations/${conversationId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async updateAIConversationTitle(conversationId: string, title: string) {
+    return this.request(`/api/ai/conversations/${conversationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    });
+  }
+
   // RAG Service methods
   async queryRAG(query: string, top_k?: number, use_tools: boolean = true) {
     const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';

@@ -6,6 +6,54 @@ import { streamChatCompletion, getChatCompletion, chatWithFunctions, generatePro
 
 const router = express.Router();
 
+let aiConversationsTableEnsured = false;
+
+async function ensureAIConversationsTable() {
+  if (aiConversationsTableEnsured) return;
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_conversations (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        tenant_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        title TEXT DEFAULT 'New Conversation',
+        messages JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ai_conversations_tenant ON ai_conversations(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_conversations_user ON ai_conversations(user_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_conversations_created ON ai_conversations(created_at DESC);
+    `);
+    await query(`
+      CREATE OR REPLACE FUNCTION set_ai_conversations_updated_at()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        NEW.updated_at = now();
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger
+          WHERE tgname = 'update_ai_conversations_updated_at'
+        ) THEN
+          CREATE TRIGGER update_ai_conversations_updated_at
+            BEFORE UPDATE ON ai_conversations
+            FOR EACH ROW EXECUTE FUNCTION set_ai_conversations_updated_at();
+        END IF;
+      END;
+      $$;
+    `);
+    aiConversationsTableEnsured = true;
+  } catch (error) {
+    console.error('Failed to ensure ai_conversations table exists:', error);
+  }
+}
+
 // Simple API key middleware
 function requireApiKey(req, res, next) {
   const key = req.header('x-api-key') || req.query.api_key;
@@ -270,8 +318,11 @@ router.get('/policy/explain', requireApiKey, rateLimit(60), async (req, res) => 
 
 // Chat endpoint - streaming chat with OpenAI and function calling
 router.post('/chat', authenticateToken, async (req, res) => {
+  console.log('[AI Assistant] Chat request received');
   try {
+    await ensureAIConversationsTable();
     const { messages, enable_functions = true, conversation_id } = req.body;
+    console.log('[AI Assistant] Messages count:', messages?.length, 'Enable functions:', enable_functions);
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Messages array is required' });
@@ -298,8 +349,11 @@ router.post('/chat', authenticateToken, async (req, res) => {
     const userContextMessage = userContext ? buildUserContextMessage(userContext) : '';
 
     if (!tenantId) {
+      console.error('[AI Assistant] No tenant ID found for user:', userId);
       return res.status(403).json({ error: 'No organization found' });
     }
+
+    console.log('[AI Assistant] User:', userId, 'Tenant:', tenantId, 'Role:', userRole);
 
     // Set headers for streaming
     res.setHeader('Content-Type', 'text/event-stream');
@@ -311,6 +365,11 @@ router.post('/chat', authenticateToken, async (req, res) => {
     try {
       const { executeFunction } = await import('../services/ai/functions.js');
       const { chatWithFunctions } = await import('../services/openai.js');
+      console.log('[AI Assistant] Starting stream with functions enabled:', enable_functions);
+
+      // Track all messages for conversation saving
+      let allConversationMessages = [...messages];
+      let finalAssistantContent = '';
 
       // If function calling is enabled, use the function-enabled chat
       if (enable_functions) {
@@ -323,9 +382,11 @@ router.post('/chat', authenticateToken, async (req, res) => {
             userContext: userContextMessage,
             tenantId: tenantId, // Pass tenantId for mini app discovery
           });
+          console.log('[AI Assistant] Stream obtained, processing...');
 
         let hasFunctionCall = false;
         let toolCalls = [];
+        let assistantContent = '';
 
         // Process stream and detect function calls
         for await (const chunk of stream) {
@@ -362,12 +423,18 @@ router.post('/chat', authenticateToken, async (req, res) => {
 
           const content = delta?.content;
           if (content) {
+            assistantContent += content;
             res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
           }
         }
 
         // If function calls were detected, handle them
         if (hasFunctionCall && toolCalls.length > 0) {
+          console.log('[AI Assistant] Function calls detected:', toolCalls.length);
+          // Send any accumulated assistant content before function calls
+          if (assistantContent) {
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: assistantContent } }] })}\n\n`);
+          }
           // Close current stream
           res.write('data: [FUNCTION_CALL]\n\n');
 
@@ -399,16 +466,35 @@ router.post('/chat', authenticateToken, async (req, res) => {
                 tenantId
               );
 
+              const resultStr = typeof functionResult === 'string' ? functionResult : JSON.stringify(functionResult);
+              
               allToolResults.push({
                 toolCallId: toolCall.id,
-                result: typeof functionResult === 'string' ? functionResult : JSON.stringify(functionResult),
+                result: resultStr,
               });
+
+              // Send tool result as SSE event for frontend
+              res.write(`data: ${JSON.stringify({ 
+                type: 'tool_result', 
+                tool_call_id: toolCall.id,
+                tool_name: functionName,
+                result: resultStr 
+              })}\n\n`);
             } catch (funcError) {
               console.error(`Error executing function ${functionName}:`, funcError);
+              const errorMsg = funcError.message || 'Function execution failed';
               allToolResults.push({
                 toolCallId: toolCall.id,
-                result: JSON.stringify({ error: funcError.message || 'Function execution failed' }),
+                result: JSON.stringify({ error: errorMsg }),
               });
+
+              // Send tool error as SSE event for frontend
+              res.write(`data: ${JSON.stringify({ 
+                type: 'tool_error', 
+                tool_call_id: toolCall.id,
+                tool_name: functionName,
+                error: errorMsg 
+              })}\n\n`);
             }
           }
 
@@ -446,19 +532,90 @@ router.post('/chat', authenticateToken, async (req, res) => {
               async (fnName, fnArgs) => await executeFunction(fnName, fnArgs, userId, tenantId)
             );
 
+            finalAssistantContent = finalResponse;
+
             // Send final response
             res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: finalResponse } }] })}\n\n`);
+            
+            // Update conversation messages with final response
+            allConversationMessages = [
+              ...messages,
+              assistantMessage,
+              ...toolMessages,
+              { role: 'assistant', content: finalResponse }
+            ];
           } catch (chatError) {
             console.error('Error in chatWithFunctions:', chatError);
             res.write(`data: ${JSON.stringify({ error: chatError.message || 'Error processing request' })}\n\n`);
+            
+            // Update conversation messages even on error
+            allConversationMessages = [
+              ...messages,
+              assistantMessage,
+              ...toolMessages,
+              { role: 'assistant', content: `Error: ${chatError.message || 'Error processing request'}` }
+            ];
+          }
+        } else {
+          // No function calls, just save the assistant response
+          console.log('[AI Assistant] No function calls, assistant content length:', assistantContent.length);
+          if (assistantContent) {
+            allConversationMessages.push({ role: 'assistant', content: assistantContent });
+            finalAssistantContent = assistantContent;
+          } else {
+            // If no content was received, send a default message
+            console.warn('[AI Assistant] No assistant content received, sending default message');
+            const defaultMessage = "I'm ready to help. Please let me know what you'd like me to do.";
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: defaultMessage } }] })}\n\n`);
+            allConversationMessages.push({ role: 'assistant', content: defaultMessage });
+            finalAssistantContent = defaultMessage;
           }
         }
 
-          // Send done signal
-          res.write('data: [DONE]\n\n');
-          res.end();
+        // Save conversation before ending response
+        try {
+          const title = messages[0]?.content?.substring(0, 100) || 'New Conversation';
+          
+          if (conversation_id) {
+            // Update existing conversation
+            await query(
+              `UPDATE ai_conversations 
+               SET messages = $1::jsonb, title = $2, updated_at = now()
+               WHERE id = $3 AND user_id = $4 AND tenant_id = $5`,
+              [JSON.stringify(allConversationMessages), title, conversation_id, userId, tenantId]
+            );
+            res.write(`data: ${JSON.stringify({ conversation_id })}\n\n`);
+          } else {
+            // Create new conversation
+            const convResult = await query(
+              `INSERT INTO ai_conversations (tenant_id, user_id, title, messages)
+               VALUES ($1, $2, $3, $4::jsonb)
+               RETURNING id`,
+              [tenantId, userId, title, JSON.stringify(allConversationMessages)]
+            );
+            
+            // Send conversation ID back to client
+            if (convResult.rows.length > 0) {
+              res.write(`data: ${JSON.stringify({ conversation_id: convResult.rows[0].id })}\n\n`);
+            }
+          }
+        } catch (saveError) {
+          console.error('Error saving conversation:', saveError);
+          // Don't fail the request if saving fails
+        }
+
+        // Send done signal
+        res.write('data: [DONE]\n\n');
+        res.end();
         } catch (functionStreamError) {
-          console.error('Function streaming error:', functionStreamError);
+          console.error('[AI Assistant] Function streaming error:', functionStreamError);
+          // Check if it's an OpenAI initialization error
+          if (functionStreamError.message && functionStreamError.message.includes('OpenAI client is not initialized')) {
+            res.write(`data: ${JSON.stringify({ error: 'OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable.' })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+            return;
+          }
           // Fallback to simple chat without functions
           try {
             const simpleStream = await streamChatCompletion(messages, {
@@ -477,14 +634,18 @@ router.post('/chat', authenticateToken, async (req, res) => {
             res.write('data: [DONE]\n\n');
             res.end();
           } catch (fallbackError) {
-            console.error('Fallback streaming error:', fallbackError);
-            res.write(`data: ${JSON.stringify({ error: 'Failed to generate response. Please try again.' })}\n\n`);
+            console.error('[AI Assistant] Fallback streaming error:', fallbackError);
+            const errorMsg = fallbackError.message && fallbackError.message.includes('OpenAI client is not initialized')
+              ? 'OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable.'
+              : 'Failed to generate response. Please try again.';
+            res.write(`data: ${JSON.stringify({ error: errorMsg })}\n\n`);
             res.write('data: [DONE]\n\n');
             res.end();
           }
         }
       } else {
         // Simple streaming without function calls
+        let simpleAssistantContent = '';
         try {
           const stream = await streamChatCompletion(messages, {
             role: userRole,
@@ -496,8 +657,42 @@ router.post('/chat', authenticateToken, async (req, res) => {
           for await (const chunk of stream) {
             const content = chunk.choices[0]?.delta?.content;
             if (content) {
+              simpleAssistantContent += content;
               res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
             }
+          }
+
+          // Save conversation for simple chat
+          allConversationMessages = [
+            ...messages,
+            { role: 'assistant', content: simpleAssistantContent }
+          ];
+
+          try {
+            const title = messages[0]?.content?.substring(0, 100) || 'New Conversation';
+            
+            if (conversation_id) {
+              await query(
+                `UPDATE ai_conversations 
+                 SET messages = $1::jsonb, title = $2, updated_at = now()
+                 WHERE id = $3 AND user_id = $4 AND tenant_id = $5`,
+                [JSON.stringify(allConversationMessages), title, conversation_id, userId, tenantId]
+              );
+              res.write(`data: ${JSON.stringify({ conversation_id })}\n\n`);
+            } else {
+              const convResult = await query(
+                `INSERT INTO ai_conversations (tenant_id, user_id, title, messages)
+                 VALUES ($1, $2, $3, $4::jsonb)
+                 RETURNING id`,
+                [tenantId, userId, title, JSON.stringify(allConversationMessages)]
+              );
+              
+              if (convResult.rows.length > 0) {
+                res.write(`data: ${JSON.stringify({ conversation_id: convResult.rows[0].id })}\n\n`);
+              }
+            }
+          } catch (saveError) {
+            console.error('Error saving conversation:', saveError);
           }
 
           res.write('data: [DONE]\n\n');
@@ -509,48 +704,26 @@ router.post('/chat', authenticateToken, async (req, res) => {
           res.end();
         }
       }
-      
-      // Save conversation to history
-      try {
-        const allMessages = [...messages, { role: 'user', content: messages[messages.length - 1]?.content || '' }];
-        const lastMessage = allMessages[allMessages.length - 1];
-        const title = lastMessage?.content?.substring(0, 100) || 'New Conversation';
-        
-        if (conversation_id) {
-          // Update existing conversation
-          await query(
-            `UPDATE ai_conversations 
-             SET messages = $1::jsonb, title = $2, updated_at = now()
-             WHERE id = $3 AND user_id = $4 AND tenant_id = $5`,
-            [JSON.stringify(allMessages), title, conversation_id, userId, tenantId]
-          );
-        } else {
-          // Create new conversation
-          const convResult = await query(
-            `INSERT INTO ai_conversations (tenant_id, user_id, title, messages)
-             VALUES ($1, $2, $3, $4::jsonb)
-             RETURNING id`,
-            [tenantId, userId, title, JSON.stringify(allMessages)]
-          );
-          
-          // Send conversation ID back to client
-          if (convResult.rows.length > 0 && !res.headersSent) {
-            res.write(`data: ${JSON.stringify({ conversation_id: convResult.rows[0].id })}\n\n`);
-          }
-        }
-      } catch (saveError) {
-        console.error('Error saving conversation:', saveError);
-        // Don't fail the request if saving fails
-      }
     } catch (openaiError) {
-      console.error('OpenAI API error:', openaiError);
+      console.error('[AI Assistant] OpenAI API error:', openaiError);
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+      }
       res.write(`data: ${JSON.stringify({ error: openaiError.message || 'OpenAI API error' })}\n\n`);
+      res.write('data: [DONE]\n\n');
       res.end();
     }
   } catch (error) {
-    console.error('Error in chat endpoint:', error);
+    console.error('[AI Assistant] Error in chat endpoint:', error);
+    console.error('[AI Assistant] Error stack:', error.stack);
     if (!res.headersSent) {
       res.status(500).json({ error: error.message || 'Internal server error' });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: error.message || 'Internal server error' })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
     }
   }
 });
@@ -558,6 +731,7 @@ router.post('/chat', authenticateToken, async (req, res) => {
 // Chat endpoint - non-streaming with function calling support
 router.post('/chat/simple', authenticateToken, async (req, res) => {
   try {
+    await ensureAIConversationsTable();
     const { messages, enable_functions = true } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
@@ -761,6 +935,7 @@ router.post('/projects/:projectId/suggestions-enhanced', authenticateToken, asyn
 // Get conversation history
 router.get('/conversations', authenticateToken, async (req, res) => {
   try {
+    await ensureAIConversationsTable();
     const userId = req.user.id;
     const tenantResult = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
     const tenantId = tenantResult.rows[0]?.tenant_id;
@@ -799,6 +974,7 @@ router.get('/conversations', authenticateToken, async (req, res) => {
 // Get single conversation
 router.get('/conversations/:id', authenticateToken, async (req, res) => {
   try {
+    await ensureAIConversationsTable();
     const { id } = req.params;
     const userId = req.user.id;
     const tenantResult = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
@@ -837,6 +1013,7 @@ router.get('/conversations/:id', authenticateToken, async (req, res) => {
 // Delete conversation
 router.delete('/conversations/:id', authenticateToken, async (req, res) => {
   try {
+    await ensureAIConversationsTable();
     const { id } = req.params;
     const userId = req.user.id;
     const tenantResult = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
@@ -867,6 +1044,7 @@ router.delete('/conversations/:id', authenticateToken, async (req, res) => {
 // Update conversation title
 router.patch('/conversations/:id', authenticateToken, async (req, res) => {
   try {
+    await ensureAIConversationsTable();
     const { id } = req.params;
     const { title } = req.body;
     const userId = req.user.id;

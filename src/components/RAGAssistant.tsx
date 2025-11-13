@@ -369,10 +369,10 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
           <div className="flex items-center justify-between px-4 py-3 border-b">
             <div className="flex items-center gap-2">
               <Bot className="h-4 w-4" />
-              <span className="text-sm font-medium">RAG HR Assistant</span>
+              <span className="text-sm font-medium">RAG Assistant (Q&amp;A)</span>
               <Badge variant="secondary" className="text-xs">
                 <Sparkles className="h-3 w-3 mr-1" />
-                RAG Enabled
+                Document Q&amp;A
               </Badge>
             </div>
             <div className="flex items-center gap-2">
@@ -403,7 +403,7 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
               {messages.length === 0 && (
                 <div className="text-center text-muted-foreground py-12">
                   <Bot className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm mb-2">Ask me anything about HR, leaves, or policies</p>
+                  <p className="text-sm mb-2">Ask questions about your uploaded documents and policies</p>
                   <div className="flex items-center justify-center gap-4 mt-4 text-xs">
                     <div className="flex items-center gap-1">
                       <Sparkles className="h-3 w-3" />
@@ -497,7 +497,7 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                placeholder="Ask about leave policies, paystubs, or HR questions..."
+                placeholder="Ask about your uploaded HR policies or documents..."
                 disabled={isLoading}
                 className="text-sm"
               />
