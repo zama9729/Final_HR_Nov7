@@ -2,36 +2,6 @@ import { query } from '../db/pool.js';
 
 const ANNUAL_MONTHS = 12;
 
-async function getEmployeeDeclaration(employeeId, tenantId, financialYear) {
-  const declarationResult = await query(
-    `SELECT *
-     FROM tax_declarations
-     WHERE employee_id = $1
-       AND financial_year = $2
-       AND tenant_id = $3`,
-    [employeeId, financialYear, tenantId]
-  );
-
-  if (declarationResult.rows.length === 0) {
-    return null;
-  }
-
-  const declaration = declarationResult.rows[0];
-
-  const itemsResult = await query(
-    `SELECT tdi.*, tcd.section, tcd.section_group, tcd.max_limit
-     FROM tax_declaration_items tdi
-     JOIN tax_component_definitions tcd ON tcd.id = tdi.component_id
-     WHERE tdi.declaration_id = $1`,
-    [declaration.id]
-  );
-
-  return {
-    declaration,
-    items: itemsResult.rows,
-  };
-}
-
 async function getPayrollComponents(employeeId, tenantId) {
   const componentsResult = await query(
     `SELECT ecs.amount, pc.component_type, COALESCE(ecs.is_taxable_override, pc.is_taxable) as is_taxable
@@ -133,28 +103,18 @@ function applyTaxSlabs(netTaxableIncome, taxRegime) {
 }
 
 export async function calculateMonthlyTDS(employeeId, tenantId, financialYear) {
-  const declarationData = await getEmployeeDeclaration(employeeId, tenantId, financialYear);
   const compData = await getPayrollComponents(employeeId, tenantId);
 
   const { taxable } = calculateProjectedAnnual(compData);
 
-  const regimeType = declarationData?.declaration?.chosen_regime || 'old';
+  const regimeType = 'new';
+  const taxRegime = await getTaxSlabs(tenantId, financialYear, regimeType);
 
   let netTaxableIncome = taxable;
+  const standardDeduction = Number(taxRegime.standard_deduction || 0);
+  netTaxableIncome -= standardDeduction;
+  netTaxableIncome = Math.max(0, netTaxableIncome);
 
-  if (regimeType === 'old' && declarationData) {
-    const cappedDeductions = applyOldRegimeDeductions(declarationData.items || []);
-    const taxRegime = await getTaxSlabs(tenantId, financialYear, 'old');
-    const standardDeduction = Number(taxRegime.standard_deduction || 0);
-    netTaxableIncome -= cappedDeductions;
-    netTaxableIncome -= standardDeduction;
-  } else {
-    const taxRegime = await getTaxSlabs(tenantId, financialYear, 'new');
-    const standardDeduction = Number(taxRegime.standard_deduction || 0);
-    netTaxableIncome -= standardDeduction;
-  }
-
-  const taxRegime = await getTaxSlabs(tenantId, financialYear, regimeType);
   const annualTax = applyTaxSlabs(netTaxableIncome, taxRegime);
 
   const monthlyTds = annualTax / ANNUAL_MONTHS;

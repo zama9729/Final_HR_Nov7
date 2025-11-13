@@ -981,7 +981,12 @@ CREATE TABLE IF NOT EXISTS payroll_settings (
   tds_enabled BOOLEAN DEFAULT true,
   pf_rate NUMERIC(5,2) DEFAULT 12.00,
   esi_rate NUMERIC(5,2) DEFAULT 1.75,
+  pt_rate NUMERIC(8,2) DEFAULT 200.00,
   pt_amount NUMERIC(8,2) DEFAULT 200.00,
+  tds_threshold NUMERIC(12,2) DEFAULT 500000.00,
+  hra_percentage NUMERIC(5,2) DEFAULT 40.00,
+  special_allowance_percentage NUMERIC(5,2) DEFAULT 30.00,
+  basic_salary_percentage NUMERIC(5,2) DEFAULT 30.00,
   default_payday INTEGER CHECK (default_payday BETWEEN 1 AND 31),
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()

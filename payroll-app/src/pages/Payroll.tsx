@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Calendar, Settings } from "lucide-react";
 // Use relative paths assuming /pages is not in /src
@@ -14,8 +13,7 @@ const Payroll = () => {
   const navigate = useNavigate();
   const [cycles, setCycles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  // We still need to check if the user is an admin, so we fetch the profile
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin] = useState(true);
 
   const fetchCycles = async () => {
     setLoading(true);
@@ -30,35 +28,8 @@ const Payroll = () => {
   };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Use API call to check authentication - API will fail if cookies aren't set
-        const profile = await api.me.profile();
-        if (profile?.profile?.tenant_id) {
-          // User is an admin/owner, they can be here
-          setIsAdmin(true);
-          fetchCycles();
-        } else {
-          // User is not an admin, check if they are an employee
-          const me = await api.me.employee();
-          if (me?.employee) {
-            navigate("/employee-portal"); // Redirect to employee portal
-          } else {
-            navigate("/pin-auth"); // No valid role found
-          }
-        }
-      } catch (error: any) {
-        // If API call fails, user needs to authenticate
-        console.error('[Payroll] Auth check failed:', error);
-        // Store current path to return after PIN auth
-        const currentPath = window.location.pathname + window.location.search;
-        sessionStorage.setItem('payroll_last_screen', currentPath);
-        navigate("/pin-auth");
-      }
-    };
-
-    fetchData();
-  }, [navigate]);
+    fetchCycles();
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
@@ -74,11 +45,15 @@ const Payroll = () => {
               <p className="text-muted-foreground">Manage monthly payroll runs</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" asChild>
-                <Link to="/payroll/settings">
-                  <Settings className="mr-2 h-4 w-4" />
-                  Configure Payroll
-                </Link>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  sessionStorage.setItem("payroll_last_screen", "/payroll/settings");
+                  navigate("/payroll/settings");
+                }}
+              >
+                <Settings className="mr-2 h-4 w-4" />
+                Configure Payroll
               </Button>
               {/* Remove tenantId and userId props */}
               {isAdmin && (

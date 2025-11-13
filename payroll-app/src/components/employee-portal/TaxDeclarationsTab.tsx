@@ -494,7 +494,7 @@ export const TaxDeclarationsTab = () => {
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <Badge variant="outline" className="uppercase">
-                      Regime: {declaration.chosen_regime?.toUpperCase() || "OLD"}
+                      Regime: {declaration.chosen_regime?.toUpperCase() || "NEW"}
                     </Badge>
                     <Button
                       variant="secondary"
@@ -531,7 +531,7 @@ export const TaxDeclarationsTab = () => {
             </DialogTitle>
             <DialogDescription>
               Status: {detailDeclaration?.status?.toUpperCase()} • Regime:{" "}
-              {detailDeclaration?.chosen_regime?.toUpperCase() || "OLD"}
+              {detailDeclaration?.chosen_regime?.toUpperCase() || "NEW"}
             </DialogDescription>
           </DialogHeader>
 

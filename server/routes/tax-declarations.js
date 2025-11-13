@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
-import { query } from '../db/pool.js';
+import { query, withClient } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { requireCapability, CAPABILITIES } from '../policy/authorize.js';
 import { audit } from '../utils/auditLog.js';
@@ -238,15 +238,13 @@ router.post('/', authenticateToken, requireCapability(CAPABILITIES.TAX_DECLARATI
       return res.status(404).json({ error: 'Employee record not found' });
     }
 
-    const { financial_year, chosen_regime, status = 'draft', items = [] } = req.body;
+    const { financial_year, status = 'draft', items = [] } = req.body;
 
-    if (!financial_year || !chosen_regime) {
-      return res.status(400).json({ error: 'financial_year and chosen_regime are required' });
+    if (!financial_year) {
+      return res.status(400).json({ error: 'financial_year is required' });
     }
 
-    if (!['old', 'new'].includes(chosen_regime)) {
-      return res.status(400).json({ error: 'Invalid chosen_regime' });
-    }
+    const chosen_regime = 'new';
 
     if (!['draft', 'submitted'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status transition' });
@@ -389,7 +387,6 @@ router.get('/', authenticateToken, requireCapability(CAPABILITIES.TAX_DECLARATIO
 });
 
 router.post('/:id/review', authenticateToken, requireCapability(CAPABILITIES.TAX_DECLARATION_REVIEW), async (req, res) => {
-  const client = query;
   try {
     const { id } = req.params;
     const { status, items = [], remarks } = req.body;
@@ -398,7 +395,7 @@ router.post('/:id/review', authenticateToken, requireCapability(CAPABILITIES.TAX
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    const declarationResult = await client(
+    const declarationResult = await query(
       `SELECT td.*, e.tenant_id
        FROM tax_declarations td
        JOIN employees e ON e.id = td.employee_id
@@ -413,7 +410,7 @@ router.post('/:id/review', authenticateToken, requireCapability(CAPABILITIES.TAX
     const declaration = declarationResult.rows[0];
 
     if (status === 'approved') {
-      const proofCheckResult = await client(
+      const proofCheckResult = await query(
         `SELECT 
           tdi.declared_amount,
           tdi.proof_url,
@@ -449,41 +446,71 @@ router.post('/:id/review', authenticateToken, requireCapability(CAPABILITIES.TAX
       return res.status(400).json({ error: 'Declaration already approved' });
     }
 
-    await client('BEGIN');
+    await withClient(
+      async (dbClient) => {
+        try {
+          await dbClient.query('BEGIN');
 
-    await client(
-      `UPDATE tax_declarations
-       SET status = $1,
-           approved_at = CASE WHEN $1 = 'approved' THEN now() ELSE NULL END,
-           approved_by = $2,
-           remarks = $3,
-           updated_at = now()
-       WHERE id = $4`,
-      [status, req.user.id, remarks || null, id]
-    );
+          const updateResult = await dbClient.query(
+            `UPDATE tax_declarations
+             SET status = $1,
+                 approved_at = CASE WHEN $1 = 'approved' THEN now() ELSE NULL END,
+                 approved_by = $2,
+                 remarks = $3,
+                 updated_at = now()
+             WHERE id = $4`,
+            [status, req.user.id, remarks || null, id]
+          );
 
-    if (status === 'approved') {
-      for (const item of items) {
-        const approvedAmount = Number(item.approved_amount ?? item.declared_amount ?? 0);
-        if (Number.isNaN(approvedAmount) || approvedAmount < 0) {
-          await client('ROLLBACK');
-          return res.status(400).json({ error: 'approved_amount must be a non-negative number' });
+          if (updateResult.rowCount === 0) {
+            throw new Error('Declaration update failed');
+          }
+
+          if (status === 'approved') {
+            for (const item of items) {
+              const approvedAmount = Number(item.approved_amount ?? item.declared_amount ?? 0);
+              if (Number.isNaN(approvedAmount) || approvedAmount < 0) {
+                throw Object.assign(new Error('approved_amount must be a non-negative number'), {
+                  statusCode: 400,
+                });
+              }
+
+              const itemResult = await dbClient.query(
+                `UPDATE tax_declaration_items
+                 SET approved_amount = $1,
+                     notes = COALESCE($2, notes),
+                     updated_at = now()
+                 WHERE id = $3 AND declaration_id = $4`,
+                [approvedAmount, item.notes || null, item.id, id]
+              );
+
+              if (itemResult.rowCount === 0) {
+                throw new Error('Failed to update tax declaration item');
+              }
+            }
+          } else {
+            await dbClient.query(
+              `UPDATE tax_declaration_items
+               SET approved_amount = NULL,
+                   updated_at = now()
+               WHERE declaration_id = $1`,
+              [id]
+            );
+          }
+
+          await dbClient.query('COMMIT');
+        } catch (err) {
+          await dbClient.query('ROLLBACK').catch(() => {});
+
+          if (err?.statusCode === 400) {
+            throw err;
+          }
+
+          throw err;
         }
-        await client(
-          `UPDATE tax_declaration_items
-           SET approved_amount = $1, notes = COALESCE($2, notes), updated_at = now()
-           WHERE id = $3 AND declaration_id = $4`,
-          [approvedAmount, item.notes || null, item.id, id]
-        );
-      }
-    } else {
-      await client(
-        `UPDATE tax_declaration_items
-         SET approved_amount = NULL, updated_at = now()
-         WHERE declaration_id = $1`,
-        [id]
-      );
-    }
+      },
+      tenantId
+    );
 
     await safeAudit({
       actorId: req.user.id,
@@ -493,12 +520,12 @@ router.post('/:id/review', authenticateToken, requireCapability(CAPABILITIES.TAX
       details: { status, remarks },
     });
 
-    await client('COMMIT');
-
     res.json({ success: true });
   } catch (error) {
-    await client('ROLLBACK').catch(() => {});
     console.error('Error reviewing tax declaration:', error);
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ error: error.message });
+    }
     res.status(500).json({ error: error.message || 'Failed to review tax declaration' });
   }
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,7 @@ export default function TaxDeclarationReview() {
   const [remarks, setRemarks] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const autoSelectRef = useRef(true);
 
   useEffect(() => {
     loadDeclarations();
@@ -90,11 +91,13 @@ export default function TaxDeclarationReview() {
       });
       setDeclarations(result.declarations || []);
       setItems(result.items || []);
-      if (result.declarations?.length) {
-        setSelectedId(result.declarations[0].id);
-      } else {
-        setSelectedId(null);
-      }
+      const availableIds = new Set((result.declarations || []).map((decl: DeclarationSummary) => decl.id));
+      setSelectedId((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return availableIds.has(prev) ? prev : null;
+      });
     } catch (error: any) {
       console.error("Failed to fetch tax declarations", error);
       toast({
@@ -106,6 +109,16 @@ export default function TaxDeclarationReview() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!selectedId && declarations.length > 0) {
+      if (autoSelectRef.current) {
+        setSelectedId(declarations[0].id);
+      } else {
+        autoSelectRef.current = true;
+      }
+    }
+  }, [declarations, selectedId]);
 
   const selectedDeclaration = useMemo(
     () => declarations.find((decl) => decl.id === selectedId) || null,
@@ -150,6 +163,27 @@ export default function TaxDeclarationReview() {
     }
   };
 
+  const declarationStatusSummary = useMemo(() => {
+    const summary = {
+      approved: 0,
+      rejected: 0,
+      submitted: 0,
+    };
+    declarations.forEach((decl) => {
+      if (decl.status === "approved") summary.approved += 1;
+      else if (decl.status === "rejected") summary.rejected += 1;
+      else if (decl.status === "submitted") summary.submitted += 1;
+    });
+    return summary;
+  }, [declarations]);
+
+  const filteredDeclarations = useMemo(() => {
+    if (statusFilter === "all") {
+      return declarations;
+    }
+    return declarations.filter((decl) => decl.status === statusFilter);
+  }, [declarations, statusFilter]);
+
   const handleApproveAmountChange = (itemId: string, value: string) => {
     setApprovedValues((prev) => ({
       ...prev,
@@ -193,11 +227,12 @@ export default function TaxDeclarationReview() {
 
       await loadDeclarations();
 
+      autoSelectRef.current = false;
+      setSelectedId(null);
       setRemarks("");
       setApprovedValues({});
 
       window.dispatchEvent(new Event("taxDeclarations:updated"));
-
     } catch (error: any) {
       console.error("Failed to review tax declaration", error);
       toast({
@@ -252,222 +287,270 @@ export default function TaxDeclarationReview() {
               Review, approve, or reject employee tax declarations for the selected financial year.
             </p>
           </div>
-          <div className="flex gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="financialYear">Financial Year</Label>
-              <Select value={financialYear} onValueChange={setFinancialYear} disabled={reviewing}>
-                <SelectTrigger id="financialYear" className="w-40">
-                  <SelectValue placeholder="Select FY" />
-                </SelectTrigger>
-                <SelectContent>
-                  {financialYearOptions().map((fy) => (
-                    <SelectItem key={fy} value={fy}>
-                      {fy}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="statusFilter">Status</Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter} disabled={reviewing}>
-                <SelectTrigger id="statusFilter" className="w-40">
-                  <SelectValue placeholder="All statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="submitted">Submitted</SelectItem>
-                  <SelectItem value="approved">Approved</SelectItem>
-                  <SelectItem value="rejected">Rejected</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="space-y-1">
+            <Label htmlFor="financialYear">Financial Year</Label>
+            <Select value={financialYear} onValueChange={setFinancialYear} disabled={reviewing}>
+              <SelectTrigger id="financialYear" className="w-40">
+                <SelectValue placeholder="Select FY" />
+              </SelectTrigger>
+              <SelectContent>
+                {financialYearOptions().map((fy) => (
+                  <SelectItem key={fy} value={fy}>
+                    {fy}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-          <Card className="h-fit">
+        <div className="grid gap-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <button
+              type="button"
+              className={`rounded-lg border p-3 text-center transition-all ${
+                statusFilter === "approved"
+                  ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200"
+                  : "border-emerald-200 bg-emerald-25 hover:border-emerald-400"
+              }`}
+              onClick={() => setStatusFilter(statusFilter === "approved" ? "all" : "approved")}
+              disabled={reviewing}
+            >
+              <p className="text-xs font-medium uppercase text-emerald-700">Approved</p>
+              <p className="text-2xl font-semibold text-emerald-600">{declarationStatusSummary.approved}</p>
+            </button>
+            <button
+              type="button"
+              className={`rounded-lg border p-3 text-center transition-all ${
+                statusFilter === "rejected"
+                  ? "border-rose-500 bg-rose-50 ring-2 ring-rose-200"
+                  : "border-rose-200 bg-rose-25 hover:border-rose-400"
+              }`}
+              onClick={() => setStatusFilter(statusFilter === "rejected" ? "all" : "rejected")}
+              disabled={reviewing}
+            >
+              <p className="text-xs font-medium uppercase text-rose-700">Rejected</p>
+              <p className="text-2xl font-semibold text-rose-600">{declarationStatusSummary.rejected}</p>
+            </button>
+            <button
+              type="button"
+              className={`rounded-lg border p-3 text-center transition-all ${
+                statusFilter === "submitted"
+                  ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
+                  : "border-slate-300 bg-slate-25 hover:border-slate-400"
+              }`}
+              onClick={() => setStatusFilter(statusFilter === "submitted" ? "all" : "submitted")}
+              disabled={reviewing}
+            >
+              <p className="text-xs font-medium uppercase text-slate-700">Pending</p>
+              <p className="text-2xl font-semibold text-slate-800">{declarationStatusSummary.submitted}</p>
+            </button>
+          </div>
+
+          <Card>
             <CardHeader>
-              <CardTitle>Declarations</CardTitle>
+              <CardTitle>Requests</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 max-h-[65vh] overflow-y-auto">
               {loading ? (
                 <div className="text-muted-foreground">Loading declarations…</div>
-              ) : declarations.length === 0 ? (
-                <div className="text-muted-foreground">No declarations found for this filter.</div>
+              ) : filteredDeclarations.length === 0 ? (
+                <div className="text-muted-foreground">No declarations found for this view.</div>
               ) : (
-                declarations.map((declaration) => {
+                filteredDeclarations.map((declaration) => {
                   const name =
                     [declaration.first_name, declaration.last_name].filter(Boolean).join(" ") ||
                     declaration.email ||
                     "Employee";
                   const isSelected = declaration.id === selectedId;
+                  const summaryItems = items.filter((item) => item.declaration_id === declaration.id);
+                  const approvedTotal = summaryItems.reduce((total, item) => {
+                    const amount =
+                      declaration.status === "approved"
+                        ? Number(item.approved_amount ?? item.declared_amount ?? 0)
+                        : Number(item.declared_amount ?? 0);
+                    return total + amount;
+                  }, 0);
+                  const statusLabel =
+                    declaration.status === "submitted"
+                      ? "Pending"
+                      : declaration.status === "approved"
+                      ? "Approved"
+                      : "Rejected";
+
                   return (
-                    <button
-                      key={declaration.id}
-                      onClick={() => setSelectedId(declaration.id)}
-                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                        isSelected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">{name}</span>
-                        <Badge variant={declaration.status === "submitted" ? "default" : "secondary"}>
-                          {declaration.status.toUpperCase()}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">{declaration.email}</p>
-                    </button>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
+                    <div key={declaration.id} className="rounded-lg border">
+                      <button
+                        onClick={() => setSelectedId(isSelected ? null : declaration.id)}
+                        className={`flex w-full flex-col gap-2 rounded-lg px-4 py-3 text-left transition-colors ${
+                          isSelected ? "bg-primary/5" : "hover:bg-muted/60"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-sm sm:text-base">{name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              Employee ID: {declaration.employee_id}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-sm">
+                            <span className="text-muted-foreground">
+                              FY {declaration.financial_year}
+                            </span>
+                            <span className="font-medium">
+                              ₹{approvedTotal.toLocaleString("en-IN")}
+                            </span>
+                            <Badge className="capitalize" variant={
+                              declaration.status === "approved"
+                                ? "default"
+                                : declaration.status === "rejected"
+                                ? "destructive"
+                                : "secondary"
+                            }>
+                              {statusLabel}
+                            </Badge>
+                          </div>
+                        </div>
+                      </button>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Declaration Details</CardTitle>
-                {selectedDeclaration && (
-                  <Badge variant="outline">Regime: {selectedDeclaration.chosen_regime.toUpperCase()}</Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {!selectedDeclaration ? (
-                <div className="text-muted-foreground">Select an employee declaration to review.</div>
-              ) : (
-                <>
-                <div className="grid gap-3 rounded-lg border p-4 bg-muted/40 text-sm sm:grid-cols-3">
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Status
-                    </p>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusChipStyles(selectedDeclaration.status)}`}
-                    >
-                      {selectedDeclaration.status.toUpperCase()}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Total Declared
-                    </p>
-                    <p className="text-base font-semibold">
-                      ₹{selectedSummary.declared.toLocaleString("en-IN")}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Total Approved
-                    </p>
-                    <p className="text-base font-semibold">
-                      {selectedSummary.hasApproved
-                        ? `₹${selectedSummary.approved.toLocaleString("en-IN")}`
-                        : "Pending review"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <Label>Reviewer Remarks</Label>
-                  {selectedDeclaration.status === "submitted" ? (
-                    <Textarea
-                      placeholder="Provide remarks for the employee (visible after review)"
-                      value={remarks}
-                      onChange={(event) => setRemarks(event.target.value)}
-                      disabled={reviewing}
-                    />
-                  ) : (
-                    <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
-                      {selectedDeclaration.remarks?.trim() || "No reviewer remarks recorded."}
-                    </p>
-                  )}
-                </div>
-
-                  <div className="space-y-4">
-                    {selectedItems.length === 0 ? (
-                      <div className="text-muted-foreground text-sm">
-                        This declaration does not have any tax components listed.
-                      </div>
-                    ) : (
-                      selectedItems.map((item) => (
-                        <div key={item.id} className="border rounded-lg p-4 space-y-2">
-                          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      {isSelected && (
+                        <div className="border-t bg-muted/30 p-4 space-y-4">
+                          <div className="grid gap-3 rounded-lg border bg-white p-4 sm:grid-cols-3 text-sm">
                             <div>
-                              <h3 className="text-base font-semibold">{item.label}</h3>
-                              <p className="text-xs text-muted-foreground">
-                                Section {item.section}
-                                {item.section_group ? ` • Group ${item.section_group}` : ""}
+                              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                Status
                               </p>
-                              <p className="text-sm text-muted-foreground mt-1">
-                                Declared: ₹{Number(item.declared_amount || 0).toLocaleString()}
-                              </p>
-                              {item.proof_url ? (
-                                <a
-                                  href={item.proof_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs text-primary mt-2 inline-flex items-center gap-1 underline underline-offset-2"
-                                >
-                                  View proof
-                                </a>
-                              ) : (
-                                <p className="text-xs text-muted-foreground mt-2">
-                                  No proof uploaded.
-                                </p>
-                              )}
+                              <span
+                                className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusChipStyles(declaration.status)}`}
+                              >
+                                {declaration.status.toUpperCase()}
+                              </span>
                             </div>
-                            {selectedDeclaration.status === "submitted" && (
-                              <Input
-                                className="w-32"
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={approvedValues[item.id] || ""}
-                                onChange={(event) => handleApproveAmountChange(item.id, event.target.value)}
-                                disabled={reviewing || statusFilter === "approved"}
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                Total Declared
+                              </p>
+                              <p className="text-base font-semibold">
+                                ₹{selectedSummary.declared.toLocaleString("en-IN")}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                Total Approved
+                              </p>
+                              <p className="text-base font-semibold">
+                                {declaration.status === "approved"
+                                  ? `₹${selectedSummary.approved.toLocaleString("en-IN")}`
+                                  : declaration.status === "rejected"
+                                  ? "Rejected"
+                                  : "Pending review"}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <Label>Reviewer Remarks</Label>
+                            {declaration.status === "submitted" ? (
+                              <Textarea
+                                placeholder="Provide remarks for the employee (visible after review)"
+                                value={remarks}
+                                onChange={(event) => setRemarks(event.target.value)}
+                                disabled={reviewing}
                               />
+                            ) : (
+                              <p className="rounded-md border bg-white p-3 text-sm text-muted-foreground">
+                                {declaration.remarks?.trim() || "No reviewer remarks recorded."}
+                              </p>
                             )}
                           </div>
-                          {selectedDeclaration.status === "approved" && item.approved_amount && (
-                            <p className="text-sm text-emerald-600">
-                              Approved: ₹{Number(item.approved_amount).toLocaleString()}
-                            </p>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
 
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      variant="secondary"
-                      onClick={handleDownloadForm16}
-                      disabled={reviewing || !selectedDeclaration}
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      Download Form 16
-                    </Button>
-                  {selectedDeclaration.status === "submitted" && (
-                    <>
-                      <Button
-                        variant="outline"
-                        onClick={() => handleReview("rejected")}
-                        disabled={reviewing || !selectedId}
-                      >
-                        Reject
-                      </Button>
-                      <Button
-                        onClick={() => handleReview("approved")}
-                        disabled={reviewing || !selectedId}
-                      >
-                        Approve
-                      </Button>
-                    </>
-                  )}
-                  </div>
-                </>
+                          <div className="space-y-4">
+                            {summaryItems.length === 0 ? (
+                              <div className="text-muted-foreground text-sm">
+                                This declaration does not have any tax components listed.
+                              </div>
+                            ) : (
+                              summaryItems.map((item) => (
+                                <div key={item.id} className="border rounded-lg bg-white p-4 space-y-2">
+                                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                    <div>
+                                      <h3 className="text-base font-semibold">{item.label}</h3>
+                                      <p className="text-xs text-muted-foreground">
+                                        Section {item.section}
+                                        {item.section_group ? ` • Group ${item.section_group}` : ""}
+                                      </p>
+                                      <p className="text-sm text-muted-foreground mt-1">
+                                        Declared: ₹{Number(item.declared_amount || 0).toLocaleString("en-IN")}
+                                      </p>
+                                      {item.proof_url ? (
+                                        <a
+                                          href={item.proof_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-xs text-primary mt-2 inline-flex items-center gap-1 underline underline-offset-2"
+                                        >
+                                          View proof
+                                        </a>
+                                      ) : (
+                                        <p className="text-xs text-muted-foreground mt-2">
+                                          No proof uploaded.
+                                        </p>
+                                      )}
+                                    </div>
+                                    {declaration.status === "submitted" && (
+                                      <Input
+                                        className="w-32"
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={approvedValues[item.id] || ""}
+                                        onChange={(event) => handleApproveAmountChange(item.id, event.target.value)}
+                                        disabled={reviewing}
+                                      />
+                                    )}
+                                  </div>
+                                  {declaration.status === "approved" && item.approved_amount && (
+                                    <p className="text-sm text-emerald-600">
+                                      Approved: ₹{Number(item.approved_amount).toLocaleString("en-IN")}
+                                    </p>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap gap-3">
+                            <Button
+                              variant="secondary"
+                              onClick={handleDownloadForm16}
+                              disabled={reviewing}
+                            >
+                              <Download className="mr-2 h-4 w-4" />
+                              Download Form 16
+                            </Button>
+                            {declaration.status === "submitted" && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => handleReview("rejected")}
+                                  disabled={reviewing || !selectedId}
+                                >
+                                  Reject
+                                </Button>
+                                <Button
+                                  onClick={() => handleReview("approved")}
+                                  disabled={reviewing || !selectedId}
+                                >
+                                  Approve
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </CardContent>
           </Card>

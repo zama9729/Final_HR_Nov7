@@ -289,11 +289,11 @@ export const api = {
       client.post<{ settings: any }>("/api/payroll-settings", data),
 
     getTaxRegimes: (financialYear: string) =>
-      client.get<{ financial_year: string; regimes: Record<string, any> }>(
+      client.get<{ financial_year: string; regime: Record<string, any> }>(
         `/api/payroll-settings/tax-regimes?financial_year=${encodeURIComponent(financialYear)}`
       ),
 
-    saveTaxRegimes: (data: { financial_year: string; regimes: Array<any> }) =>
+    saveTaxRegimes: (data: { financial_year: string; regime: Record<string, any> }) =>
       client.post("/api/payroll-settings/tax-regimes", data),
   },
 
