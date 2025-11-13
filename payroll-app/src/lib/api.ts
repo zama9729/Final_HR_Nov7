@@ -239,6 +239,12 @@ export const api = {
     processCycle: (cycleId, payrollItems?) =>
       client.post(`/api/payroll-cycles/${cycleId}/process`, payrollItems ? { payrollItems } : {}),
     
+    setIncentive: (cycleId: string, employeeId: string, amount: number) =>
+      client.post(`/api/payroll-cycles/${cycleId}/incentives`, {
+        employee_id: employeeId,
+        amount,
+      }),
+    
     getCyclePayslips: (cycleId) =>
       client.get(`/api/payroll-cycles/${cycleId}/payslips`),
   },

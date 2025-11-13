@@ -2,9 +2,21 @@ import { useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Play, Receipt } from "lucide-react";
+import { Loader2, Play, Receipt, Edit2 } from "lucide-react";
 import { PayrollReviewDialog } from "./PayrollReviewDialog";
 import { PayrollCyclePayslipsDialog } from "./PayrollCyclePayslipsDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 interface PayrollCycle {
   id: string;
@@ -27,8 +39,19 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [payslipsDialogOpen, setPayslipsDialogOpen] = useState(false);
   const [selectedCycle, setSelectedCycle] = useState<PayrollCycle | null>(null);
+  const [confirmProcessOpen, setConfirmProcessOpen] = useState(false);
+  const [cycleToProcess, setCycleToProcess] = useState<PayrollCycle | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const isCycleEditable = (status: string) =>
+    !["processing", "completed", "paid", "failed"].includes(status);
 
   const handleProcess = (cycle: PayrollCycle) => {
+    setCycleToProcess(cycle);
+    setConfirmProcessOpen(true);
+  };
+
+  const handleEdit = (cycle: PayrollCycle) => {
+    if (!isCycleEditable(cycle.status)) return;
     setSelectedCycle(cycle);
     setReviewDialogOpen(true);
   };
@@ -41,6 +64,22 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
   const handleProcessed = () => {
     if (onRefresh) {
       onRefresh();
+    }
+  };
+
+  const processCycle = async () => {
+    if (!cycleToProcess) return;
+    setProcessing(true);
+    try {
+      const result = await api.payroll.processCycle(cycleToProcess.id);
+      toast.success(result.message || "Payroll processed successfully");
+      setConfirmProcessOpen(false);
+      setCycleToProcess(null);
+      handleProcessed();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to process payroll");
+    } finally {
+      setProcessing(false);
     }
   };
   const getStatusColor = (status: string) => {
@@ -144,6 +183,16 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
                       Process
                     </Button>
                   )}
+                  {isCycleEditable(cycle.status) && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleEdit(cycle)}
+                    >
+                      <Edit2 className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
+                  )}
                   {(cycle.status === 'completed' || cycle.status === 'approved' || cycle.status === 'processing') && (
                     <Button
                       size="sm"
@@ -171,6 +220,7 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
           cycleMonth={selectedCycle.month}
           cycleYear={selectedCycle.year}
           onProcessed={handleProcessed}
+          canModify={isCycleEditable(selectedCycle.status)}
         />
         <PayrollCyclePayslipsDialog
           open={payslipsDialogOpen}
@@ -181,6 +231,23 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
         />
       </>
     )}
+
+    <AlertDialog open={confirmProcessOpen} onOpenChange={(open) => !processing && setConfirmProcessOpen(open)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Process payroll?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to process the payroll for this cycle?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
+          <AlertDialogAction onClick={processCycle} disabled={processing}>
+            {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Yes"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </>
   );
 };

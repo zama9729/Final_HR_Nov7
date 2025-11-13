@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS payroll_items (
   basic_salary DECIMAL(12,2) NOT NULL,
   hra DECIMAL(12,2) DEFAULT 0,
   special_allowance DECIMAL(12,2) DEFAULT 0,
+  incentive_amount DECIMAL(12,2) DEFAULT 0,
   pf_deduction DECIMAL(12,2) DEFAULT 0,
   esi_deduction DECIMAL(12,2) DEFAULT 0,
   tds_deduction DECIMAL(12,2) DEFAULT 0,
@@ -115,6 +116,20 @@ CREATE TABLE IF NOT EXISTS payroll_items (
 CREATE INDEX IF NOT EXISTS idx_payroll_items_tenant ON payroll_items(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_payroll_items_cycle ON payroll_items(payroll_cycle_id);
 CREATE INDEX IF NOT EXISTS idx_payroll_items_employee ON payroll_items(employee_id);
+
+CREATE TABLE IF NOT EXISTS payroll_incentives (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+  payroll_cycle_id UUID REFERENCES payroll_cycles(id) ON DELETE CASCADE NOT NULL,
+  employee_id UUID REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  UNIQUE (payroll_cycle_id, employee_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_incentives_cycle ON payroll_incentives(payroll_cycle_id);
+CREATE INDEX IF NOT EXISTS idx_payroll_incentives_employee ON payroll_incentives(employee_id);
 
 -- Tax declarations table (references HR employees)
 CREATE TABLE IF NOT EXISTS tax_declarations (

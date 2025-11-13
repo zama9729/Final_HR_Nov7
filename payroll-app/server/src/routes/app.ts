@@ -1040,9 +1040,10 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
                 tenant_id, payroll_cycle_id, employee_id,
                 gross_salary, deductions, net_salary,
                 basic_salary, hra, special_allowance,
+                incentive_amount,
                 pf_deduction, esi_deduction, tds_deduction, pt_deduction,
                 lop_days, paid_days, total_working_days
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
               ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
                 gross_salary = EXCLUDED.gross_salary,
                 deductions = EXCLUDED.deductions,
@@ -1050,6 +1051,7 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
                 basic_salary = EXCLUDED.basic_salary,
                 hra = EXCLUDED.hra,
                 special_allowance = EXCLUDED.special_allowance,
+                incentive_amount = EXCLUDED.incentive_amount,
                 pf_deduction = EXCLUDED.pf_deduction,
                 esi_deduction = EXCLUDED.esi_deduction,
                 tds_deduction = EXCLUDED.tds_deduction,
@@ -1058,7 +1060,7 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
                 paid_days = EXCLUDED.paid_days,
                 total_working_days = EXCLUDED.total_working_days,
                 updated_at = NOW()`,
-              [tenantId, cycleId, emp.id, adjustedGross, deductions, net, adjustedBasic, adjustedHra, adjustedSa, pf, esi, tds, pt, lopDays, paidDays, totalWorkingDays]
+              [tenantId, cycleId, emp.id, adjustedGross, deductions, net, adjustedBasic, adjustedHra, adjustedSa, 0, pf, esi, tds, pt, lopDays, paidDays, totalWorkingDays]
             );
 
             processedCount++;
@@ -2705,6 +2707,77 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       });
     }
 
+    const existingItemsResult = await query(
+      `SELECT 
+         pi.employee_id,
+         pi.gross_salary,
+         pi.deductions,
+         pi.net_salary,
+         pi.basic_salary,
+         pi.hra,
+         pi.special_allowance,
+         pi.incentive_amount,
+         pi.pf_deduction,
+         pi.esi_deduction,
+         pi.pt_deduction,
+         pi.tds_deduction,
+         pi.lop_days,
+         pi.paid_days,
+         pi.total_working_days,
+         e.employee_code,
+         e.full_name,
+         e.email
+       FROM payroll_items pi
+       JOIN payroll_employee_view e ON e.employee_id = pi.employee_id AND (e.org_id = $2 OR e.org_id IS NULL)
+       WHERE pi.payroll_cycle_id = $1
+         AND pi.tenant_id = $2
+       ORDER BY e.full_name`,
+      [cycleId, tenantId]
+    );
+
+    if (existingItemsResult.rows.length > 0) {
+      const incentiveRows = await query(
+        `SELECT employee_id, amount
+         FROM payroll_incentives
+         WHERE tenant_id = $1
+           AND payroll_cycle_id = $2`,
+        [tenantId, cycleId]
+      );
+      const incentiveMap = new Map<string, number>();
+      incentiveRows.rows.forEach((row) => {
+        incentiveMap.set(row.employee_id, Number(row.amount || 0));
+      });
+
+      const items = existingItemsResult.rows.map((row) => ({
+        employee_id: row.employee_id,
+        employee_code: row.employee_id,
+        employee_name: row.full_name,
+        employee_email: row.email,
+        basic_salary: Number(row.basic_salary || 0),
+        hra: Number(row.hra || 0),
+        special_allowance: Number(row.special_allowance || 0),
+        incentive_amount:
+          row.incentive_amount !== null && row.incentive_amount !== undefined
+            ? Number(row.incentive_amount)
+            : incentiveMap.get(row.employee_id) || 0,
+        da: 0,
+        lta: 0,
+        bonus: 0,
+        gross_salary: Number(row.gross_salary || 0),
+        pf_deduction: Number(row.pf_deduction || 0),
+        esi_deduction: Number(row.esi_deduction || 0),
+        pt_deduction: Number(row.pt_deduction || 0),
+        tds_deduction: Number(row.tds_deduction || 0),
+        deductions: Number(row.deductions || 0),
+        net_salary: Number(row.net_salary || 0),
+        lop_days: Number(row.lop_days || 0),
+        paid_days: Number(row.paid_days || 0),
+        total_working_days: Number(row.total_working_days || 0),
+      }));
+
+      return res.json({ payrollItems: items });
+    }
+
     const payrollMonth = cycle.month;
     const payrollYear = cycle.year;
     const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
@@ -2724,17 +2797,29 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
 
     // Get all active employees who were employed by the payroll month
     const employeesResult = await query(
-      `SELECT e.id, e.full_name, e.email, e.employee_code
-       FROM employees e
-       WHERE e.tenant_id = $1 
-         AND e.status = 'active'
-         AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
-       ORDER BY e.date_of_joining ASC`,
+      `SELECT employee_id, full_name, email, employee_code
+       FROM payroll_employee_view
+       WHERE org_id = $1
+         AND employment_status = 'active'
+         AND (date_of_joining IS NULL OR date_of_joining <= $2)
+       ORDER BY date_of_joining ASC`,
       [tenantId, payrollMonthEnd.toISOString()]
     );
 
     const employees = employeesResult.rows;
     const payrollItems: any[] = [];
+
+    const incentivesResult = await query(
+      `SELECT employee_id, amount
+       FROM payroll_incentives
+       WHERE tenant_id = $1
+         AND payroll_cycle_id = $2`,
+      [tenantId, cycleId]
+    );
+    const incentiveMap = new Map<string, number>();
+    incentivesResult.rows.forEach((row) => {
+      incentiveMap.set(row.employee_id, Number(row.amount || 0));
+    });
 
     // Calculate salary for each employee
     for (const employee of employees) {
@@ -2746,7 +2831,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
            AND effective_from <= $3
          ORDER BY effective_from DESC
          LIMIT 1`,
-        [employee.id, tenantId, payrollMonthEnd.toISOString()]
+        [employee.employee_id, tenantId, payrollMonthEnd.toISOString()]
       );
 
       if (compResult.rows.length === 0) {
@@ -2769,7 +2854,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       // Calculate LOP days and paid days for this month
       const { lopDays, paidDays, totalWorkingDays } = await calculateLopAndPaidDays(
         tenantId,
-        employee.id,
+        employee.employee_id,
         payrollMonth,
         payrollYear
       );
@@ -2792,7 +2877,9 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
       const ptDeduction = Number(settings.pt_rate) || 200;
       
-      const annualIncome = adjustedGrossSalary * 12;
+      const incentiveAmount = incentiveMap.get(employee.employee_id) || 0;
+      const grossWithIncentive = adjustedGrossSalary + incentiveAmount;
+      const annualIncome = grossWithIncentive * 12;
       let tdsDeduction = 0;
       if (annualIncome > Number(settings.tds_threshold)) {
         const excessAmount = annualIncome - Number(settings.tds_threshold);
@@ -2800,20 +2887,22 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       }
 
       const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
-      const netSalary = adjustedGrossSalary - totalDeductions;
+      const netSalary = grossWithIncentive - totalDeductions;
+      const finalGrossSalary = grossWithIncentive;
 
       payrollItems.push({
-        employee_id: employee.id,
+        employee_id: employee.employee_id,
         employee_code: employee.employee_code,
         employee_name: employee.full_name,
         employee_email: employee.email,
         basic_salary: adjustedBasic,
         hra: adjustedHRA,
         special_allowance: adjustedSpecialAllowance,
+        incentive_amount: incentiveAmount,
         da: adjustedDA,
         lta: adjustedLTA,
         bonus: adjustedBonus,
-        gross_salary: adjustedGrossSalary,
+        gross_salary: grossWithIncentive,
         pf_deduction: pfDeduction,
         esi_deduction: esiDeduction,
         pt_deduction: ptDeduction,
@@ -2831,6 +2920,76 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
   } catch (e: any) {
     console.error("Error previewing payroll:", e);
     return res.status(500).json({ error: e.message || "Failed to preview payroll" });
+  }
+});
+
+appRouter.post("/payroll-cycles/:cycleId/incentives", requireAuth, async (req, res) => {
+  const tenantId = (req as any).tenantId as string;
+  const { cycleId } = req.params;
+  const { employee_id: employeeId, amount } = req.body || {};
+
+  if (!tenantId) {
+    return res.status(403).json({ error: "User tenant not found" });
+  }
+
+  if (!employeeId) {
+    return res.status(400).json({ error: "employee_id is required" });
+  }
+
+  if (amount === undefined || amount === null || Number.isNaN(Number(amount))) {
+    return res.status(400).json({ error: "Valid incentive amount is required" });
+  }
+
+  const numericAmount = Number(amount);
+  if (numericAmount < 0) {
+    return res.status(400).json({ error: "Incentive amount cannot be negative" });
+  }
+
+  try {
+    const cycleResult = await query(
+      "SELECT status FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycleStatus = cycleResult.rows[0].status;
+    if (['processing', 'completed', 'paid', 'failed'].includes(cycleStatus)) {
+      return res.status(400).json({ error: `Cannot modify incentives for a '${cycleStatus}' payroll cycle.` });
+    }
+
+    if (numericAmount === 0) {
+      await query(
+        `DELETE FROM payroll_incentives
+         WHERE tenant_id = $1 AND payroll_cycle_id = $2 AND employee_id = $3`,
+        [tenantId, cycleId, employeeId]
+      );
+
+      return res.json({
+        message: "Incentive removed successfully",
+        incentive: { employee_id: employeeId, amount: 0 },
+      });
+    }
+
+    const upsertResult = await query(
+      `INSERT INTO payroll_incentives (
+         tenant_id, payroll_cycle_id, employee_id, amount, updated_at
+       ) VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (payroll_cycle_id, employee_id)
+       DO UPDATE SET amount = EXCLUDED.amount, updated_at = NOW()
+       RETURNING employee_id, amount`,
+      [tenantId, cycleId, employeeId, numericAmount]
+    );
+
+    return res.json({
+      message: "Incentive saved successfully",
+      incentive: upsertResult.rows[0],
+    });
+  } catch (error: any) {
+    console.error("Error saving incentive:", error);
+    return res.status(500).json({ error: error.message || "Failed to save incentive" });
   }
 });
 
@@ -3062,6 +3221,17 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
        ORDER BY e.date_of_joining ASC`,
       [tenantId, payrollMonthEnd.toISOString()]
     );
+    const incentivesExistingResult = await query(
+      `SELECT employee_id, amount
+       FROM payroll_incentives
+       WHERE tenant_id = $1
+         AND payroll_cycle_id = $2`,
+      [tenantId, cycleId]
+    );
+    const incentiveMap = new Map<string, number>();
+    incentivesExistingResult.rows.forEach((row) => {
+      incentiveMap.set(row.employee_id, Number(row.amount || 0));
+    });
 
       // Check if edited payroll items are provided in request body
       const { payrollItems: editedItems } = req.body;
@@ -3154,7 +3324,8 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         }
 
         // Recalculate gross salary from edited components
-        const editedGrossSalary = Number(basic_salary) + Number(hra) + Number(special_allowance) + Number(da) + Number(lta) + Number(bonus);
+        const incentiveAmount = Number(item.incentive_amount ?? incentiveMap.get(employee_id) ?? 0);
+        const editedGrossSalary = Number(basic_salary) + Number(hra) + Number(special_allowance) + Number(da) + Number(lta) + Number(bonus) + incentiveAmount;
 
         // Recalculate deductions based on edited values
         const editedPfDeduction = (Number(basic_salary) * Number(settings.pf_rate)) / 100;
@@ -3192,9 +3363,10 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             tenant_id, payroll_cycle_id, employee_id,
             gross_salary, deductions, net_salary,
             basic_salary, hra, special_allowance,
+            incentive_amount,
             pf_deduction, esi_deduction, tds_deduction, pt_deduction,
             lop_days, paid_days, total_working_days
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
           ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
             gross_salary = EXCLUDED.gross_salary,
             deductions = EXCLUDED.deductions,
@@ -3202,6 +3374,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             basic_salary = EXCLUDED.basic_salary,
             hra = EXCLUDED.hra,
             special_allowance = EXCLUDED.special_allowance,
+            incentive_amount = EXCLUDED.incentive_amount,
             pf_deduction = EXCLUDED.pf_deduction,
             esi_deduction = EXCLUDED.esi_deduction,
             tds_deduction = EXCLUDED.tds_deduction,
@@ -3220,6 +3393,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             Number(basic_salary),
             Number(hra),
             Number(special_allowance),
+            incentiveAmount,
             editedPfDeduction,
             editedEsiDeduction,
             editedTdsDeduction,
@@ -3229,6 +3403,25 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             finalTotalWorkingDays,
           ]
         );
+
+        if (incentiveAmount > 0) {
+          await query(
+            `INSERT INTO payroll_incentives (
+              tenant_id, payroll_cycle_id, employee_id, amount, updated_at
+            ) VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (payroll_cycle_id, employee_id)
+            DO UPDATE SET amount = EXCLUDED.amount, updated_at = NOW()`,
+            [tenantId, cycleId, employee_id, incentiveAmount]
+          );
+        } else {
+          await query(
+            `DELETE FROM payroll_incentives
+             WHERE tenant_id = $1 AND payroll_cycle_id = $2 AND employee_id = $3`,
+            [tenantId, cycleId, employee_id]
+          );
+        }
+
+        incentiveMap.set(employee_id, incentiveAmount);
 
         processedCount++;
         totalGrossSalary += editedGrossSalary;
@@ -3264,9 +3457,9 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       );
       
       if (existingItemsResult.rows.length > 0 && parseInt(existingItemsResult.rows[0]?.count || '0', 10) > 0) {
-        const processedCount = parseInt(existingItemsResult.rows[0]?.count || '0', 10);
-        const totalGrossSalary = parseFloat(existingItemsResult.rows[0]?.total_gross || '0');
-        const totalDeductions = parseFloat(existingItemsResult.rows[0]?.total_deductions || '0');
+      const processedCount = parseInt(existingItemsResult.rows[0]?.count || '0', 10);
+      const totalGrossSalary = parseFloat(existingItemsResult.rows[0]?.total_gross || '0');
+      const totalDeductions = parseFloat(existingItemsResult.rows[0]?.total_deductions || '0');
 
         await query(
           `UPDATE payroll_cycles
@@ -3303,7 +3496,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
            AND effective_from <= $3
          ORDER BY effective_from DESC
          LIMIT 1`,
-        [employee.id, tenantId, payrollMonthEnd.toISOString()]
+        [employee.employee_id, tenantId, payrollMonthEnd.toISOString()]
       );
 
       if (compResult.rows.length === 0) {
@@ -3322,12 +3515,13 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       const monthlyBonus = Number(compensation.bonus) || 0; // Already monthly
 
       // Gross salary = sum of all monthly earnings
+      const incentiveAmount = incentiveMap.get(employee.id) || 0;
       const grossSalary = monthlyBasic + monthlyHRA + monthlySpecialAllowance + monthlyDA + monthlyLTA + monthlyBonus;
 
       // Calculate LOP days and paid days for this month
       const { lopDays, paidDays, totalWorkingDays } = await calculateLopAndPaidDays(
         tenantId,
-        employee.id,
+        employee.employee_id,
         payrollMonth,
         payrollYear
       );
@@ -3353,7 +3547,8 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       const ptDeduction = Number(settings.pt_rate) || 200;
       
       // TDS: Calculate based on annual income (simplified - 5% if annual > threshold)
-      const annualIncome = adjustedGrossSalary * 12;
+      const finalGrossSalary = adjustedGrossSalary + incentiveAmount;
+      const annualIncome = finalGrossSalary * 12;
       let tdsDeduction = 0;
       if (annualIncome > Number(settings.tds_threshold)) {
         // Simplified TDS calculation - 5% of excess over threshold
@@ -3362,7 +3557,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       }
 
       const totalDeductionsForEmployee = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
-      const netSalary = adjustedGrossSalary - totalDeductionsForEmployee;
+      const netSalary = finalGrossSalary - totalDeductionsForEmployee;
 
       // Insert payroll item
       // Only allow inserts/updates for draft and pending_approval cycles
@@ -3377,9 +3572,10 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           tenant_id, payroll_cycle_id, employee_id,
           gross_salary, deductions, net_salary,
           basic_salary, hra, special_allowance,
+          incentive_amount,
           pf_deduction, esi_deduction, tds_deduction, pt_deduction,
           lop_days, paid_days, total_working_days
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
           gross_salary = EXCLUDED.gross_salary,
           deductions = EXCLUDED.deductions,
@@ -3387,6 +3583,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           basic_salary = EXCLUDED.basic_salary,
           hra = EXCLUDED.hra,
           special_allowance = EXCLUDED.special_allowance,
+          incentive_amount = EXCLUDED.incentive_amount,
           pf_deduction = EXCLUDED.pf_deduction,
           esi_deduction = EXCLUDED.esi_deduction,
           tds_deduction = EXCLUDED.tds_deduction,
@@ -3398,13 +3595,14 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         [
           tenantId,
           cycleId,
-          employee.id,
-          adjustedGrossSalary,
+          employee.employee_id,
+          finalGrossSalary,
           totalDeductionsForEmployee,
           netSalary,
           adjustedBasic,
           adjustedHRA,
           adjustedSpecialAllowance,
+          incentiveAmount,
           pfDeduction,
           esiDeduction,
           tdsDeduction,
@@ -3415,8 +3613,25 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         ]
       );
 
+      if (incentiveAmount > 0) {
+        await query(
+          `INSERT INTO payroll_incentives (
+            tenant_id, payroll_cycle_id, employee_id, amount, updated_at
+          ) VALUES ($1, $2, $3, $4, NOW())
+          ON CONFLICT (payroll_cycle_id, employee_id)
+          DO UPDATE SET amount = EXCLUDED.amount, updated_at = NOW()`,
+          [tenantId, cycleId, employee.employee_id, incentiveAmount]
+        );
+      } else {
+        await query(
+          `DELETE FROM payroll_incentives
+           WHERE tenant_id = $1 AND payroll_cycle_id = $2 AND employee_id = $3`,
+          [tenantId, cycleId, employee.employee_id]
+        );
+      }
+
       processedCount++;
-      totalGrossSalary += adjustedGrossSalary;
+      totalGrossSalary += finalGrossSalary;
       totalDeductions += totalDeductionsForEmployee;
     }
 
