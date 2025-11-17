@@ -83,7 +83,7 @@ export const ReimbursementsTab = () => {
   const queryClient = useQueryClient();
   const form = useForm<FormValues>({
     defaultValues: {
-      category: REIMBURSEMENT_CATEGORIES[0].value,
+      category: "food" as ReimbursementCategoryValue,
       amount: "",
       description: "",
       receipt: null,
@@ -117,7 +117,7 @@ export const ReimbursementsTab = () => {
     onSuccess: () => {
       toast.success("Reimbursement submitted");
       form.reset({
-        category: REIMBURSEMENT_CATEGORIES[0].value,
+        category: "food" as ReimbursementCategoryValue,
         amount: "",
         description: "",
         receipt: null,
@@ -151,20 +151,23 @@ export const ReimbursementsTab = () => {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Category</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl>
+                      <FormControl>
+                        <Select 
+                          value={field.value} 
+                          onValueChange={field.onChange}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Select category" />
                           </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {REIMBURSEMENT_CATEGORIES.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                          <SelectContent>
+                            {REIMBURSEMENT_CATEGORIES.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
