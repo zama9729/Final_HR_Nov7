@@ -5,6 +5,7 @@ import PDFDocument from "pdfkit";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import reimbursementsRouter from "./reimbursements.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 const PROOFS_DIRECTORY =
@@ -4027,4 +4028,7 @@ appRouter.get("/reports/payroll-register", requireAuth, async (req, res) => {
     res.status(500).json({ error: e.message || "Failed to generate payroll register report" });
   }
 });
+
+// Reimbursement routes
+appRouter.use("/v1/reimbursements", requireAuth, reimbursementsRouter);
 
