@@ -158,14 +158,73 @@ router.get('/', authenticateToken, async (req, res) => {
 
       const pendingRequestsResult = await query(pendingRequestsQuery, queryParams);
 
+      // Also fetch leave requests with pending workflow actions for this role
+      let workflowPendingResult = { rows: [] };
+      try {
+        // Use DISTINCT ON instead of DISTINCT to avoid JSON comparison issues
+        let workflowPendingQuery = `
+          SELECT DISTINCT ON (lr.id)
+            lr.id,
+            lr.employee_id,
+            lr.leave_type_id,
+            lr.start_date,
+            lr.end_date,
+            lr.total_days,
+            lr.reason,
+            lr.status,
+            lr.submitted_at,
+            lr.reviewed_by,
+            lr.reviewed_at,
+            lr.tenant_id,
+            e.employee_id as emp_employee_id,
+            e.reporting_manager_id,
+            m.reporting_manager_id as manager_manager_id,
+            json_build_object(
+              'id', p1.id,
+              'profiles', json_build_object(
+                'first_name', p1.first_name,
+                'last_name', p1.last_name
+              )
+            ) as employee,
+            NULL::jsonb as reviewer,
+            json_build_object('name', lp.name) as leave_type,
+            wa.id as workflow_action_id,
+            wa.label as workflow_action_label
+          FROM leave_requests lr
+          INNER JOIN workflow_actions wa ON wa.resource_type = 'leave' AND wa.resource_id = lr.id
+          LEFT JOIN employees e ON lr.employee_id = e.id
+          LEFT JOIN profiles p1 ON e.user_id = p1.id
+          LEFT JOIN leave_policies lp ON lr.leave_type_id = lp.id
+          LEFT JOIN employees m ON e.reporting_manager_id = m.id
+          WHERE lr.tenant_id = $1 
+          AND lr.status = 'pending'
+          AND wa.status = 'pending'
+          AND wa.assignee_role = $2
+          ORDER BY lr.id, lr.submitted_at DESC
+        `;
+        
+        const workflowParams = [tenantId, role];
+        workflowPendingResult = await query(workflowPendingQuery, workflowParams);
+        console.log(`[Workflow] Found ${workflowPendingResult.rows.length} leave requests with workflow actions for role ${role}`);
+      } catch (workflowQueryError) {
+        console.error('Error fetching workflow-based leave requests:', workflowQueryError);
+        // Continue with empty result - don't break the entire request
+      }
+      
+      // Combine both results and deduplicate by leave request ID
+      const allPending = [...pendingRequestsResult.rows, ...workflowPendingResult.rows];
+      const uniquePending = Array.from(
+        new Map(allPending.map(req => [req.id, req])).values()
+      );
+
       // For managers, filter to only show requests from direct reports
       // For HR/CEO, show requests that need their approval (no manager or manager has no manager)
       if (role === 'manager' && employeeId) {
-        teamRequests = pendingRequestsResult.rows.filter(
+        teamRequests = uniquePending.filter(
           (req) => req.employee?.profiles?.first_name || true // For now, show all pending
         );
       } else {
-        teamRequests = pendingRequestsResult.rows;
+        teamRequests = uniquePending;
       }
 
       // Fetch approved requests for the team
@@ -273,8 +332,83 @@ router.post('/', authenticateToken, async (req, res) => {
     );
 
     const leave = insertResult.rows[0];
-    // Create approval workflow for this leave
-    await create_approval('leave', leave.total_days, req.user.id, leave.id);
+    
+    // Trigger workflows with 'trigger_leave' type
+    let workflowTriggered = false;
+    try {
+      const { startInstance } = await import('../services/workflows.js');
+      
+      // Find active workflows with trigger_leave (check both 'active' and 'draft' status for now)
+      // Check for workflows where any node has type starting with 'trigger_leave'
+      const workflowResult = await query(
+        `SELECT id, name, workflow_json, status 
+         FROM workflows 
+         WHERE tenant_id = $1 
+         AND (status = 'active' OR status = 'draft')
+         AND workflow_json::jsonb->'nodes' IS NOT NULL
+         AND EXISTS (
+           SELECT 1 
+           FROM jsonb_array_elements(workflow_json::jsonb->'nodes') AS node
+           WHERE node->>'type' LIKE 'trigger_leave%'
+         )`,
+        [tenantId]
+      );
+      
+      console.log(`[Workflow] Found ${workflowResult.rows.length} workflows with trigger_leave for tenant ${tenantId}`);
+      
+      // Start workflow instances for each matching workflow
+      for (const workflow of workflowResult.rows) {
+        try {
+          workflowTriggered = true;
+          const workflowJson = typeof workflow.workflow_json === 'string' 
+            ? JSON.parse(workflow.workflow_json) 
+            : workflow.workflow_json;
+          
+          console.log(`[Workflow] Starting instance for workflow ${workflow.id} (${workflow.name})`);
+          
+          const instanceId = await startInstance({
+            tenantId,
+            userId: req.user.id,
+            workflow: {
+              id: workflow.id,
+              name: workflow.name,
+              workflow_json: workflowJson,
+              // Also include nodes and connections directly for easier access
+              nodes: workflowJson.nodes || [],
+              connections: workflowJson.connections || []
+            },
+            name: `Leave Request ${leave.id.substring(0, 8)}`,
+            triggerPayload: {
+              leave_request_id: leave.id,
+              employee_id: employeeId,
+              total_days: leave.total_days,
+              start_date: leave.start_date,
+              end_date: leave.end_date
+            },
+            resourceType: 'leave',
+            resourceId: leave.id
+          });
+          
+          console.log(`[Workflow] ✅ Started workflow instance ${instanceId} for leave request ${leave.id}`);
+        } catch (instanceError) {
+          console.error(`[Workflow] ❌ Error starting workflow instance for workflow ${workflow.id}:`, instanceError);
+        }
+      }
+    } catch (workflowError) {
+      console.error('Error triggering workflows for leave request:', workflowError);
+      // Continue even if workflow triggering fails - don't block leave request creation
+    }
+    
+    // Fall back to legacy approval flow only if no workflows were triggered
+    if (!workflowTriggered) {
+      try {
+        await create_approval('leave', leave.total_days, req.user.id, leave.id);
+      } catch (approvalError) {
+        console.warn('Could not create legacy approval:', approvalError.message);
+      }
+    } else {
+      console.log('[Workflow] Custom workflow triggered; skipping legacy approval pipeline');
+    }
 
     res.status(201).json(leave);
   } catch (error) {
@@ -435,6 +569,45 @@ router.patch('/:id/approve', authenticateToken, async (req, res) => {
           `UPDATE leave_requests SET status = 'approved', reviewed_by = $1, reviewed_at = now() WHERE id = $2`,
           [reviewerId, id]
         );
+        
+        // Also approve any pending workflow actions for this leave request
+        try {
+          const workflowActions = await query(
+            `SELECT wa.id, wa.instance_id, w.workflow_json as wf_json, w.id as workflow_id
+             FROM workflow_actions wa
+             JOIN workflow_instances i ON i.id = wa.instance_id
+             LEFT JOIN workflows w ON w.id = i.workflow_id
+             WHERE wa.resource_type = 'leave' 
+             AND wa.resource_id = $1 
+             AND wa.status = 'pending'
+             AND wa.assignee_role = $2`,
+            [id, reviewerRole]
+          );
+          
+          for (const action of workflowActions.rows) {
+            const workflowJson = typeof action.wf_json === 'string' 
+              ? JSON.parse(action.wf_json) 
+              : (action.wf_json || {});
+            const workflow = {
+              id: action.workflow_id,
+              workflow_json: workflowJson,
+              nodes: workflowJson.nodes || [],
+              connections: workflowJson.connections || []
+            };
+            const { decide } = await import('../services/workflows.js');
+            await decide({ 
+              actionId: action.id, 
+              decision: 'approve', 
+              reason: 'Approved via leave requests page', 
+              userId: req.user.id, 
+              workflow 
+            });
+            console.log(`[Leave Approve] ✅ Approved workflow action ${action.id} - workflow will continue`);
+          }
+        } catch (workflowError) {
+          console.warn('Could not approve workflow actions:', workflowError.message);
+          // Continue even if workflow approval fails
+        }
         
         result = { updated: true, final: true, status: 'approved' };
       } else {

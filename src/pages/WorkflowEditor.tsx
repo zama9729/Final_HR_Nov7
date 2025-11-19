@@ -2,15 +2,42 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Save, Play } from "lucide-react";
+import { Save, Play, Loader2 } from "lucide-react";
 import { InteractiveWorkflowCanvas } from "@/components/workflow/InteractiveWorkflowCanvas";
 import N8nWorkflowCanvas, { N8nWorkflowCanvasHandle } from "@/components/workflow/N8nWorkflowCanvas";
 import { WorkflowToolbox } from "@/components/workflow/WorkflowToolbox";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
+import { api } from "@/lib/api";
 
 export default function WorkflowEditor() {
+  const { id } = useParams<{ id: string }>();
   const [workflowName, setWorkflowName] = useState("New Workflow");
+  const [workflowDescription, setWorkflowDescription] = useState("");
+  const [loading, setLoading] = useState(!!id);
+  const [workflowData, setWorkflowData] = useState<any>(null);
   const canvasRef = useRef<N8nWorkflowCanvasHandle | null>(null);
+
+  useEffect(() => {
+    if (id) {
+      const loadWorkflow = async () => {
+        try {
+          setLoading(true);
+          const response = await api.getWorkflow(id);
+          const workflow = response.workflow;
+          setWorkflowName(workflow.name || "New Workflow");
+          setWorkflowDescription(workflow.description || "");
+          setWorkflowData(workflow.workflow_json);
+        } catch (error: any) {
+          console.error("Failed to load workflow:", error);
+          alert(`Failed to load workflow: ${error?.message || "Unknown error"}`);
+        } finally {
+          setLoading(false);
+        }
+      };
+      loadWorkflow();
+    }
+  }, [id]);
 
   return (
     <AppLayout>
@@ -50,7 +77,19 @@ export default function WorkflowEditor() {
           <Card className="overflow-hidden">
             <CardContent className="p-0 h-full">
               {/* Use the n8n-like canvas with React Flow for connections */}
-              <N8nWorkflowCanvas ref={canvasRef} />
+              {loading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <N8nWorkflowCanvas 
+                  ref={canvasRef} 
+                  initialWorkflow={workflowData} 
+                  workflowId={id || undefined}
+                  initialName={workflowName}
+                  initialDescription={workflowDescription}
+                />
+              )}
             </CardContent>
           </Card>
         </div>

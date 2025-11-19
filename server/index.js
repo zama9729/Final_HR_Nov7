@@ -223,6 +223,8 @@ createPool().then(async () => {
       status TEXT NOT NULL DEFAULT 'running', -- running | completed | rejected | error
       current_node_ids TEXT[] DEFAULT '{}',
       trigger_payload JSONB,
+      resource_type TEXT, -- 'leave', 'expense', etc.
+      resource_id UUID, -- ID of the resource (leave_request.id, etc.)
       created_by UUID REFERENCES profiles(id),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -241,8 +243,27 @@ createPool().then(async () => {
       decision_reason TEXT,
       decided_by UUID REFERENCES profiles(id),
       decided_at TIMESTAMPTZ,
+      resource_type TEXT, -- 'leave', 'expense', etc.
+      resource_id UUID, -- ID of the resource (leave_request.id, etc.)
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    
+    -- Add resource linking columns if they don't exist (for existing databases)
+    DO $$ 
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflow_instances' AND column_name = 'resource_type') THEN
+        ALTER TABLE workflow_instances ADD COLUMN resource_type TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflow_instances' AND column_name = 'resource_id') THEN
+        ALTER TABLE workflow_instances ADD COLUMN resource_id UUID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflow_actions' AND column_name = 'resource_type') THEN
+        ALTER TABLE workflow_actions ADD COLUMN resource_type TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflow_actions' AND column_name = 'resource_id') THEN
+        ALTER TABLE workflow_actions ADD COLUMN resource_id UUID;
+      END IF;
+    END $$;
 
     CREATE INDEX IF NOT EXISTS idx_workflow_actions_tenant_pending ON workflow_actions(tenant_id) WHERE status = 'pending';
 

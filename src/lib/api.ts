@@ -483,6 +483,14 @@ class ApiClient {
   }
 
   // Workflow runtime
+  async listWorkflows() {
+    return this.request('/api/workflows');
+  }
+
+  async getWorkflow(id: string) {
+    return this.request(`/api/workflows/${id}`);
+  }
+
   async triggerWorkflow(data: { name?: string; workflow: any; payload?: any }) {
     return this.request('/api/workflows/trigger', { method: 'POST', body: JSON.stringify(data) });
   }

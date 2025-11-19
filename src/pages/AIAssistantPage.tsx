@@ -30,7 +30,7 @@ export default function AIAssistantPage() {
         >
           <TabsList className="w-full sm:w-auto">
             <TabsTrigger value="rag" className="flex-1 sm:flex-none">
-              RAG Q&amp;A
+              RAG Q&A
             </TabsTrigger>
             <TabsTrigger value="actions" className="flex-1 sm:flex-none">
               AI Actions
@@ -42,7 +42,7 @@ export default function AIAssistantPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Bot className="h-5 w-5" />
-                  Retrieval-Augmented Q&amp;A
+                  Retrieval-Augmented Q&A
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
