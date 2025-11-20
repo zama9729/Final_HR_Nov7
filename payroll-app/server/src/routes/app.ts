@@ -4063,16 +4063,56 @@ appRouter.get("/reports/statutory/pf-ecr", requireAuth, async (req, res) => {
 
     // Forward request to HR API
     const hrApiUrl = process.env.HR_API_URL || process.env.HR_BASE_URL || "http://api:3001";
-    const hrResponse = await fetch(
-      `${hrApiUrl}/api/reports/statutory/pf-ecr?month=${month}&year=${year}`,
-      {
+    const hrEndpoint = `${hrApiUrl}/api/reports/statutory/pf-ecr?month=${month}&year=${year}`;
+    
+    console.log(`[STATUTORY] Proxying PF ECR request to HR API: ${hrEndpoint}`);
+    console.log(`[STATUTORY] HR API URL: ${hrApiUrl}, HR User ID: ${hrUserId}, Tenant ID: ${tenantId}`);
+    
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    let hrResponse;
+    try {
+      hrResponse = await fetch(hrEndpoint, {
         method: "GET",
         headers: {
           "Authorization": `Bearer ${hrToken}`,
           "Content-Type": "text/plain",
         },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      console.log(`[STATUTORY] HR API response status: ${hrResponse.status}`);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      console.error("[STATUTORY] Error fetching from HR API:", {
+        message: fetchError.message,
+        code: fetchError.code,
+        cause: fetchError.cause,
+        stack: fetchError.stack
+      });
+      
+      if (fetchError.code === 'ECONNREFUSED' || 
+          fetchError.message?.includes('ECONNREFUSED') || 
+          fetchError.cause?.code === 'ECONNREFUSED') {
+        return res.status(503).json({ 
+          error: "HR API service unavailable", 
+          message: `Cannot connect to HR API at ${hrApiUrl}. Please ensure the HR API service is running and accessible.` 
+        });
       }
-    );
+      if (fetchError.name === 'AbortError') {
+        return res.status(504).json({ 
+          error: "Request timeout", 
+          message: "HR API request timed out. Please try again." 
+        });
+      }
+      return res.status(500).json({ 
+        error: "Failed to fetch PF ECR", 
+        message: fetchError.message || "Unknown error occurred",
+        details: fetchError.cause?.message || fetchError.code
+      });
+    }
 
     if (!hrResponse.ok) {
       const error = await hrResponse.json().catch(() => ({ error: "Failed to fetch PF ECR" }));
@@ -4123,16 +4163,45 @@ appRouter.get("/reports/statutory/esi-return", requireAuth, async (req, res) => 
 
     // Forward request to HR API
     const hrApiUrl = process.env.HR_API_URL || process.env.HR_BASE_URL || "http://api:3001";
-    const hrResponse = await fetch(
-      `${hrApiUrl}/api/reports/statutory/esi-return?month=${month}&year=${year}`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${hrToken}`,
-          "Content-Type": "text/csv",
-        },
+    
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    let hrResponse;
+    try {
+      hrResponse = await fetch(
+        `${hrApiUrl}/api/reports/statutory/esi-return?month=${month}&year=${year}`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${hrToken}`,
+            "Content-Type": "text/csv",
+          },
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      console.error("Error fetching from HR API:", fetchError);
+      if (fetchError.code === 'ECONNREFUSED' || fetchError.message?.includes('ECONNREFUSED') || fetchError.cause?.code === 'ECONNREFUSED') {
+        return res.status(503).json({ 
+          error: "HR API service unavailable", 
+          message: "Cannot connect to HR API. Please ensure the HR API service is running and accessible." 
+        });
       }
-    );
+      if (fetchError.name === 'AbortError') {
+        return res.status(504).json({ 
+          error: "Request timeout", 
+          message: "HR API request timed out. Please try again." 
+        });
+      }
+      return res.status(500).json({ 
+        error: "Failed to fetch ESI Return", 
+        message: fetchError.message || "Unknown error occurred" 
+      });
+    }
 
     if (!hrResponse.ok) {
       const error = await hrResponse.json().catch(() => ({ error: "Failed to fetch ESI Return" }));
@@ -4183,16 +4252,45 @@ appRouter.get("/reports/statutory/tds-summary", requireAuth, async (req, res) =>
 
     // Forward request to HR API
     const hrApiUrl = process.env.HR_API_URL || process.env.HR_BASE_URL || "http://api:3001";
-    const hrResponse = await fetch(
-      `${hrApiUrl}/api/reports/statutory/tds-summary?month=${month}&year=${year}`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${hrToken}`,
-          "Content-Type": "application/json",
-        },
+    
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    let hrResponse;
+    try {
+      hrResponse = await fetch(
+        `${hrApiUrl}/api/reports/statutory/tds-summary?month=${month}&year=${year}`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${hrToken}`,
+            "Content-Type": "application/json",
+          },
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      console.error("Error fetching from HR API:", fetchError);
+      if (fetchError.code === 'ECONNREFUSED' || fetchError.message?.includes('ECONNREFUSED') || fetchError.cause?.code === 'ECONNREFUSED') {
+        return res.status(503).json({ 
+          error: "HR API service unavailable", 
+          message: "Cannot connect to HR API. Please ensure the HR API service is running and accessible." 
+        });
       }
-    );
+      if (fetchError.name === 'AbortError') {
+        return res.status(504).json({ 
+          error: "Request timeout", 
+          message: "HR API request timed out. Please try again." 
+        });
+      }
+      return res.status(500).json({ 
+        error: "Failed to fetch TDS Summary", 
+        message: fetchError.message || "Unknown error occurred" 
+      });
+    }
 
     if (!hrResponse.ok) {
       const error = await hrResponse.json().catch(() => ({ error: "Failed to fetch TDS Summary" }));

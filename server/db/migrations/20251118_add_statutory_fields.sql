@@ -21,6 +21,7 @@ ALTER TABLE organizations
 -- Add comments for documentation
 COMMENT ON COLUMN employees.uan_number IS 'Universal Account Number for EPFO';
 COMMENT ON COLUMN employees.esi_number IS 'Employee State Insurance number';
+
 COMMENT ON COLUMN employees.pan_number IS 'Permanent Account Number for tax purposes';
 COMMENT ON COLUMN organizations.pf_code IS 'EPFO Establishment Code';
 COMMENT ON COLUMN organizations.esi_code IS 'ESI Registration Code';

@@ -285,7 +285,7 @@ router.patch('/me', authenticateToken, requireRole('admin', 'ceo', 'director', '
     }
 
     const tenantId = profileResult.rows[0].tenant_id;
-    const { name } = req.body;
+    const { name, pf_code, esi_code } = req.body;
 
     let logoUrl = null;
 
@@ -317,6 +317,16 @@ router.patch('/me', authenticateToken, requireRole('admin', 'ceo', 'director', '
       values.push(logoUrl);
     }
 
+    if (pf_code !== undefined) {
+      updates.push(`pf_code = $${paramIndex++}`);
+      values.push(pf_code || null);
+    }
+
+    if (esi_code !== undefined) {
+      updates.push(`esi_code = $${paramIndex++}`);
+      values.push(esi_code || null);
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No updates provided' });
     }
@@ -332,8 +342,8 @@ router.patch('/me', authenticateToken, requireRole('admin', 'ceo', 'director', '
     
     const hasSlugColumn = columnCheck.rows.length > 0;
     const returnFields = hasSlugColumn 
-      ? 'id, name, slug, logo_url, domain, company_size, industry, timezone'
-      : 'id, name, logo_url, domain, company_size, industry, timezone';
+      ? 'id, name, slug, logo_url, domain, company_size, industry, timezone, pf_code, esi_code'
+      : 'id, name, logo_url, domain, company_size, industry, timezone, pf_code, esi_code';
     
     const updateQuery = `
       UPDATE organizations 

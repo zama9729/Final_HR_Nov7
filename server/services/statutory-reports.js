@@ -186,29 +186,87 @@ export async function generatePFECR(tenantId, month, year) {
       throw new Error('No employees found in payroll run');
     }
     
-    // ECR Format: Pipe-delimited (|) text file
-    const lines = [];
-    
-    // Header line: Establishment Code|Month|Year|Total Employees|Total EPF|Total EPS|Total EDLI
+    // Calculate totals
     const totalEPF = employeesResult.rows.reduce((sum, emp) => sum + Number(emp.pf_contribution_cents || 0), 0);
     const totalEPS = Math.round(totalEPF * 0.8333); // EPS is 8.33% of EPF (which is 12% of wages)
     const totalEDLI = Math.round(totalEPF * 0.0005); // EDLI is 0.5% of EPF
+    const totalGrossWages = employeesResult.rows.reduce((sum, emp) => sum + Math.round(emp.gross_pay_cents / 100), 0);
     
-    const header = [
-      org.pf_code || '',
-      String(month).padStart(2, '0'),
-      String(year),
-      String(employeesResult.rows.length),
-      String(Math.round(totalEPF / 100)), // Convert cents to rupees
-      String(Math.round(totalEPS / 100)),
-      String(Math.round(totalEDLI / 100))
-    ].join('|');
-    lines.push(header);
+    // Format currency helper
+    const formatCurrency = (amount) => {
+      return `₹${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
     
-    // Employee records: UAN|Name|Gross Wages|EPF Wages|EPS Wages|EPF Contribution|EPS Contribution|EDLI Contribution
-    employeesResult.rows.forEach((emp) => {
-      const uan = emp.uan_number || '';
-      const name = (emp.employee_name || '').trim().toUpperCase();
+    // Format number helper
+    const formatNumber = (amount) => {
+      return Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+    
+    // Get month name
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                       'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthName = monthNames[month - 1];
+    const currentDate = new Date().toLocaleDateString('en-IN', { 
+      day: '2-digit', 
+      month: 'long', 
+      year: 'numeric' 
+    });
+    
+    // Build professional formatted report
+    const lines = [];
+    
+    // ===== HEADER SECTION =====
+    lines.push('='.repeat(100));
+    lines.push('EMPLOYEES\' PROVIDENT FUND ORGANISATION (EPFO)');
+    lines.push('ELECTRONIC CHALLAN CUM RETURN (ECR)');
+    lines.push('='.repeat(100));
+    lines.push('');
+    
+    // Organization Details
+    lines.push('ESTABLISHMENT DETAILS');
+    lines.push('-'.repeat(100));
+    lines.push(`Establishment Name    : ${org.name || 'N/A'}`);
+    lines.push(`EPFO Code             : ${org.pf_code || 'N/A'}`);
+    lines.push(`PAN Number            : ${org.company_pan || 'N/A'}`);
+    lines.push(`Period                : ${monthName} ${year}`);
+    lines.push(`Report Generated On   : ${currentDate}`);
+    lines.push('');
+    
+    // Summary Section
+    lines.push('SUMMARY');
+    lines.push('-'.repeat(100));
+    lines.push(`Total Employees       : ${employeesResult.rows.length}`);
+    lines.push(`Total Gross Wages     : ${formatCurrency(totalGrossWages)}`);
+    lines.push(`Total EPF Contribution: ${formatCurrency(totalEPF / 100)}`);
+    lines.push(`Total EPS Contribution: ${formatCurrency(totalEPS / 100)}`);
+    lines.push(`Total EDLI Contribution: ${formatCurrency(totalEDLI / 100)}`);
+    lines.push('');
+    
+    // ===== EMPLOYEE DETAILS TABLE =====
+    lines.push('EMPLOYEE CONTRIBUTION DETAILS');
+    lines.push('-'.repeat(100));
+    lines.push('');
+    
+    // Table Header
+    const headerRow = [
+      'S.No.'.padEnd(6),
+      'UAN Number'.padEnd(18),
+      'Employee Name'.padEnd(30),
+      'Gross Wages'.padStart(15),
+      'EPF Wages'.padStart(15),
+      'EPS Wages'.padStart(15),
+      'EPF Cont.'.padStart(15),
+      'EPS Cont.'.padStart(15),
+      'EDLI Cont.'.padStart(15)
+    ].join(' | ');
+    
+    lines.push(headerRow);
+    lines.push('-'.repeat(100));
+    
+    // Employee Records
+    employeesResult.rows.forEach((emp, index) => {
+      const uan = (emp.uan_number || 'N/A').padEnd(18);
+      const name = (emp.employee_name || '').trim().toUpperCase().substring(0, 28).padEnd(30);
       const grossWages = Math.round(emp.gross_pay_cents / 100);
       const epfWages = Math.round(emp.epf_wages_cents / 100);
       const epsWages = Math.round(emp.eps_wages_cents / 100);
@@ -216,19 +274,50 @@ export async function generatePFECR(tenantId, month, year) {
       const epsContribution = Math.round(epfContribution * 0.8333); // EPS is 8.33% of EPF
       const edliContribution = Math.round(epfContribution * 0.0005); // EDLI is 0.5% of EPF
       
-      const record = [
+      const row = [
+        String(index + 1).padEnd(6),
         uan,
         name,
-        String(grossWages),
-        String(epfWages),
-        String(epsWages),
-        String(epfContribution),
-        String(epsContribution),
-        String(edliContribution)
-      ].join('|');
+        formatNumber(grossWages).padStart(15),
+        formatNumber(epfWages).padStart(15),
+        formatNumber(epsWages).padStart(15),
+        formatNumber(epfContribution).padStart(15),
+        formatNumber(epsContribution).padStart(15),
+        formatNumber(edliContribution).padStart(15)
+      ].join(' | ');
       
-      lines.push(record);
+      lines.push(row);
     });
+    
+    lines.push('-'.repeat(100));
+    
+    // Footer Summary Row
+    const footerRow = [
+      'TOTAL'.padEnd(6),
+      ''.padEnd(18),
+      ''.padEnd(30),
+      formatNumber(totalGrossWages).padStart(15),
+      formatNumber(totalGrossWages > 0 ? Math.min(totalGrossWages, employeesResult.rows.length * 15000) : 0).padStart(15),
+      formatNumber(totalGrossWages > 0 ? Math.min(totalGrossWages, employeesResult.rows.length * 15000) : 0).padStart(15),
+      formatNumber(totalEPF / 100).padStart(15),
+      formatNumber(totalEPS / 100).padStart(15),
+      formatNumber(totalEDLI / 100).padStart(15)
+    ].join(' | ');
+    
+    lines.push(footerRow);
+    lines.push('='.repeat(100));
+    lines.push('');
+    
+    // Notes Section
+    lines.push('NOTES:');
+    lines.push('1. EPF Wages: Minimum of (Gross Pay, ₹15,000) for PF calculation');
+    lines.push('2. EPS Wages: Minimum of (Gross Pay, ₹15,000) for EPS calculation');
+    lines.push('3. EPF Contribution: 12% of EPF Wages (Employee + Employer)');
+    lines.push('4. EPS Contribution: 8.33% of EPF Contribution (from Employer share)');
+    lines.push('5. EDLI Contribution: 0.5% of EPF Contribution (from Employer share)');
+    lines.push('');
+    lines.push(`Report Generated: ${currentDate}`);
+    lines.push('='.repeat(100));
     
     return lines.join('\n');
   } catch (error) {
