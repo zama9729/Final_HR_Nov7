@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Building2, Upload, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useOrgSetup } from "@/contexts/OrgSetupContext";
 
 export default function Settings() {
@@ -27,24 +28,84 @@ export default function Settings() {
     capture_method: "timesheets",
     enable_geofence: false,
     enable_kiosk: false,
+    kiosk_pin: "",
+    kiosk_label: "",
   });
   const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [geofenceForm, setGeofenceForm] = useState({
+    lat: "",
+    lng: "",
+    radius: "250",
+    label: "",
+  });
+  const [geofenceSaving, setGeofenceSaving] = useState(false);
+  const selectedBranch = useMemo(
+    () => branches.find((branch) => branch.id === selectedBranchId),
+    [branches, selectedBranchId]
+  );
+  const geofenceUpdatedAt = selectedBranch?.metadata?.geofence?.updated_at;
+
+  const hydrateGeofenceForm = (branchId: string, sourceList?: any[]) => {
+    const collection = sourceList || branches;
+    const branch = collection.find((b) => b.id === branchId);
+    const existing = branch?.metadata?.geofence || {};
+    setGeofenceForm({
+      lat: existing.lat !== undefined ? String(existing.lat) : "",
+      lng: existing.lng !== undefined ? String(existing.lng) : "",
+      radius: existing.radius !== undefined ? String(existing.radius) : "250",
+      label: existing.label || "",
+    });
+  };
+
+  const loadBranchHierarchy = async (preferredBranchId?: string) => {
+    try {
+      const data = await api.getBranchHierarchy();
+      const branchList = data?.branches || [];
+      setBranches(branchList);
+      if (branchList.length === 0) {
+        setSelectedBranchId("");
+        setGeofenceForm({ lat: "", lng: "", radius: "250", label: "" });
+        return;
+      }
+      const candidateId =
+        (preferredBranchId && branchList.some((b: any) => b.id === preferredBranchId))
+          ? preferredBranchId
+          : (selectedBranchId && branchList.some((b: any) => b.id === selectedBranchId))
+            ? selectedBranchId
+            : branchList[0].id;
+      setSelectedBranchId(candidateId);
+      hydrateGeofenceForm(candidateId, branchList);
+    } catch (error) {
+      console.error('Error loading branches for geofence:', error);
+    }
+  };
 
   useEffect(() => {
-    // Admin, CEO, Director, HR can edit
-    setCanEdit(['admin', 'ceo', 'director', 'hr'].includes(userRole || ''));
+    const editable = ['admin', 'ceo', 'director', 'hr'].includes(userRole || '');
+    setCanEdit(editable);
     if (user) {
       fetchOrganization();
     }
     refreshAttendanceSettings();
+    if (editable) {
+      loadBranchHierarchy();
+    } else {
+      setBranches([]);
+      setSelectedBranchId("");
+    }
   }, [user, userRole, refreshAttendanceSettings]);
 
   useEffect(() => {
     if (attendanceSettings) {
+      const metadata = attendanceSettings.metadata || {};
       setAttendanceState({
         capture_method: attendanceSettings.capture_method || "timesheets",
         enable_geofence: Boolean(attendanceSettings.enable_geofence),
         enable_kiosk: Boolean(attendanceSettings.enable_kiosk),
+        kiosk_pin: metadata.kiosk_pin || "",
+        kiosk_label: metadata.kiosk_label || "",
       });
     }
   }, [attendanceSettings]);
@@ -133,6 +194,96 @@ export default function Settings() {
     }
   };
 
+  const handleSelectBranch = (value: string) => {
+    setSelectedBranchId(value);
+    hydrateGeofenceForm(value);
+  };
+
+  const handleGeofenceInputChange = (field: keyof typeof geofenceForm, value: string) => {
+    setGeofenceForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleGeofenceSave = async () => {
+    if (!canEdit) {
+      toast({
+        title: "Access denied",
+        description: "Only Admin, CEO, Director, or HR can configure geofencing.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!selectedBranchId) {
+      toast({
+        title: "Select a branch",
+        description: "Choose a branch before saving geofence coordinates.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const latNum = parseFloat(geofenceForm.lat);
+    const lngNum = parseFloat(geofenceForm.lng);
+    const radiusNum = parseFloat(geofenceForm.radius);
+    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum) || !Number.isFinite(radiusNum)) {
+      toast({
+        title: "Invalid coordinates",
+        description: "Latitude, longitude, and radius must be numeric values.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (radiusNum <= 0) {
+      toast({
+        title: "Radius too small",
+        description: "Enter a radius greater than zero (in meters).",
+        variant: "destructive",
+      });
+      return;
+    }
+    setGeofenceSaving(true);
+    try {
+      await api.updateBranchGeofence(selectedBranchId, {
+        lat: latNum,
+        lng: lngNum,
+        radius: radiusNum,
+        label: geofenceForm.label,
+      });
+      toast({
+        title: "Geofence saved",
+        description: "Branch geofence updated.",
+      });
+      await loadBranchHierarchy(selectedBranchId);
+    } catch (error: any) {
+      toast({
+        title: "Failed to save geofence",
+        description: error?.message || "Unable to save geofence for this branch.",
+        variant: "destructive",
+      });
+    } finally {
+      setGeofenceSaving(false);
+    }
+  };
+
+  const handleGeofenceClear = async () => {
+    if (!selectedBranchId) return;
+    setGeofenceSaving(true);
+    try {
+      await api.updateBranchGeofence(selectedBranchId, { clear: true });
+      toast({
+        title: "Geofence cleared",
+        description: "The geofence for this branch has been removed.",
+      });
+      await loadBranchHierarchy(selectedBranchId);
+    } catch (error: any) {
+      toast({
+        title: "Failed to clear geofence",
+        description: error?.message || "Unable to clear geofence for this branch.",
+        variant: "destructive",
+      });
+    } finally {
+      setGeofenceSaving(false);
+    }
+  };
+
   const handleAttendanceSave = async () => {
     if (!canEdit) {
       toast({
@@ -148,6 +299,10 @@ export default function Settings() {
         capture_method: attendanceState.capture_method,
         enable_geofence: attendanceState.enable_geofence,
         enable_kiosk: attendanceState.enable_kiosk,
+        metadata: {
+          kiosk_pin: attendanceState.kiosk_pin || null,
+          kiosk_label: attendanceState.kiosk_label || null,
+        },
       });
       await refreshAttendanceSettings();
       toast({
@@ -310,9 +465,10 @@ export default function Settings() {
                     <Switch
                       disabled={!canEdit || attendanceSaving}
                       checked={attendanceState.enable_geofence}
-                      onCheckedChange={(checked) =>
-                        setAttendanceState((prev) => ({ ...prev, enable_geofence: checked }))
-                      }
+                      onCheckedChange={(checked) => {
+                        if (!canEdit) return;
+                        setAttendanceState((prev) => ({ ...prev, enable_geofence: checked }));
+                      }}
                     />
                   </div>
                   <div className="border rounded-lg p-4 flex items-center justify-between">
@@ -323,11 +479,145 @@ export default function Settings() {
                     <Switch
                       disabled={!canEdit || attendanceSaving}
                       checked={attendanceState.enable_kiosk}
-                      onCheckedChange={(checked) =>
-                        setAttendanceState((prev) => ({ ...prev, enable_kiosk: checked }))
-                      }
+                      onCheckedChange={(checked) => {
+                        if (!canEdit) return;
+                        setAttendanceState((prev) => ({ ...prev, enable_kiosk: checked }));
+                      }}
                     />
                   </div>
+                </div>
+              )}
+
+              {attendanceState.capture_method === "clock_in_out" && attendanceState.enable_kiosk && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Kiosk label</Label>
+                    <Input
+                      value={attendanceState.kiosk_label}
+                      onChange={(e) =>
+                        setAttendanceState((prev) => ({ ...prev, kiosk_label: e.target.value }))
+                      }
+                      placeholder="e.g., Front Desk Tablet"
+                      disabled={!canEdit}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Kiosk PIN</Label>
+                    <Input
+                      value={attendanceState.kiosk_pin}
+                      onChange={(e) =>
+                        setAttendanceState((prev) => ({ ...prev, kiosk_pin: e.target.value }))
+                      }
+                      placeholder="Optional PIN to unlock kiosk"
+                      disabled={!canEdit}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Share this PIN with the kiosk attendant if you want to restrict access.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {attendanceState.capture_method === "clock_in_out" && attendanceState.enable_geofence && (
+                <div className="space-y-4 border rounded-lg p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium text-sm">Branch geofence</p>
+                      <p className="text-xs text-muted-foreground">
+                        Configure latitude, longitude, and a radius in meters for each branch.
+                      </p>
+                    </div>
+                    <div className="w-full md:w-60">
+                      <Select
+                        value={selectedBranchId || undefined}
+                        onValueChange={handleSelectBranch}
+                        disabled={!canEdit || branches.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select branch" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {branches.map((branch) => (
+                            <SelectItem key={branch.id} value={branch.id}>
+                              {branch.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {branches.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Add at least one branch before configuring geofencing.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Latitude</Label>
+                          <Input
+                            type="number"
+                            step="0.000001"
+                            value={geofenceForm.lat}
+                            onChange={(e) => handleGeofenceInputChange("lat", e.target.value)}
+                            disabled={!canEdit || geofenceSaving}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Longitude</Label>
+                          <Input
+                            type="number"
+                            step="0.000001"
+                            value={geofenceForm.lng}
+                            onChange={(e) => handleGeofenceInputChange("lng", e.target.value)}
+                            disabled={!canEdit || geofenceSaving}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Radius (meters)</Label>
+                          <Input
+                            type="number"
+                            min="10"
+                            value={geofenceForm.radius}
+                            onChange={(e) => handleGeofenceInputChange("radius", e.target.value)}
+                            disabled={!canEdit || geofenceSaving}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Label / Notes</Label>
+                          <Input
+                            value={geofenceForm.label}
+                            onChange={(e) => handleGeofenceInputChange("label", e.target.value)}
+                            placeholder="Optional label shown in reports"
+                            disabled={!canEdit || geofenceSaving}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        <Button
+                          onClick={handleGeofenceSave}
+                          disabled={!canEdit || geofenceSaving}
+                        >
+                          {geofenceSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Save Geofence
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleGeofenceClear}
+                          disabled={!canEdit || geofenceSaving}
+                        >
+                          Clear Geofence
+                        </Button>
+                        {geofenceUpdatedAt && (
+                          <p className="text-xs text-muted-foreground self-center">
+                            Last updated {new Date(geofenceUpdatedAt).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 

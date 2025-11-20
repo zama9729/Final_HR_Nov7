@@ -248,6 +248,13 @@ class ApiClient {
     });
   }
 
+  async updateBranchGeofence(branchId: string, payload: Record<string, any>) {
+    return this.request(`/api/branches/${branchId}/geofence`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
   // Stats methods
   async getPendingCounts() {
     return this.request('/api/stats/pending-counts');

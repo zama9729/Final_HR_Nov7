@@ -170,6 +170,67 @@ router.delete('/:branchId', async (req, res) => {
   }
 });
 
+router.patch('/:branchId/geofence', async (req, res) => {
+  const { branchId } = req.params;
+  const { lat, lng, radius, label, clear } = req.body || {};
+  try {
+    if (clear) {
+      const result = await queryWithOrg(
+        `UPDATE org_branches
+         SET metadata = (COALESCE(metadata, '{}'::jsonb) - 'geofence'),
+             updated_at = now()
+         WHERE id = $1 AND org_id = $2
+         RETURNING id, metadata`,
+        [branchId, req.orgId],
+        req.orgId
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ error: 'Branch not found' });
+      }
+      return res.json(result.rows[0]);
+    }
+
+    const latNumber = Number(lat);
+    const lngNumber = Number(lng);
+    const radiusNumber = Number(radius);
+
+    if (!Number.isFinite(latNumber) || !Number.isFinite(lngNumber) || !Number.isFinite(radiusNumber)) {
+      return res.status(400).json({ error: 'lat, lng, and radius are required numeric values' });
+    }
+
+    if (radiusNumber <= 0) {
+      return res.status(400).json({ error: 'Radius must be greater than zero' });
+    }
+
+    const geofencePayload = {
+      lat: latNumber,
+      lng: lngNumber,
+      radius: radiusNumber,
+      label: label || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const result = await queryWithOrg(
+      `UPDATE org_branches
+       SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('geofence', $3::jsonb),
+           updated_at = now()
+       WHERE id = $1 AND org_id = $2
+       RETURNING id, metadata`,
+      [branchId, req.orgId, JSON.stringify(geofencePayload)],
+      req.orgId
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Branch not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Failed to update geofence', error);
+    res.status(500).json({ error: error.message || 'Failed to update geofence' });
+  }
+});
+
 export default router;
 
 
