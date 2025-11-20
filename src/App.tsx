@@ -11,6 +11,8 @@ import Login from "./pages/auth/Login";
 import FirstTimeLogin from "./pages/auth/FirstTimeLogin";
 import FirstLoginWithToken from "./pages/auth/FirstLoginWithToken";
 import Signup from "./pages/auth/Signup";
+import ForgotPassword from "./pages/auth/ForgotPassword";
+import ResetPassword from "./pages/auth/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Employees from "./pages/Employees";
 import Appraisals from "./pages/Appraisals";
@@ -47,6 +49,7 @@ import ProjectCalendar from "./pages/ProjectCalendar";
 import HolidayManagement from "./pages/HolidayManagement";
 import EmployeeStats from "./pages/EmployeeStats";
 import Payroll from "./pages/Payroll";
+import PayrollAdjustments from "./pages/PayrollAdjustments";
 import BackgroundChecks from "./pages/BackgroundChecks";
 import Terminations from "./pages/Terminations";
 import DocumentInbox from "./pages/DocumentInbox";
@@ -57,6 +60,9 @@ import OffboardingPolicies from "./pages/OffboardingPolicies";
 import OnboardingEnhanced from "./pages/OnboardingEnhanced";
 import PoliciesManagement from "./pages/PoliciesManagement";
 import PromotionCycles from "./pages/PromotionCycles";
+import TaxDeclaration from "./pages/TaxDeclaration";
+import TaxDeclarationReview from "./pages/TaxDeclarationReview";
+import Form16 from "./pages/Form16";
 
 const queryClient = new QueryClient();
 
@@ -71,6 +77,8 @@ const App = () => (
             {/* Public routes */}
             <Route path="/auth/login" element={<PublicRoute><Login /></PublicRoute>} />
             <Route path="/auth/signup" element={<PublicRoute><Signup /></PublicRoute>} />
+            <Route path="/auth/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
+            <Route path="/auth/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
             <Route path="/auth/first-time-login" element={<FirstTimeLogin />} />
             <Route path="/auth/first-login" element={<FirstLoginWithToken />} />
             <Route path="/setup-password" element={<SetupPassword />} />
@@ -116,6 +124,10 @@ const App = () => (
             <Route path="/attendance/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><AttendanceUpload /></ProtectedRoute>} />
             <Route path="/attendance/history" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><AttendanceUploadHistory /></ProtectedRoute>} />
             <Route path="/payroll" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin']}><Payroll /></ProtectedRoute>} />
+            <Route path="/tax/declaration" element={<ProtectedRoute><TaxDeclaration /></ProtectedRoute>} />
+            <Route path="/tax/declarations/review" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><TaxDeclarationReview /></ProtectedRoute>} />
+            <Route path="/reports/form16" element={<ProtectedRoute><Form16 /></ProtectedRoute>} />
+            <Route path="/payroll/adjustments" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin']}><PayrollAdjustments /></ProtectedRoute>} />
             <Route path="/background-checks" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><BackgroundChecks /></ProtectedRoute>} />
             <Route path="/terminations" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><Terminations /></ProtectedRoute>} />
             <Route path="/documents" element={<ProtectedRoute><DocumentInbox /></ProtectedRoute>} />

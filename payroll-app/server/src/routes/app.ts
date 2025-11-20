@@ -2,8 +2,97 @@ import { Router, Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { query } from "../db.js";
 import PDFDocument from "pdfkit";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import reimbursementsRouter from "./reimbursements.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+const PROOFS_DIRECTORY =
+  process.env.PAYROLL_PROOFS_DIR || path.resolve(process.cwd(), "uploads", "tax-proofs");
+const PROOFS_BASE_URL = process.env.PAYROLL_PROOFS_BASE_URL || "/tax-proofs";
+fs.mkdirSync(PROOFS_DIRECTORY, { recursive: true });
+
+const proofStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, PROOFS_DIRECTORY),
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const sanitized = file.originalname.replace(/\s+/g, "_");
+    cb(null, `${uniqueSuffix}-${sanitized}`);
+  },
+});
+
+const proofUpload = multer({
+  storage: proofStorage,
+  limits: {
+    fileSize: Number(process.env.PAYROLL_PROOF_MAX_SIZE || 5 * 1024 * 1024), // default 5MB
+  },
+});
+
+const TAX_COMPONENT_MAP = [
+  {
+    key: "section80C",
+    code: "PAYROLL_SECTION_80C",
+    label: "Section 80C Investments",
+    section: "80C",
+    sectionGroup: "80C",
+  },
+  {
+    key: "section80D",
+    code: "PAYROLL_SECTION_80D",
+    label: "Section 80D Medical Insurance",
+    section: "80D",
+    sectionGroup: "80D",
+  },
+  {
+    key: "homeLoanInterest",
+    code: "PAYROLL_SECTION_24B",
+    label: "Home Loan Interest (Section 24B)",
+    section: "24B",
+    sectionGroup: null,
+  },
+  {
+    key: "hra",
+    code: "PAYROLL_HRA",
+    label: "HRA Exemption",
+    section: "HRA",
+    sectionGroup: null,
+  },
+  {
+    key: "otherDeductions",
+    code: "PAYROLL_OTHER_DEDUCTIONS",
+    label: "Other Deductions",
+    section: "Other",
+    sectionGroup: null,
+  },
+] as const;
+
+const defaultTaxSlabs: Array<{ from: number; to: number | null; rate: number }> = [
+  { from: 0, to: 300000, rate: 0 },
+  { from: 300000, to: 600000, rate: 5 },
+  { from: 600000, to: 900000, rate: 10 },
+  { from: 900000, to: 1200000, rate: 15 },
+  { from: 1200000, to: 1500000, rate: 20 },
+  { from: 1500000, to: null, rate: 30 },
+];
+
+function getCurrentFinancialYearString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const startYear = now.getMonth() >= 3 ? year : year - 1;
+  return `${startYear}-${startYear + 1}`;
+}
+
+function buildDefaultTaxRegime(financialYear: string) {
+  return {
+    regime_type: "new",
+    financial_year: financialYear,
+    standard_deduction: 75000,
+    cess_percentage: 4,
+    slabs: defaultTaxSlabs,
+    surcharge_rules: [],
+  };
+}
 
 export const appRouter = Router();
 appRouter.get("/test", (req, res) => {
@@ -24,8 +113,8 @@ console.log("[ROUTES] POST /api/employees-test registered (test route)");
 // This function is defined once and used by the auth middleware
 // Payroll uses 'users' table, not 'profiles' table
 async function getUserTenant(userId: string) {
-  const user = await query<{ org_id: string; email: string }>(
-    "SELECT org_id as tenant_id, email FROM users WHERE id = $1",
+  const user = await query<{ org_id: string; email: string; hr_user_id: string | null }>(
+    "SELECT org_id as tenant_id, email, hr_user_id FROM users WHERE id = $1",
     [userId]
   );
   if (!user.rows[0]) {
@@ -106,8 +195,9 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
              ON CONFLICT (id) DO UPDATE SET
                email = COALESCE(EXCLUDED.email, users.email),
                org_id = COALESCE(EXCLUDED.org_id, users.org_id),
-               payroll_role = COALESCE(EXCLUDED.payroll_role, users.payroll_role)
-             RETURNING org_id as tenant_id, email`,
+               payroll_role = COALESCE(EXCLUDED.payroll_role, users.payroll_role),
+               hr_user_id = COALESCE(EXCLUDED.hr_user_id, users.hr_user_id)
+             RETURNING org_id as tenant_id, email, hr_user_id`,
             [userId, email, orgId, payrollRole, hrUserId]
           );
           
@@ -134,6 +224,7 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
       (req as any).tenantId = profile.tenant_id;
       (req as any).userEmail = profile.email;
+      (req as any).hrUserId = profile.hr_user_id || null;
 
       next();
     } catch (e: any) {
@@ -196,7 +287,8 @@ appRouter.get("/profile", requireAuth, async (req, res) => {
            ON CONFLICT (id) DO UPDATE SET
              email = COALESCE(EXCLUDED.email, users.email),
              org_id = COALESCE(EXCLUDED.org_id, users.org_id),
-             payroll_role = COALESCE(EXCLUDED.payroll_role, users.payroll_role)
+             payroll_role = COALESCE(EXCLUDED.payroll_role, users.payroll_role),
+             hr_user_id = COALESCE(EXCLUDED.hr_user_id, users.hr_user_id)
            RETURNING id, org_id as tenant_id, email,
              COALESCE(first_name || ' ' || last_name, email) as full_name,
              first_name, last_name, payroll_role, hr_user_id`,
@@ -949,9 +1041,10 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
                 tenant_id, payroll_cycle_id, employee_id,
                 gross_salary, deductions, net_salary,
                 basic_salary, hra, special_allowance,
+                incentive_amount,
                 pf_deduction, esi_deduction, tds_deduction, pt_deduction,
                 lop_days, paid_days, total_working_days
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
               ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
                 gross_salary = EXCLUDED.gross_salary,
                 deductions = EXCLUDED.deductions,
@@ -959,6 +1052,7 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
                 basic_salary = EXCLUDED.basic_salary,
                 hra = EXCLUDED.hra,
                 special_allowance = EXCLUDED.special_allowance,
+                incentive_amount = EXCLUDED.incentive_amount,
                 pf_deduction = EXCLUDED.pf_deduction,
                 esi_deduction = EXCLUDED.esi_deduction,
                 tds_deduction = EXCLUDED.tds_deduction,
@@ -967,7 +1061,7 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
                 paid_days = EXCLUDED.paid_days,
                 total_working_days = EXCLUDED.total_working_days,
                 updated_at = NOW()`,
-              [tenantId, cycleId, emp.id, adjustedGross, deductions, net, adjustedBasic, adjustedHra, adjustedSa, pf, esi, tds, pt, lopDays, paidDays, totalWorkingDays]
+              [tenantId, cycleId, emp.id, adjustedGross, deductions, net, adjustedBasic, adjustedHra, adjustedSa, 0, pf, esi, tds, pt, lopDays, paidDays, totalWorkingDays]
             );
 
             processedCount++;
@@ -1355,6 +1449,44 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
   }
 });
 
+appRouter.post(
+  "/tax-declarations/proofs",
+  requireAuth,
+  proofUpload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "File is required" });
+      }
+
+      const { component_code: componentCode, financial_year: financialYear } = req.body;
+
+      if (!componentCode) {
+        return res.status(400).json({ error: "component_code is required" });
+      }
+
+      if (!financialYear) {
+        return res.status(400).json({ error: "financial_year is required" });
+      }
+
+      const basePath = PROOFS_BASE_URL.startsWith("http")
+        ? PROOFS_BASE_URL
+        : `${req.protocol}://${req.get("host")}${PROOFS_BASE_URL}`;
+      const publicUrl = `${basePath.replace(/\/+$/, "")}/${req.file.filename}`;
+
+      res.json({
+        url: publicUrl,
+        fileName: req.file.originalname,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
+      });
+    } catch (error: any) {
+      console.error("Error uploading tax declaration proof:", error);
+      res.status(500).json({ error: error.message || "Failed to upload proof" });
+    }
+  }
+);
+
 appRouter.get("/tax-declarations", requireAuth, async (req, res) => {
   try {
     const tenantId = (req as any).tenantId as string;
@@ -1375,7 +1507,37 @@ appRouter.get("/tax-declarations", requireAuth, async (req, res) => {
       [employeeId, tenantId]
     );
 
-    return res.json({ declarations: result.rows });
+    const declarations = result.rows;
+    const ids = declarations.map((dec) => dec.id);
+    const itemsByDeclaration = new Map<string, any[]>();
+
+    if (ids.length > 0) {
+      const itemsResult = await query(
+        `SELECT 
+          tdi.*,
+          tcd.label,
+          tcd.section,
+          tcd.section_group
+        FROM tax_declaration_items tdi
+        JOIN tax_component_definitions tcd ON tcd.id = tdi.component_id
+        WHERE tdi.declaration_id = ANY($1::uuid[])`,
+        [ids]
+      );
+
+      for (const row of itemsResult.rows) {
+        if (!itemsByDeclaration.has(row.declaration_id)) {
+          itemsByDeclaration.set(row.declaration_id, []);
+        }
+        itemsByDeclaration.get(row.declaration_id)?.push(row);
+      }
+    }
+
+    const enriched = declarations.map((dec) => ({
+      ...dec,
+      items: itemsByDeclaration.get(dec.id) || [],
+    }));
+
+    return res.json({ declarations: enriched });
 
   } catch (e: any) {
     console.error("Error fetching tax declarations:", e);
@@ -1387,7 +1549,10 @@ appRouter.post("/tax-declarations", requireAuth, async (req, res) => {
   try {
     const tenantId = (req as any).tenantId as string;
     const email = (req as any).userEmail as string;
-    const { financial_year, declaration_data } = req.body;
+    const { financial_year, declaration_data, chosen_regime: bodyRegime } = req.body;
+    const statusRaw =
+      typeof req.body.status === "string" ? req.body.status.toLowerCase() : "draft";
+    const statusValue = statusRaw === "submitted" ? "submitted" : "draft";
 
     if (!financial_year || !declaration_data) {
       return res.status(400).json({ error: "Missing financial_year or declaration_data" });
@@ -1403,15 +1568,215 @@ appRouter.post("/tax-declarations", requireAuth, async (req, res) => {
     }
     const employeeId = emp.rows[0].id;
 
-    const result = await query(
-      `INSERT INTO tax_declarations 
-        (employee_id, tenant_id, financial_year, declaration_data, status, submitted_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [employeeId, tenantId, financial_year, declaration_data, 'submitted', new Date().toISOString()]
+    const { rows: columnRows } = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_schema = 'public' AND table_name = 'tax_declarations'`
     );
 
-    return res.status(201).json({ declaration: result.rows[0] });
+    const existingColumns = columnRows.map((row) => row.column_name);
+    const chosenRegime = 'new';
+    const nowIso = new Date().toISOString();
+
+    const structuredData = {
+      section80C: Number(declaration_data.section80C) || 0,
+      section80D: Number(declaration_data.section80D) || 0,
+      homeLoanInterest: Number(declaration_data.homeLoanInterest) || 0,
+      hra: Number(declaration_data.hra) || 0,
+      otherDeductions: Number(declaration_data.otherDeductions) || 0,
+    };
+
+    const rawItems = Array.isArray(req.body.items) ? req.body.items : [];
+
+    let result;
+
+    if (existingColumns.includes('declaration_data')) {
+      const columns: string[] = ['employee_id', 'tenant_id', 'financial_year'];
+      const values: any[] = [employeeId, tenantId, financial_year];
+      const placeholders: string[] = ['$1', '$2', '$3'];
+      let index = 4;
+
+      columns.push('declaration_data');
+      values.push(structuredData);
+      placeholders.push(`$${index++}`);
+
+      if (existingColumns.includes('chosen_regime')) {
+        columns.push('chosen_regime');
+        values.push(chosenRegime);
+        placeholders.push(`$${index++}`);
+      }
+
+      if (existingColumns.includes("status")) {
+        columns.push("status");
+        values.push(statusValue);
+        placeholders.push(`$${index++}`);
+      }
+
+      if (existingColumns.includes("submitted_at")) {
+        columns.push("submitted_at");
+        values.push(statusValue === "submitted" ? nowIso : null);
+        placeholders.push(`$${index++}`);
+      }
+
+      if (existingColumns.includes("updated_at")) {
+        columns.push("updated_at");
+        values.push(nowIso);
+        placeholders.push(`$${index++}`);
+      }
+
+      const insertQuery = `
+        INSERT INTO tax_declarations (${columns.join(', ')})
+        VALUES (${placeholders.join(', ')})
+        ON CONFLICT (employee_id, financial_year)
+        DO UPDATE SET
+          ${columns
+            .slice(3)
+            .map((col) =>
+              col === "submitted_at"
+                ? `${col} = COALESCE(EXCLUDED.${col}, tax_declarations.${col})`
+                : `${col} = EXCLUDED.${col}`
+            )
+            .join(', ')}
+        RETURNING *
+      `;
+
+      result = await query(insertQuery, values);
+    } else {
+      const columns: string[] = ["employee_id", "tenant_id", "financial_year"];
+      const values: any[] = [employeeId, tenantId, financial_year];
+      const placeholders: string[] = ["$1", "$2", "$3"];
+      let index = 4;
+
+      const addColumn = (column: string, value: any) => {
+        columns.push(column);
+        values.push(value);
+        placeholders.push(`$${index++}`);
+      };
+
+      if (existingColumns.includes("section_80c")) addColumn("section_80c", structuredData.section80C);
+      if (existingColumns.includes("section_80d")) addColumn("section_80d", structuredData.section80D);
+      if (existingColumns.includes("section_24b"))
+        addColumn("section_24b", structuredData.homeLoanInterest);
+      if (existingColumns.includes("hra")) addColumn("hra", structuredData.hra);
+      if (existingColumns.includes("other_deductions"))
+        addColumn("other_deductions", structuredData.otherDeductions + structuredData.hra);
+      if (existingColumns.includes("total_deductions"))
+        addColumn(
+          "total_deductions",
+          structuredData.section80C +
+            structuredData.section80D +
+            structuredData.homeLoanInterest +
+            structuredData.otherDeductions +
+            structuredData.hra
+        );
+      if (existingColumns.includes("chosen_regime")) addColumn("chosen_regime", chosenRegime);
+      if (existingColumns.includes("status")) addColumn("status", statusValue);
+      if (existingColumns.includes("submitted_at"))
+        addColumn("submitted_at", statusValue === "submitted" ? nowIso : null);
+      if (existingColumns.includes("approved_by")) addColumn("approved_by", null);
+      if (existingColumns.includes("approved_at")) addColumn("approved_at", null);
+      if (existingColumns.includes("updated_at")) addColumn("updated_at", nowIso);
+
+      const updateAssignments = columns.slice(3).map((column) =>
+        column === "submitted_at"
+          ? `${column} = COALESCE(EXCLUDED.${column}, tax_declarations.${column})`
+          : `${column} = EXCLUDED.${column}`
+      );
+
+      const insertQuery = `
+        INSERT INTO tax_declarations (${columns.join(", ")})
+        VALUES (${placeholders.join(", ")})
+        ON CONFLICT (employee_id, financial_year)
+        ${updateAssignments.length > 0 ? `DO UPDATE SET ${updateAssignments.join(", ")}` : "DO NOTHING"}
+        RETURNING *
+      `;
+
+      result = await query(insertQuery, values);
+
+      if (result.rows.length === 0) {
+        result = await query(
+          `SELECT * FROM tax_declarations WHERE employee_id = $1 AND tenant_id = $2 AND financial_year = $3`,
+          [employeeId, tenantId, financial_year]
+        );
+      }
+    }
+
+    const declarationRow = result.rows[0];
+    const declarationId = declarationRow.id;
+
+    await query(`DELETE FROM tax_declaration_items WHERE declaration_id = $1`, [declarationId]);
+
+    const definitionCache = new Map<string, string>();
+    const ensureDefinition = async (componentCode: string) => {
+      if (definitionCache.has(componentCode)) {
+        return definitionCache.get(componentCode)!;
+      }
+      const component = TAX_COMPONENT_MAP.find((entry) => entry.code === componentCode);
+      if (!component) {
+        throw new Error(`Unknown tax component: ${componentCode}`);
+      }
+
+      const existingDef = await query(
+        `SELECT id FROM tax_component_definitions 
+         WHERE tenant_id = $1 AND financial_year = $2 AND component_code = $3
+         LIMIT 1`,
+        [tenantId, financial_year, component.code]
+      );
+
+      if (existingDef.rows.length > 0) {
+        const id = existingDef.rows[0].id as string;
+        definitionCache.set(component.code, id);
+        return id;
+      }
+
+      const insertDef = await query(
+        `INSERT INTO tax_component_definitions (
+          tenant_id, financial_year, component_code, label, section, section_group, metadata, is_active
+        ) VALUES ($1, $2, $3, $4, $5, $6, '{}', true)
+        RETURNING id`,
+        [tenantId, financial_year, component.code, component.label, component.section, component.sectionGroup || null]
+      );
+
+      const id = insertDef.rows[0].id as string;
+      definitionCache.set(component.code, id);
+      return id;
+    };
+
+    const normalizedItems =
+      rawItems.length > 0
+        ? rawItems.map((item: any) => ({
+            component_id: String(item.component_id || item.component_code || "").trim(),
+            declared_amount: Number(item.declared_amount ?? 0),
+            proof_url: typeof item.proof_url === "string" ? item.proof_url.trim() : "",
+          }))
+        : TAX_COMPONENT_MAP.map((component) => ({
+            component_id: component.code,
+            declared_amount: Number(structuredData[component.key as keyof typeof structuredData] || 0),
+            proof_url: "",
+          }));
+
+    for (const item of normalizedItems) {
+      if (!item.component_id) continue;
+      const component = TAX_COMPONENT_MAP.find((entry) => entry.code === item.component_id);
+      if (!component) continue;
+
+      const declaredAmount = Number(item.declared_amount || 0);
+      const proofUrl = (item.proof_url || "").trim();
+
+      if (declaredAmount <= 0 && !proofUrl) {
+        continue;
+      }
+
+      const definitionId = await ensureDefinition(component.code);
+      await query(
+        `INSERT INTO tax_declaration_items (
+          declaration_id, component_id, declared_amount, approved_amount, proof_url
+        ) VALUES ($1, $2, $3, NULL, $4)`,
+        [declarationId, definitionId, declaredAmount, proofUrl || null]
+      );
+    }
+
+    return res.status(201).json({ declaration: declarationRow });
 
   } catch (e: any) {
     console.error("Error creating tax declaration:", e);
@@ -1758,7 +2123,7 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
     }
 
     // Verify user is actually HR role in HR system
-    const hrUserId = userResult.rows[0].hr_user_id;
+    let hrUserId: string | null = userResult.rows[0].hr_user_id || null;
     if (hrUserId) {
       try {
         // In Docker, use service name 'api' instead of 'localhost'
@@ -1805,6 +2170,10 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    if (!hrUserId && (req as any).hrUserId) {
+      hrUserId = (req as any).hrUserId as string;
+    }
+
     const result = await query(
       `INSERT INTO compensation_structures (
         tenant_id, employee_id, effective_from, ctc, basic_salary, 
@@ -1812,7 +2181,21 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         created_by
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-      ) RETURNING *`,
+      )
+      ON CONFLICT (employee_id, effective_from)
+      DO UPDATE SET
+        ctc = EXCLUDED.ctc,
+        basic_salary = EXCLUDED.basic_salary,
+        hra = EXCLUDED.hra,
+        special_allowance = EXCLUDED.special_allowance,
+        da = EXCLUDED.da,
+        lta = EXCLUDED.lta,
+        bonus = EXCLUDED.bonus,
+        pf_contribution = EXCLUDED.pf_contribution,
+        esi_contribution = EXCLUDED.esi_contribution,
+        created_by = COALESCE(compensation_structures.created_by, EXCLUDED.created_by),
+        updated_at = NOW()
+      RETURNING *`,
       [
         tenantId,
         employeeId,
@@ -1826,7 +2209,7 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         bonus || 0,
         pf_contribution || 0,
         esi_contribution || 0,
-        userId // created_by
+        hrUserId || null // created_by (HR profile ID); allow null if not mapped
       ]
     );
     
@@ -1916,7 +2299,7 @@ appRouter.get("/payroll/new-cycle-data", requireAuth, async (req, res) => {
   const { rows: compRows } = await query(
     `SELECT SUM(cs.ctc / 12) as total
      FROM compensation_structures cs
-     JOIN payroll_employee_view e ON e.employee_id = cs.employee_id::text
+     JOIN payroll_employee_view e ON e.employee_id = cs.employee_id
      WHERE e.org_id = $1 
        AND e.employment_status = 'active'
        AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
@@ -2325,6 +2708,77 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       });
     }
 
+    const existingItemsResult = await query(
+      `SELECT 
+         pi.employee_id,
+         pi.gross_salary,
+         pi.deductions,
+         pi.net_salary,
+         pi.basic_salary,
+         pi.hra,
+         pi.special_allowance,
+         pi.incentive_amount,
+         pi.pf_deduction,
+         pi.esi_deduction,
+         pi.pt_deduction,
+         pi.tds_deduction,
+         pi.lop_days,
+         pi.paid_days,
+         pi.total_working_days,
+         e.employee_code,
+         e.full_name,
+         e.email
+       FROM payroll_items pi
+       JOIN payroll_employee_view e ON e.employee_id = pi.employee_id AND (e.org_id = $2 OR e.org_id IS NULL)
+       WHERE pi.payroll_cycle_id = $1
+         AND pi.tenant_id = $2
+       ORDER BY e.full_name`,
+      [cycleId, tenantId]
+    );
+
+    if (existingItemsResult.rows.length > 0) {
+      const incentiveRows = await query(
+        `SELECT employee_id, amount
+         FROM payroll_incentives
+         WHERE tenant_id = $1
+           AND payroll_cycle_id = $2`,
+        [tenantId, cycleId]
+      );
+      const incentiveMap = new Map<string, number>();
+      incentiveRows.rows.forEach((row) => {
+        incentiveMap.set(row.employee_id, Number(row.amount || 0));
+      });
+
+      const items = existingItemsResult.rows.map((row) => ({
+        employee_id: row.employee_id,
+        employee_code: row.employee_id,
+        employee_name: row.full_name,
+        employee_email: row.email,
+        basic_salary: Number(row.basic_salary || 0),
+        hra: Number(row.hra || 0),
+        special_allowance: Number(row.special_allowance || 0),
+        incentive_amount:
+          row.incentive_amount !== null && row.incentive_amount !== undefined
+            ? Number(row.incentive_amount)
+            : incentiveMap.get(row.employee_id) || 0,
+        da: 0,
+        lta: 0,
+        bonus: 0,
+        gross_salary: Number(row.gross_salary || 0),
+        pf_deduction: Number(row.pf_deduction || 0),
+        esi_deduction: Number(row.esi_deduction || 0),
+        pt_deduction: Number(row.pt_deduction || 0),
+        tds_deduction: Number(row.tds_deduction || 0),
+        deductions: Number(row.deductions || 0),
+        net_salary: Number(row.net_salary || 0),
+        lop_days: Number(row.lop_days || 0),
+        paid_days: Number(row.paid_days || 0),
+        total_working_days: Number(row.total_working_days || 0),
+      }));
+
+      return res.json({ payrollItems: items });
+    }
+
     const payrollMonth = cycle.month;
     const payrollYear = cycle.year;
     const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
@@ -2344,17 +2798,29 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
 
     // Get all active employees who were employed by the payroll month
     const employeesResult = await query(
-      `SELECT e.id, e.full_name, e.email, e.employee_code
-       FROM employees e
-       WHERE e.tenant_id = $1 
-         AND e.status = 'active'
-         AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
-       ORDER BY e.date_of_joining ASC`,
+      `SELECT employee_id, full_name, email, employee_code
+       FROM payroll_employee_view
+       WHERE org_id = $1
+         AND employment_status = 'active'
+         AND (date_of_joining IS NULL OR date_of_joining <= $2)
+       ORDER BY date_of_joining ASC`,
       [tenantId, payrollMonthEnd.toISOString()]
     );
 
     const employees = employeesResult.rows;
     const payrollItems: any[] = [];
+
+    const incentivesResult = await query(
+      `SELECT employee_id, amount
+       FROM payroll_incentives
+       WHERE tenant_id = $1
+         AND payroll_cycle_id = $2`,
+      [tenantId, cycleId]
+    );
+    const incentiveMap = new Map<string, number>();
+    incentivesResult.rows.forEach((row) => {
+      incentiveMap.set(row.employee_id, Number(row.amount || 0));
+    });
 
     // Calculate salary for each employee
     for (const employee of employees) {
@@ -2366,7 +2832,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
            AND effective_from <= $3
          ORDER BY effective_from DESC
          LIMIT 1`,
-        [employee.id, tenantId, payrollMonthEnd.toISOString()]
+        [employee.employee_id, tenantId, payrollMonthEnd.toISOString()]
       );
 
       if (compResult.rows.length === 0) {
@@ -2389,7 +2855,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       // Calculate LOP days and paid days for this month
       const { lopDays, paidDays, totalWorkingDays } = await calculateLopAndPaidDays(
         tenantId,
-        employee.id,
+        employee.employee_id,
         payrollMonth,
         payrollYear
       );
@@ -2412,7 +2878,9 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
       const ptDeduction = Number(settings.pt_rate) || 200;
       
-      const annualIncome = adjustedGrossSalary * 12;
+      const incentiveAmount = incentiveMap.get(employee.employee_id) || 0;
+      const grossWithIncentive = adjustedGrossSalary + incentiveAmount;
+      const annualIncome = grossWithIncentive * 12;
       let tdsDeduction = 0;
       if (annualIncome > Number(settings.tds_threshold)) {
         const excessAmount = annualIncome - Number(settings.tds_threshold);
@@ -2420,20 +2888,22 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       }
 
       const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
-      const netSalary = adjustedGrossSalary - totalDeductions;
+      const netSalary = grossWithIncentive - totalDeductions;
+      const finalGrossSalary = grossWithIncentive;
 
       payrollItems.push({
-        employee_id: employee.id,
+        employee_id: employee.employee_id,
         employee_code: employee.employee_code,
         employee_name: employee.full_name,
         employee_email: employee.email,
         basic_salary: adjustedBasic,
         hra: adjustedHRA,
         special_allowance: adjustedSpecialAllowance,
+        incentive_amount: incentiveAmount,
         da: adjustedDA,
         lta: adjustedLTA,
         bonus: adjustedBonus,
-        gross_salary: adjustedGrossSalary,
+        gross_salary: grossWithIncentive,
         pf_deduction: pfDeduction,
         esi_deduction: esiDeduction,
         pt_deduction: ptDeduction,
@@ -2451,6 +2921,76 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
   } catch (e: any) {
     console.error("Error previewing payroll:", e);
     return res.status(500).json({ error: e.message || "Failed to preview payroll" });
+  }
+});
+
+appRouter.post("/payroll-cycles/:cycleId/incentives", requireAuth, async (req, res) => {
+  const tenantId = (req as any).tenantId as string;
+  const { cycleId } = req.params;
+  const { employee_id: employeeId, amount } = req.body || {};
+
+  if (!tenantId) {
+    return res.status(403).json({ error: "User tenant not found" });
+  }
+
+  if (!employeeId) {
+    return res.status(400).json({ error: "employee_id is required" });
+  }
+
+  if (amount === undefined || amount === null || Number.isNaN(Number(amount))) {
+    return res.status(400).json({ error: "Valid incentive amount is required" });
+  }
+
+  const numericAmount = Number(amount);
+  if (numericAmount < 0) {
+    return res.status(400).json({ error: "Incentive amount cannot be negative" });
+  }
+
+  try {
+    const cycleResult = await query(
+      "SELECT status FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycleStatus = cycleResult.rows[0].status;
+    if (['processing', 'completed', 'paid', 'failed'].includes(cycleStatus)) {
+      return res.status(400).json({ error: `Cannot modify incentives for a '${cycleStatus}' payroll cycle.` });
+    }
+
+    if (numericAmount === 0) {
+      await query(
+        `DELETE FROM payroll_incentives
+         WHERE tenant_id = $1 AND payroll_cycle_id = $2 AND employee_id = $3`,
+        [tenantId, cycleId, employeeId]
+      );
+
+      return res.json({
+        message: "Incentive removed successfully",
+        incentive: { employee_id: employeeId, amount: 0 },
+      });
+    }
+
+    const upsertResult = await query(
+      `INSERT INTO payroll_incentives (
+         tenant_id, payroll_cycle_id, employee_id, amount, updated_at
+       ) VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (payroll_cycle_id, employee_id)
+       DO UPDATE SET amount = EXCLUDED.amount, updated_at = NOW()
+       RETURNING employee_id, amount`,
+      [tenantId, cycleId, employeeId, numericAmount]
+    );
+
+    return res.json({
+      message: "Incentive saved successfully",
+      incentive: upsertResult.rows[0],
+    });
+  } catch (error: any) {
+    console.error("Error saving incentive:", error);
+    return res.status(500).json({ error: error.message || "Failed to save incentive" });
   }
 });
 
@@ -2682,6 +3222,17 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
        ORDER BY e.date_of_joining ASC`,
       [tenantId, payrollMonthEnd.toISOString()]
     );
+    const incentivesExistingResult = await query(
+      `SELECT employee_id, amount
+       FROM payroll_incentives
+       WHERE tenant_id = $1
+         AND payroll_cycle_id = $2`,
+      [tenantId, cycleId]
+    );
+    const incentiveMap = new Map<string, number>();
+    incentivesExistingResult.rows.forEach((row) => {
+      incentiveMap.set(row.employee_id, Number(row.amount || 0));
+    });
 
       // Check if edited payroll items are provided in request body
       const { payrollItems: editedItems } = req.body;
@@ -2774,7 +3325,8 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         }
 
         // Recalculate gross salary from edited components
-        const editedGrossSalary = Number(basic_salary) + Number(hra) + Number(special_allowance) + Number(da) + Number(lta) + Number(bonus);
+        const incentiveAmount = Number(item.incentive_amount ?? incentiveMap.get(employee_id) ?? 0);
+        const editedGrossSalary = Number(basic_salary) + Number(hra) + Number(special_allowance) + Number(da) + Number(lta) + Number(bonus) + incentiveAmount;
 
         // Recalculate deductions based on edited values
         const editedPfDeduction = (Number(basic_salary) * Number(settings.pf_rate)) / 100;
@@ -2812,9 +3364,10 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             tenant_id, payroll_cycle_id, employee_id,
             gross_salary, deductions, net_salary,
             basic_salary, hra, special_allowance,
+            incentive_amount,
             pf_deduction, esi_deduction, tds_deduction, pt_deduction,
             lop_days, paid_days, total_working_days
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
           ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
             gross_salary = EXCLUDED.gross_salary,
             deductions = EXCLUDED.deductions,
@@ -2822,6 +3375,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             basic_salary = EXCLUDED.basic_salary,
             hra = EXCLUDED.hra,
             special_allowance = EXCLUDED.special_allowance,
+            incentive_amount = EXCLUDED.incentive_amount,
             pf_deduction = EXCLUDED.pf_deduction,
             esi_deduction = EXCLUDED.esi_deduction,
             tds_deduction = EXCLUDED.tds_deduction,
@@ -2840,6 +3394,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             Number(basic_salary),
             Number(hra),
             Number(special_allowance),
+            incentiveAmount,
             editedPfDeduction,
             editedEsiDeduction,
             editedTdsDeduction,
@@ -2849,6 +3404,25 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             finalTotalWorkingDays,
           ]
         );
+
+        if (incentiveAmount > 0) {
+          await query(
+            `INSERT INTO payroll_incentives (
+              tenant_id, payroll_cycle_id, employee_id, amount, updated_at
+            ) VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (payroll_cycle_id, employee_id)
+            DO UPDATE SET amount = EXCLUDED.amount, updated_at = NOW()`,
+            [tenantId, cycleId, employee_id, incentiveAmount]
+          );
+        } else {
+          await query(
+            `DELETE FROM payroll_incentives
+             WHERE tenant_id = $1 AND payroll_cycle_id = $2 AND employee_id = $3`,
+            [tenantId, cycleId, employee_id]
+          );
+        }
+
+        incentiveMap.set(employee_id, incentiveAmount);
 
         processedCount++;
         totalGrossSalary += editedGrossSalary;
@@ -2884,9 +3458,9 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       );
       
       if (existingItemsResult.rows.length > 0 && parseInt(existingItemsResult.rows[0]?.count || '0', 10) > 0) {
-        const processedCount = parseInt(existingItemsResult.rows[0]?.count || '0', 10);
-        const totalGrossSalary = parseFloat(existingItemsResult.rows[0]?.total_gross || '0');
-        const totalDeductions = parseFloat(existingItemsResult.rows[0]?.total_deductions || '0');
+      const processedCount = parseInt(existingItemsResult.rows[0]?.count || '0', 10);
+      const totalGrossSalary = parseFloat(existingItemsResult.rows[0]?.total_gross || '0');
+      const totalDeductions = parseFloat(existingItemsResult.rows[0]?.total_deductions || '0');
 
         await query(
           `UPDATE payroll_cycles
@@ -2923,7 +3497,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
            AND effective_from <= $3
          ORDER BY effective_from DESC
          LIMIT 1`,
-        [employee.id, tenantId, payrollMonthEnd.toISOString()]
+        [employee.employee_id, tenantId, payrollMonthEnd.toISOString()]
       );
 
       if (compResult.rows.length === 0) {
@@ -2942,12 +3516,13 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       const monthlyBonus = Number(compensation.bonus) || 0; // Already monthly
 
       // Gross salary = sum of all monthly earnings
+      const incentiveAmount = incentiveMap.get(employee.id) || 0;
       const grossSalary = monthlyBasic + monthlyHRA + monthlySpecialAllowance + monthlyDA + monthlyLTA + monthlyBonus;
 
       // Calculate LOP days and paid days for this month
       const { lopDays, paidDays, totalWorkingDays } = await calculateLopAndPaidDays(
         tenantId,
-        employee.id,
+        employee.employee_id,
         payrollMonth,
         payrollYear
       );
@@ -2973,7 +3548,8 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       const ptDeduction = Number(settings.pt_rate) || 200;
       
       // TDS: Calculate based on annual income (simplified - 5% if annual > threshold)
-      const annualIncome = adjustedGrossSalary * 12;
+      const finalGrossSalary = adjustedGrossSalary + incentiveAmount;
+      const annualIncome = finalGrossSalary * 12;
       let tdsDeduction = 0;
       if (annualIncome > Number(settings.tds_threshold)) {
         // Simplified TDS calculation - 5% of excess over threshold
@@ -2982,7 +3558,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       }
 
       const totalDeductionsForEmployee = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
-      const netSalary = adjustedGrossSalary - totalDeductionsForEmployee;
+      const netSalary = finalGrossSalary - totalDeductionsForEmployee;
 
       // Insert payroll item
       // Only allow inserts/updates for draft and pending_approval cycles
@@ -2997,9 +3573,10 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           tenant_id, payroll_cycle_id, employee_id,
           gross_salary, deductions, net_salary,
           basic_salary, hra, special_allowance,
+          incentive_amount,
           pf_deduction, esi_deduction, tds_deduction, pt_deduction,
           lop_days, paid_days, total_working_days
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
           gross_salary = EXCLUDED.gross_salary,
           deductions = EXCLUDED.deductions,
@@ -3007,6 +3584,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           basic_salary = EXCLUDED.basic_salary,
           hra = EXCLUDED.hra,
           special_allowance = EXCLUDED.special_allowance,
+          incentive_amount = EXCLUDED.incentive_amount,
           pf_deduction = EXCLUDED.pf_deduction,
           esi_deduction = EXCLUDED.esi_deduction,
           tds_deduction = EXCLUDED.tds_deduction,
@@ -3018,13 +3596,14 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         [
           tenantId,
           cycleId,
-          employee.id,
-          adjustedGrossSalary,
+          employee.employee_id,
+          finalGrossSalary,
           totalDeductionsForEmployee,
           netSalary,
           adjustedBasic,
           adjustedHRA,
           adjustedSpecialAllowance,
+          incentiveAmount,
           pfDeduction,
           esiDeduction,
           tdsDeduction,
@@ -3035,8 +3614,25 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         ]
       );
 
+      if (incentiveAmount > 0) {
+        await query(
+          `INSERT INTO payroll_incentives (
+            tenant_id, payroll_cycle_id, employee_id, amount, updated_at
+          ) VALUES ($1, $2, $3, $4, NOW())
+          ON CONFLICT (payroll_cycle_id, employee_id)
+          DO UPDATE SET amount = EXCLUDED.amount, updated_at = NOW()`,
+          [tenantId, cycleId, employee.employee_id, incentiveAmount]
+        );
+      } else {
+        await query(
+          `DELETE FROM payroll_incentives
+           WHERE tenant_id = $1 AND payroll_cycle_id = $2 AND employee_id = $3`,
+          [tenantId, cycleId, employee.employee_id]
+        );
+      }
+
       processedCount++;
-      totalGrossSalary += adjustedGrossSalary;
+      totalGrossSalary += finalGrossSalary;
       totalDeductions += totalDeductionsForEmployee;
     }
 
@@ -3088,6 +3684,63 @@ appRouter.get("/payroll-settings", requireAuth, async (req: Request, res: Respon
   } catch (error) {
     console.error("Error fetching payroll settings:", error);
     return res.status(500).json({ error: "Failed to fetch settings" });
+  }
+});
+
+appRouter.get("/payroll-settings/tax-regimes", requireAuth, async (req: Request, res: Response) => {
+  const tenantId = (req as any).tenantId as string;
+  if (!tenantId) {
+    return res.status(403).json({ error: "You are not part of a tenant." });
+  }
+
+  const financialYearParam = req.query.financial_year;
+  const financialYear =
+    typeof financialYearParam === "string" && financialYearParam.trim().length > 0
+      ? financialYearParam.trim()
+      : getCurrentFinancialYearString();
+
+  try {
+    const { rows } = await query(
+      `SELECT tenant_id, financial_year, regime_type, slabs, standard_deduction, surcharge_rules, cess_percentage
+       FROM tax_regimes
+       WHERE financial_year = $1
+         AND regime_type = 'new'
+         AND (tenant_id = $2 OR tenant_id IS NULL)
+       ORDER BY tenant_id DESC NULLS LAST`,
+      [financialYear, tenantId]
+    );
+
+    const defaults = buildDefaultTaxRegime(financialYear);
+
+    const activeRegime =
+      rows.find((row) => row.tenant_id === tenantId) ||
+      rows[0] ||
+      defaults;
+
+    const formatRegime = (regime: any) => ({
+      financial_year: financialYear,
+      standard_deduction:
+        regime?.standard_deduction !== undefined
+          ? Number(regime.standard_deduction)
+          : defaults.standard_deduction,
+      cess_percentage:
+        regime?.cess_percentage !== undefined
+          ? Number(regime.cess_percentage)
+          : 4,
+      slabs:
+        Array.isArray(regime?.slabs) && regime.slabs.length > 0
+          ? regime.slabs
+          : defaults.slabs,
+      surcharge_rules: Array.isArray(regime?.surcharge_rules) ? regime.surcharge_rules : [],
+    });
+
+    return res.json({
+      financial_year: financialYear,
+      regime: formatRegime(activeRegime),
+    });
+  } catch (error: any) {
+    console.error("Error fetching tax regimes:", error);
+    return res.status(500).json({ error: error.message || "Failed to fetch tax regimes" });
   }
 });
 
@@ -3161,6 +3814,73 @@ appRouter.post("/payroll-settings", requireAuth, async (req: Request, res: Respo
   } catch (error) {
     console.error("Error saving payroll settings:", error);
     return res.status(500).json({ error: "Failed to save settings" });
+  }
+});
+
+appRouter.post("/payroll-settings/tax-regimes", requireAuth, async (req: Request, res: Response) => {
+  const tenantId = (req as any).tenantId as string;
+  if (!tenantId) {
+    return res.status(403).json({ error: "You are not part of a tenant." });
+  }
+
+  const { financial_year: financialYearRaw, regime } = req.body;
+  if (!regime || typeof regime !== "object") {
+    return res.status(400).json({ error: "regime payload is required" });
+  }
+
+  const financialYear =
+    typeof financialYearRaw === "string" && financialYearRaw.trim().length > 0
+      ? financialYearRaw.trim()
+      : getCurrentFinancialYearString();
+
+  try {
+    const slabs =
+      Array.isArray(regime.slabs) && regime.slabs.length > 0
+        ? regime.slabs.map((slab: any) => ({
+            from: Number(slab.from || 0),
+            to: slab.to === null || slab.to === "" ? null : Number(slab.to),
+            rate: Number(slab.rate || 0),
+          }))
+        : defaultTaxSlabs;
+
+    await query(
+      `
+      INSERT INTO tax_regimes (
+        tenant_id,
+        financial_year,
+        regime_type,
+        slabs,
+        standard_deduction,
+        surcharge_rules,
+        cess_percentage,
+        is_default,
+        updated_at
+      )
+      VALUES ($1, $2, 'new', $3, $4, $5, $6, false, NOW())
+      ON CONFLICT ON CONSTRAINT ux_tax_regimes_scope_year
+      DO UPDATE SET
+        slabs = EXCLUDED.slabs,
+        standard_deduction = EXCLUDED.standard_deduction,
+        surcharge_rules = EXCLUDED.surcharge_rules,
+        cess_percentage = EXCLUDED.cess_percentage,
+        tenant_id = EXCLUDED.tenant_id,
+        is_default = false,
+        updated_at = NOW()
+      `,
+      [
+        tenantId,
+        financialYear,
+        JSON.stringify(slabs),
+        Number(regime.standard_deduction ?? 0),
+        JSON.stringify(Array.isArray(regime.surcharge_rules) ? regime.surcharge_rules : []),
+        Number(regime.cess_percentage ?? 4),
+      ]
+    );
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error("Error saving tax regimes:", error);
+    return res.status(500).json({ error: error.message || "Failed to save tax regimes" });
   }
 });
 
@@ -3308,4 +4028,7 @@ appRouter.get("/reports/payroll-register", requireAuth, async (req, res) => {
     res.status(500).json({ error: e.message || "Failed to generate payroll register report" });
   }
 });
+
+// Reimbursement routes
+appRouter.use("/v1/reimbursements", requireAuth, reimbursementsRouter);
 

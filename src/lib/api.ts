@@ -1,6 +1,6 @@
 // API Client - Replaces Supabase client
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = (import.meta as any).env.VITE_API_URL || 'http://localhost:3001';
 
 class ApiClient {
   private baseURL: string;
@@ -100,6 +100,29 @@ class ApiClient {
       this.setToken(result.token);
     }
     return result;
+  }
+
+  async requestPasswordReset(email: string) {
+    return this.request('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async getPasswordResetInfo(token: string) {
+    return this.request(`/api/auth/reset-password?token=${encodeURIComponent(token)}`);
+  }
+
+  async resetPassword(data: {
+    token: string;
+    password: string;
+    securityAnswer1?: string;
+    securityAnswer2?: string;
+  }) {
+    return this.request('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 
   // Employee methods
@@ -483,14 +506,6 @@ class ApiClient {
   }
 
   // Workflow runtime
-  async listWorkflows() {
-    return this.request('/api/workflows');
-  }
-
-  async getWorkflow(id: string) {
-    return this.request(`/api/workflows/${id}`);
-  }
-
   async triggerWorkflow(data: { name?: string; workflow: any; payload?: any }) {
     return this.request('/api/workflows/trigger', { method: 'POST', body: JSON.stringify(data) });
   }
@@ -962,163 +977,130 @@ class ApiClient {
     return this.request('/api/payroll/sso');
   }
 
-  // AI Action Assistant methods
-  async listAIConversations() {
-    return this.request('/api/ai/conversations');
+  async getPayrollRuns(params?: { status?: string; limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    return this.request(`/api/payroll/runs${query}`);
   }
 
-  async getAIConversation(conversationId: string) {
-    return this.request(`/api/ai/conversations/${conversationId}`);
+  async getPayrollRunAdjustments(runId: string) {
+    return this.request(`/api/payroll/runs/${runId}/adjustments`);
   }
 
-  async deleteAIConversation(conversationId: string) {
-    return this.request(`/api/ai/conversations/${conversationId}`, {
+  async createPayrollRunAdjustment(runId: string, data: {
+    employee_id: string;
+    component_name: string;
+    amount: number;
+    is_taxable?: boolean;
+    notes?: string;
+  }) {
+    return this.request(`/api/payroll/runs/${runId}/adjustments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePayrollRunAdjustment(adjustmentId: string, data: {
+    component_name?: string;
+    amount?: number;
+    is_taxable?: boolean;
+    notes?: string;
+  }) {
+    return this.request(`/api/payroll/adjustments/${adjustmentId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePayrollRunAdjustment(adjustmentId: string) {
+    return this.request(`/api/payroll/adjustments/${adjustmentId}`, {
       method: 'DELETE',
     });
   }
 
-  async updateAIConversationTitle(conversationId: string, title: string) {
-    return this.request(`/api/ai/conversations/${conversationId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ title }),
-    });
+  async getTaxDefinitions(financialYear: string) {
+    return this.request(`/api/tax/declarations/definitions?financial_year=${encodeURIComponent(financialYear)}`);
   }
 
-  // RAG Service methods
-  async queryRAG(query: string, top_k?: number, use_tools: boolean = true) {
-    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
-    const token = this._token || localStorage.getItem('auth_token');
-    
-    const response = await fetch(`${RAG_API_URL}/api/v1/query`, {
+  async getMyTaxDeclaration(financialYear: string) {
+    return this.request(`/api/tax/declarations/me?financial_year=${encodeURIComponent(financialYear)}`);
+  }
+
+  async saveTaxDeclaration(data: {
+    financial_year: string;
+    chosen_regime: 'old' | 'new';
+    status: 'draft' | 'submitted';
+    items: Array<{
+      component_id: string;
+      declared_amount: number;
+      proof_url?: string;
+      notes?: string;
+    }>;
+  }) {
+    return this.request('/api/tax/declarations', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token || ''}`,
-      },
-      body: JSON.stringify({ query, top_k, use_tools }),
+      body: JSON.stringify(data),
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
-    }
-
-    return response.json();
   }
 
-  async ingestDocument(file: File, isConfidential: boolean = false) {
-    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
-    const token = this._token || localStorage.getItem('auth_token');
-    
+  async uploadTaxProof(params: { componentId: string; financialYear: string; file: File }) {
     const formData = new FormData();
-    formData.append('file', file);
-    formData.append('is_confidential', String(isConfidential));
+    formData.append('component_id', params.componentId);
+    formData.append('financial_year', params.financialYear);
+    formData.append('file', params.file);
 
-    const response = await fetch(`${RAG_API_URL}/api/v1/ingest`, {
+    return this.request(
+      '/api/tax/declarations/proofs',
+      {
+        method: 'POST',
+        body: formData,
+        headers: {} as HeadersInit,
+      },
+      true,
+    );
+  }
+
+  async getTaxDeclarations(params?: { financial_year?: string; status?: string }) {
+    const searchParams = new URLSearchParams();
+    if (params?.financial_year) searchParams.append('financial_year', params.financial_year);
+    if (params?.status) searchParams.append('status', params.status);
+    const queryString = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    return this.request(`/api/tax/declarations${queryString}`);
+  }
+
+  async reviewTaxDeclaration(
+    declarationId: string,
+    data: {
+      status: 'approved' | 'rejected';
+      items?: Array<{ id: string; approved_amount?: number; notes?: string }>;
+      remarks?: string;
+    }
+  ) {
+    return this.request(`/api/tax/declarations/${declarationId}/review`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token || ''}`,
-      },
-      body: formData,
+      body: JSON.stringify(data),
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
-    }
-
-    return response.json();
   }
 
-  async getRAGAuditLogs(limit: number = 100) {
-    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
-    const token = this._token || localStorage.getItem('auth_token');
-    
-    const response = await fetch(`${RAG_API_URL}/api/v1/audit?limit=${limit}`, {
-      headers: {
-        'Authorization': `Bearer ${token || ''}`,
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+  async downloadForm16(financialYear: string, employeeId?: string) {
+    const params = new URLSearchParams();
+    params.append('financial_year', financialYear);
+    if (employeeId) {
+      params.append('employee_id', employeeId);
     }
-
-    return response.json();
-  }
-
-  async getRAGDocumentStatus(documentId: string) {
-    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
-    const token = this._token || localStorage.getItem('auth_token');
-
-    const response = await fetch(`${RAG_API_URL}/api/v1/documents/${documentId}/status`, {
-      headers: {
-        'Authorization': `Bearer ${token || ''}`,
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    const url = `${this.baseURL}/api/reports/form16?${params.toString()}`;
+    const headers: HeadersInit = {};
+    if (this._token) {
+      headers['Authorization'] = `Bearer ${this._token}`;
     }
-
-    return response.json();
-  }
-
-  async getRAGDocumentProgress(documentId: string) {
-    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
-    const token = this._token || localStorage.getItem('auth_token');
-
-    const response = await fetch(`${RAG_API_URL}/api/v1/documents/${documentId}/progress`, {
-      headers: {
-        'Authorization': `Bearer ${token || ''}`,
-      },
-    });
-
+    const response = await fetch(url, { headers });
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+      throw new Error('Failed to download Form 16');
     }
-
-    return response.json();
-  }
-
-  async listRAGDocuments(limit: number = 50) {
-    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
-    const token = this._token || localStorage.getItem('auth_token');
-
-    const response = await fetch(`${RAG_API_URL}/api/v1/documents?limit=${limit}`, {
-      headers: {
-        'Authorization': `Bearer ${token || ''}`,
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
-    }
-
-    return response.json();
-  }
-
-  async reprocessRAGDocument(documentId: string) {
-    const RAG_API_URL = import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001';
-    const token = this._token || localStorage.getItem('auth_token');
-
-    const response = await fetch(`${RAG_API_URL}/api/v1/documents/${documentId}/reprocess`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token || ''}`,
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
-    }
-
-    return response.json();
+    return response.blob();
   }
 }
 

@@ -453,14 +453,19 @@ export default function Terminations() {
                     <div className="grid gap-2">
                       <Label htmlFor="previous_termination_id">Previous Termination (Optional)</Label>
                       <Select
-                        value={rehireForm.previous_termination_id}
-                        onValueChange={(value) => setRehireForm({ ...rehireForm, previous_termination_id: value })}
+                        value={rehireForm.previous_termination_id || 'none'}
+                        onValueChange={(value) =>
+                          setRehireForm({
+                            ...rehireForm,
+                            previous_termination_id: value === 'none' ? '' : value,
+                          })
+                        }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select previous termination" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">None</SelectItem>
+                          <SelectItem value="none">None</SelectItem>
                           {terminations.map((term) => (
                             <SelectItem key={term.id} value={term.id}>
                               {term.employee_profile?.first_name} {term.employee_profile?.last_name} - {format(new Date(term.termination_date), 'MMM d, yyyy')}

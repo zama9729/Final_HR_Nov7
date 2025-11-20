@@ -7,6 +7,8 @@ import { appRouter } from "./routes/app.js";
 import ssoRouter from "./routes/sso.js";
 import provisionRouter from "./routes/provision.js";
 import { query } from "./db.js";
+import fs from "fs";
+import path from "path";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -14,6 +16,16 @@ const port = Number(process.env.PORT || 4000);
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
+
+const proofsDirectory =
+  process.env.PAYROLL_PROOFS_DIR || path.resolve(process.cwd(), "uploads", "tax-proofs");
+fs.mkdirSync(proofsDirectory, { recursive: true });
+app.use("/tax-proofs", express.static(proofsDirectory));
+
+const receiptsDirectory =
+  process.env.REIMBURSEMENTS_RECEIPT_DIR || path.resolve(process.cwd(), "uploads", "receipts");
+fs.mkdirSync(receiptsDirectory, { recursive: true });
+app.use("/receipts", express.static(receiptsDirectory));
 
 // Ensure required tables exist on startup
 async function ensureRequiredTables() {
@@ -166,6 +178,103 @@ async function ensureRequiredTables() {
           END IF;
         END $$;
       `);
+    }
+
+    // Check if employee_reimbursements table exists
+    const reimbursementsCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'employee_reimbursements'
+      );
+    `);
+    
+    if (!reimbursementsCheck.rows[0]?.exists) {
+      console.log('⚠️  employee_reimbursements table does not exist, creating...');
+      
+      // Create reimbursement_status enum if it doesn't exist
+      await query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reimbursement_status') THEN
+            CREATE TYPE reimbursement_status AS ENUM (
+              'pending',
+              'approved',
+              'rejected',
+              'paid'
+            );
+          END IF;
+        END
+        $$;
+      `);
+      
+      // Check if referenced tables exist
+      const profilesCheck = await query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'profiles'
+        );
+      `);
+      const payrollRunsCheck = await query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'payroll_runs'
+        );
+      `);
+      
+      const hasProfiles = profilesCheck.rows[0]?.exists;
+      const hasPayrollRuns = payrollRunsCheck.rows[0]?.exists;
+      
+      // Build foreign key constraints conditionally
+      let reviewedByFk = '';
+      if (hasProfiles) {
+        reviewedByFk = 'reviewed_by_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,';
+      } else {
+        reviewedByFk = 'reviewed_by_user_id UUID,';
+      }
+      
+      let payrollRunFk = '';
+      if (hasPayrollRuns) {
+        payrollRunFk = 'payroll_run_id UUID REFERENCES payroll_runs(id) ON DELETE SET NULL,';
+      } else {
+        payrollRunFk = 'payroll_run_id UUID,';
+      }
+      
+      // Create employee_reimbursements table
+      await query(`
+        CREATE TABLE IF NOT EXISTS public.employee_reimbursements (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          category TEXT NOT NULL,
+          amount NUMERIC(10, 2) NOT NULL,
+          description TEXT,
+          receipt_url TEXT,
+          status reimbursement_status NOT NULL DEFAULT 'pending',
+          submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          ${reviewedByFk}
+          reviewed_at TIMESTAMPTZ,
+          ${payrollRunFk}
+          CONSTRAINT chk_amount_positive CHECK (amount > 0)
+        );
+      `);
+      
+      // Create indexes
+      await query(`
+        CREATE INDEX IF NOT EXISTS idx_reimbursements_employee_id
+          ON employee_reimbursements(employee_id);
+      `);
+      
+      await query(`
+        CREATE INDEX IF NOT EXISTS idx_reimbursements_status
+          ON employee_reimbursements(status);
+      `);
+      
+      console.log('✅ employee_reimbursements table created');
+    } else {
+      console.log('✅ employee_reimbursements table exists');
     }
   } catch (error: any) {
     console.error('⚠️  Error ensuring tables:', error.message);

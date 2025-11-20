@@ -8,6 +8,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +39,7 @@ interface PayrollItem {
   da: number;
   lta: number;
   bonus: number;
+  incentive_amount?: number;
   gross_salary: number;
   pf_deduction: number;
   esi_deduction: number;
@@ -44,6 +56,7 @@ interface PayrollReviewDialogProps {
   cycleMonth: number;
   cycleYear: number;
   onProcessed: () => void;
+  canModify?: boolean;
 }
 
 export const PayrollReviewDialog = ({
@@ -53,10 +66,15 @@ export const PayrollReviewDialog = ({
   cycleMonth,
   cycleYear,
   onProcessed,
+  canModify = true,
 }: PayrollReviewDialogProps) => {
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [activeIncentiveIndex, setActiveIncentiveIndex] = useState<number | null>(null);
+  const [incentiveDraft, setIncentiveDraft] = useState<string>("");
+  const [savingIncentive, setSavingIncentive] = useState(false);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["payroll-preview", cycleId],
@@ -69,9 +87,21 @@ export const PayrollReviewDialog = ({
 
   useEffect(() => {
     if (data) {
-      setPayrollItems([...data]);
+      const normalized = data.map((item) => ({
+        ...item,
+        incentive_amount: Number(item.incentive_amount || 0),
+      }));
+      setPayrollItems(normalized);
+      setActiveIncentiveIndex(null);
     }
   }, [data]);
+
+  useEffect(() => {
+    if (!open) {
+      setActiveIncentiveIndex(null);
+      setConfirmOpen(false);
+    }
+  }, [open]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -82,6 +112,7 @@ export const PayrollReviewDialog = ({
   };
 
   const handleEdit = (index: number) => {
+    if (!canModify) return;
     setEditingIndex(index);
   };
 
@@ -97,7 +128,13 @@ export const PayrollReviewDialog = ({
     
     // Recalculate gross salary
     const grossSalary =
-      item.basic_salary + item.hra + item.special_allowance + item.da + item.lta + item.bonus;
+      item.basic_salary +
+      item.hra +
+      item.special_allowance +
+      item.da +
+      item.lta +
+      item.bonus +
+      (item.incentive_amount || 0);
 
     // Recalculate deductions (simplified - would need settings from backend)
     const pfDeduction = (item.basic_salary * 12) / 100; // 12% of basic
@@ -134,7 +171,8 @@ export const PayrollReviewDialog = ({
     setPayrollItems(updatedItems);
   };
 
-  const handleProcess = async () => {
+  const processPayroll = async () => {
+    setConfirmOpen(false);
     setProcessing(true);
     try {
       const result = await api.payroll.processCycle(cycleId, payrollItems);
@@ -145,6 +183,36 @@ export const PayrollReviewDialog = ({
       toast.error(error.message || "Failed to process payroll");
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleOpenIncentive = (index: number) => {
+    if (!canModify) return;
+    const currentAmount = payrollItems[index]?.incentive_amount || 0;
+    setIncentiveDraft(currentAmount ? String(currentAmount) : "");
+    setActiveIncentiveIndex(index);
+  };
+
+  const handleSaveIncentive = async () => {
+    if (activeIncentiveIndex === null) return;
+    const target = payrollItems[activeIncentiveIndex];
+    const parsedAmount = Number(incentiveDraft || 0);
+
+    if (Number.isNaN(parsedAmount) || parsedAmount < 0) {
+      toast.error("Please enter a valid incentive amount (zero or positive).");
+      return;
+    }
+
+    setSavingIncentive(true);
+    try {
+      await api.payroll.setIncentive(cycleId, target.employee_id, parsedAmount);
+      toast.success("Incentive saved.");
+      await refetch();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to save incentive");
+    } finally {
+      setSavingIncentive(false);
+      setActiveIncentiveIndex(null);
     }
   };
 
@@ -184,6 +252,7 @@ export const PayrollReviewDialog = ({
                     <TableHead className="text-right">Basic</TableHead>
                     <TableHead className="text-right">HRA</TableHead>
                     <TableHead className="text-right">Special Allowance</TableHead>
+                    <TableHead className="text-right">Incentive</TableHead>
                     <TableHead className="text-right">Gross</TableHead>
                     <TableHead className="text-right">Deductions</TableHead>
                     <TableHead className="text-right">Net Salary</TableHead>
@@ -235,6 +304,48 @@ export const PayrollReviewDialog = ({
                               className="w-24"
                             />
                           </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex flex-col items-end gap-2">
+                              <span className="font-semibold">
+                                {formatCurrency(item.incentive_amount || 0)}
+                              </span>
+                              {canModify && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleOpenIncentive(index)}
+                                  >
+                                    {item.incentive_amount ? "Edit Incentive" : "Add Incentive"}
+                                  </Button>
+                                  {activeIncentiveIndex === index && (
+                                    <div className="flex items-center gap-2">
+                                      <Input
+                                        type="number"
+                                        value={incentiveDraft}
+                                        onChange={(e) => setIncentiveDraft(e.target.value)}
+                                        className="w-28"
+                                      />
+                                      <Button
+                                        size="sm"
+                                        onClick={handleSaveIncentive}
+                                        disabled={savingIncentive}
+                                      >
+                                        Save
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => setActiveIncentiveIndex(null)}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell className="text-right font-semibold">
                             {formatCurrency(item.gross_salary)}
                           </TableCell>
@@ -276,6 +387,48 @@ export const PayrollReviewDialog = ({
                           <TableCell className="text-right">
                             {formatCurrency(item.special_allowance)}
                           </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex flex-col items-end gap-2">
+                              <span className="font-semibold">
+                                {formatCurrency(item.incentive_amount || 0)}
+                              </span>
+                              {canModify && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleOpenIncentive(index)}
+                                  >
+                                    {item.incentive_amount ? "Edit Incentive" : "Add Incentive"}
+                                  </Button>
+                                  {activeIncentiveIndex === index && (
+                                    <div className="flex items-center justify-end gap-2">
+                                      <Input
+                                        type="number"
+                                        value={incentiveDraft}
+                                        onChange={(e) => setIncentiveDraft(e.target.value)}
+                                        className="w-28"
+                                      />
+                                      <Button
+                                        size="sm"
+                                        onClick={handleSaveIncentive}
+                                        disabled={savingIncentive}
+                                      >
+                                        Save
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => setActiveIncentiveIndex(null)}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell className="text-right font-semibold">
                             {formatCurrency(item.gross_salary)}
                           </TableCell>
@@ -286,14 +439,16 @@ export const PayrollReviewDialog = ({
                             {formatCurrency(item.net_salary)}
                           </TableCell>
                           <TableCell>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleEdit(index)}
-                            >
-                              <Edit2 className="h-4 w-4 mr-1" />
-                              Edit
-                            </Button>
+                            {canModify && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleEdit(index)}
+                              >
+                                <Edit2 className="h-4 w-4 mr-1" />
+                                Edit
+                              </Button>
+                            )}
                           </TableCell>
                         </>
                       )}
@@ -330,16 +485,39 @@ export const PayrollReviewDialog = ({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={processing}>
             Cancel
           </Button>
-          <Button onClick={handleProcess} disabled={processing || payrollItems.length === 0}>
-            {processing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing...
-              </>
-            ) : (
-              "Process Payroll"
-            )}
-          </Button>
+          <AlertDialog open={confirmOpen} onOpenChange={(open) => !processing && setConfirmOpen(open)}>
+            <AlertDialogTrigger asChild>
+              <Button
+                disabled={!canModify || processing || payrollItems.length === 0}
+              >
+                {processing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  "Process Payroll"
+                )}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Process payroll?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to process the payrolls?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={processing}
+                  onClick={() => processPayroll()}
+                >
+                  Yes, Process
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </DialogFooter>
       </DialogContent>
     </Dialog>

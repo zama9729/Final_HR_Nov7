@@ -103,6 +103,20 @@ const client = {
     return response.json();
   },
 
+  upload: async <T>(endpoint: string, formData: FormData): Promise<T> => {
+    const response = await fetch(resolveEndpoint(endpoint), {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: "API error" }));
+      throw new Error(errorData.error || `API error: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
   patch: async <T>(endpoint: string, body: unknown): Promise<T> => {
     const response = await fetch(resolveEndpoint(endpoint), {
       method: "PATCH",
@@ -129,6 +143,22 @@ export const api = {
   get: client.get,
   post: client.post,
   patch: client.patch,
+  upload: client.upload,
+
+  uploadTaxProof: (
+    componentCode: string,
+    financialYear: string,
+    file: File
+  ): Promise<{ url: string; fileName?: string; size?: number; mimeType?: string }> => {
+    const formData = new FormData();
+    formData.append("component_code", componentCode);
+    formData.append("financial_year", financialYear);
+    formData.append("file", file);
+    return client.upload<{ url: string; fileName?: string; size?: number; mimeType?: string }>(
+      "/api/tax-declarations/proofs",
+      formData
+    );
+  },
 
   // --- Authentication ---
   auth: {
@@ -209,6 +239,12 @@ export const api = {
     processCycle: (cycleId, payrollItems?) =>
       client.post(`/api/payroll-cycles/${cycleId}/process`, payrollItems ? { payrollItems } : {}),
     
+    setIncentive: (cycleId: string, employeeId: string, amount: number) =>
+      client.post(`/api/payroll-cycles/${cycleId}/incentives`, {
+        employee_id: employeeId,
+        amount,
+      }),
+    
     getCyclePayslips: (cycleId) =>
       client.get(`/api/payroll-cycles/${cycleId}/payslips`),
   },
@@ -257,6 +293,14 @@ export const api = {
     
     save: (data) =>
       client.post<{ settings: any }>("/api/payroll-settings", data),
+
+    getTaxRegimes: (financialYear: string) =>
+      client.get<{ financial_year: string; regime: Record<string, any> }>(
+        `/api/payroll-settings/tax-regimes?financial_year=${encodeURIComponent(financialYear)}`
+      ),
+
+    saveTaxRegimes: (data: { financial_year: string; regime: Record<string, any> }) =>
+      client.post("/api/payroll-settings/tax-regimes", data),
   },
 
   // Leave and Attendance removed - handled by HR system
@@ -295,6 +339,14 @@ export const api = {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     },
+  },
+
+  reimbursements: {
+    submit: (formData: FormData) => client.upload("/api/v1/reimbursements/submit", formData),
+    myClaims: () => client.get<{ reimbursements: any[] }>("/api/v1/reimbursements/my-claims"),
+    pending: () => client.get<{ reimbursements: any[] }>("/api/v1/reimbursements/pending"),
+    approve: (id: string) => client.post(`/api/v1/reimbursements/${id}/approve`, {}),
+    reject: (id: string) => client.post(`/api/v1/reimbursements/${id}/reject`, {}),
   },
 };
 

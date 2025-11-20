@@ -180,6 +180,106 @@ If you need help, please contact your HR department.
 }
 
 /**
+ * Send password reset email
+ * @param {string} to - Recipient email
+ * @param {string} token - Password reset token
+ * @param {{ firstName?: string; lastName?: string }} [userInfo] - Optional user info
+ * @param {string|null} [baseUrl] - Override base URL
+ */
+export async function sendPasswordResetEmail(to, token, userInfo = {}, baseUrl = null) {
+  const appBaseUrl = baseUrl || process.env.APP_BASE_URL || 'http://localhost:3000';
+  const emailFrom = process.env.EMAIL_FROM || 'HR Portal <no-reply@example.com>';
+  const resetUrl = `${appBaseUrl.replace(/\/$/, '')}/auth/reset-password?token=${encodeURIComponent(token)}`;
+
+  const subject = 'Reset your HR Portal password';
+  const greetingName = userInfo.firstName ? ` ${userInfo.firstName}` : '';
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #4f46e5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+        .content { background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
+        .button { display: inline-block; background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+        .footer { text-align: center; margin-top: 20px; color: #6b7280; font-size: 12px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Password Reset Requested</h1>
+        </div>
+        <div class="content">
+          <p>Hello${greetingName},</p>
+          <p>We received a request to reset your HR portal password.</p>
+          <p>Click the button below to choose a new password:</p>
+          <p style="text-align: center;">
+            <a href="${resetUrl}" class="button">Reset Password</a>
+          </p>
+          <p>Or copy and paste this link into your browser:</p>
+          <p style="word-break: break-all; color: #4f46e5;">${resetUrl}</p>
+          <p><strong>This link will expire in 60 minutes.</strong></p>
+          <p>If you didn't request this password reset, you can safely ignore this email.</p>
+        </div>
+        <div class="footer">
+          <p>This is an automated message from the HR Portal.</p>
+          <p>If you need assistance, please contact your HR administrator.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const textContent = `
+Hello${greetingName},
+
+We received a request to reset your HR portal password.
+
+Reset your password by clicking this link:
+${resetUrl}
+
+This link will expire in 60 minutes.
+
+If you didn't request this password reset, you can ignore this email.
+
+---
+This is an automated message from the HR Portal.
+If you need assistance, please contact your HR administrator.
+  `;
+
+  const mailOptions = {
+    from: emailFrom,
+    to,
+    subject,
+    text: textContent,
+    html: htmlContent,
+  };
+
+  const emailTransporter = await initTransporter();
+
+  if (!emailTransporter) {
+    console.log('\n=== PASSWORD RESET EMAIL (Dev Mode) ===');
+    console.log('To:', to);
+    console.log('Subject:', subject);
+    console.log('Reset URL:', resetUrl);
+    console.log('=======================================\n');
+    return { success: true, message: 'Email logged to console' };
+  }
+
+  try {
+    const info = await emailTransporter.sendMail(mailOptions);
+    console.log('✅ Password reset email sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('❌ Failed to send password reset email:', error);
+    throw error;
+  }
+}
+
+/**
  * Verify email transporter configuration
  */
 export async function verifyEmailConfig() {
@@ -320,6 +420,7 @@ export async function sendWorkflowEmail({ instanceId, tenantId, message, recipie
 
 export default {
   sendInviteEmail,
+  sendPasswordResetEmail,
   verifyEmailConfig,
   sendWorkflowEmail,
   buildWorkflowNotificationBody,

@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 import { createPool, query as dbQuery } from './db/pool.js';
 import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
@@ -42,6 +44,9 @@ import rehireRoutes from './routes/rehire.js';
 import policiesRoutes from './routes/policies.js';
 import usersRoutes from './routes/users.js';
 import payrollSsoRoutes from './routes/payroll-sso.js';
+import taxDeclarationsRoutes from './routes/tax-declarations.js';
+import reimbursementRoutes from './routes/reimbursements.js';
+import reportsRoutes from './routes/reports.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules } from './services/cron.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
@@ -75,6 +80,32 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const proofsDirectory =
+  process.env.TAX_PROOFS_DIR || path.resolve(process.cwd(), 'uploads', 'tax-proofs');
+fs.mkdirSync(proofsDirectory, { recursive: true });
+app.use('/tax-proofs', express.static(proofsDirectory));
+
+const receiptsDirectory =
+  process.env.REIMBURSEMENTS_RECEIPT_DIR || path.resolve(process.cwd(), 'uploads', 'receipts');
+fs.mkdirSync(receiptsDirectory, { recursive: true });
+
+const deriveReceiptsMountPath = () => {
+  const base = process.env.REIMBURSEMENTS_RECEIPT_BASE_URL || '/receipts';
+  if (base.startsWith('http')) {
+    try {
+      const parsed = new URL(base);
+      return parsed.pathname || '/receipts';
+    } catch (err) {
+      console.warn('Invalid REIMBURSEMENTS_RECEIPT_BASE_URL, defaulting to /receipts:', err);
+      return '/receipts';
+    }
+  }
+  return base.startsWith('/') ? base : `/${base}`;
+};
+
+const receiptsMountPath = deriveReceiptsMountPath();
+app.use(receiptsMountPath, express.static(receiptsDirectory));
 
 // Health check
 app.get('/health', (req, res) => {
@@ -129,6 +160,71 @@ app.use('/api/users', usersRoutes);
 app.use('/api/promotion', authenticateToken, setTenantContext, promotionsRoutes);
 // Payroll SSO integration (separate from payroll routes)
 app.use('/api/payroll/sso', payrollSsoRoutes);
+app.use('/api/tax/declarations', taxDeclarationsRoutes);
+app.use('/api/v1/reimbursements', reimbursementRoutes);
+app.use('/api/reports', authenticateToken, reportsRoutes);
+
+// Tenant info endpoint for payroll service compatibility
+app.get('/api/tenant', authenticateToken, async (req, res) => {
+  try {
+    const profileResult = await dbQuery(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [req.user.id]
+    );
+
+    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    const tenantId = profileResult.rows[0].tenant_id;
+
+    let orgQuery = `
+      SELECT id, name, domain, logo_url, company_size, industry, timezone
+      FROM organizations
+      WHERE id = $1
+    `;
+
+    // Attempt to include slug and subdomain if columns exist
+    try {
+      const columnCheck = await dbQuery(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'organizations'
+          AND column_name IN ('slug', 'subdomain')
+      `);
+
+      const columns = columnCheck.rows.map(row => row.column_name);
+
+      if (columns.includes('slug') || columns.includes('subdomain')) {
+        const extraColumns = [
+          columns.includes('slug') ? 'slug' : null,
+          columns.includes('subdomain') ? 'subdomain' : null,
+        ].filter(Boolean).join(', ');
+
+        if (extraColumns) {
+          orgQuery = `
+            SELECT id, name, domain, logo_url, company_size, industry, timezone, ${extraColumns}
+            FROM organizations
+            WHERE id = $1
+          `;
+        }
+      }
+    } catch (error) {
+      // Ignore column detection errors and fall back to base columns
+    }
+
+    const orgResult = await dbQuery(orgQuery, [tenantId]);
+
+    if (orgResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    res.json(orgResult.rows[0]);
+  } catch (error) {
+    console.error('Error fetching tenant info:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch tenant info' });
+  }
+});
 
 // Public discovery endpoint for AI tools (requires API key in header)
 app.get('/discovery', (req, res, next) => {
