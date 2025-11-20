@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { authenticator } from 'otplib';
 import { query, withClient } from '../db/pool.js';
 
 export async function authenticateToken(req, res, next) {
@@ -83,5 +84,40 @@ export function requireSuperadmin(req, res, next) {
     return next();
   }
   return res.status(403).json({ error: 'Superadmin only' });
+}
+
+export async function requireSuperUser(req, res, next) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+    const { rows } = await query(
+      'SELECT role FROM user_roles WHERE user_id = $1 AND role = $2 LIMIT 1',
+      [req.user.id, 'super_user']
+    );
+    if (!rows.length) {
+      return res.status(403).json({ error: 'Super user only' });
+    }
+    const mfaCode = req.headers['x-mfa-code'];
+    if (!mfaCode) {
+      return res.status(401).json({ error: 'MFA code required' });
+    }
+    const secretRes = await query(
+      'SELECT mfa_secret FROM super_users WHERE user_id = $1',
+      [req.user.id]
+    );
+    if (!secretRes.rows.length) {
+      return res.status(403).json({ error: 'Super user not provisioned' });
+    }
+    const valid = authenticator.check(String(mfaCode), secretRes.rows[0].mfa_secret);
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid MFA code' });
+    }
+    await query('UPDATE super_users SET last_mfa_at = now() WHERE user_id = $1', [req.user.id]);
+    next();
+  } catch (error) {
+    console.error('Super user verification failed', error);
+    res.status(500).json({ error: 'Super user verification failed' });
+  }
 }
 

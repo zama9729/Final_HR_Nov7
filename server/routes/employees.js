@@ -2,7 +2,8 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { query } from '../db/pool.js';
+import { query, queryWithOrg } from '../db/pool.js';
+import { rebuildSegmentsForEmployee } from '../services/assignment-segmentation.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
@@ -11,6 +12,58 @@ import { sendInviteEmail } from '../services/email.js';
 const router = express.Router();
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+const assignmentSelectFragment = `
+  COALESCE((
+    SELECT json_build_object(
+      'assignment_id', ea.id,
+      'branch_id', ea.branch_id,
+      'branch_name', ob.name,
+      'department_id', ea.department_id,
+      'department_name', dept.name,
+      'team_id', ea.team_id,
+      'team_name', team.name,
+      'pay_group_id', pg.id,
+      'pay_group_name', pg.name,
+      'timezone', ob.timezone,
+      'holiday_calendar_id', ob.holiday_calendar_id,
+      'is_home', ea.is_home,
+      'fte', ea.fte,
+      'role', ea.role,
+      'start_date', ea.start_date,
+      'end_date', ea.end_date
+    )
+    FROM employee_assignments ea
+    LEFT JOIN org_branches ob ON ob.id = ea.branch_id
+    LEFT JOIN departments dept ON dept.id = ea.department_id
+    LEFT JOIN teams team ON team.id = ea.team_id
+    LEFT JOIN pay_groups pg ON pg.id = ea.pay_group_id
+    WHERE ea.employee_id = e.id
+    ORDER BY ea.is_home DESC, ea.start_date DESC NULLS LAST
+    LIMIT 1
+  ), '{}'::json) as home_assignment,
+  COALESCE((
+    SELECT json_agg(json_build_object(
+      'assignment_id', ea.id,
+      'branch_id', ea.branch_id,
+      'branch_name', ob.name,
+      'department_id', ea.department_id,
+      'department_name', dept.name,
+      'team_id', ea.team_id,
+      'team_name', team.name,
+      'is_home', ea.is_home,
+      'fte', ea.fte,
+      'role', ea.role,
+      'start_date', ea.start_date,
+      'end_date', ea.end_date
+    ) ORDER BY ea.is_home DESC, ea.start_date DESC NULLS LAST)
+    FROM employee_assignments ea
+    LEFT JOIN org_branches ob ON ob.id = ea.branch_id
+    LEFT JOIN departments dept ON dept.id = ea.department_id
+    LEFT JOIN teams team ON team.id = ea.team_id
+    WHERE ea.employee_id = e.id
+  ), '[]'::json) as assignments
+`;
 
 // Get all employees
 router.get('/', authenticateToken, async (req, res) => {
@@ -46,7 +99,8 @@ router.get('/', authenticateToken, async (req, res) => {
               'last_name', p.last_name,
               'email', p.email,
               'role', ur.role
-            ) as profiles
+            ) as profiles,
+            ${assignmentSelectFragment}
           FROM employees e
           JOIN profiles p ON p.id = e.user_id
           LEFT JOIN user_roles ur ON ur.user_id = e.user_id
@@ -64,7 +118,8 @@ router.get('/', authenticateToken, async (req, res) => {
               'last_name', p.last_name,
               'email', p.email,
               'role', ur.role
-            ) as profiles
+            ) as profiles,
+            ${assignmentSelectFragment}
           FROM employees e
           JOIN profiles p ON p.id = e.user_id
           LEFT JOIN user_roles ur ON ur.user_id = e.user_id
@@ -81,7 +136,8 @@ router.get('/', authenticateToken, async (req, res) => {
             'last_name', p.last_name,
             'email', p.email,
             'role', ur.role
-          ) as profiles
+          ) as profiles,
+          ${assignmentSelectFragment}
         FROM employees e
         JOIN profiles p ON p.id = e.user_id
         LEFT JOIN user_roles ur ON ur.user_id = e.user_id
@@ -120,7 +176,8 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
           'last_name', p.last_name,
           'email', p.email,
           'phone', p.phone
-        ) as profiles
+        ) as profiles,
+        ${assignmentSelectFragment}
       FROM employees e
       JOIN profiles p ON p.id = e.user_id
       WHERE e.tenant_id = $1 AND e.status = 'active'
@@ -292,7 +349,14 @@ router.post('/', authenticateToken, async (req, res) => {
       workLocation,
       joinDate,
       reportingManagerId,
-      role
+      role,
+      homeBranchId,
+      homeDepartmentId,
+      homeTeamId,
+      assignmentStartDate,
+      assignmentRole,
+      assignmentFte,
+      assignmentMetadata
     } = req.body;
 
     // Get user's tenant_id
@@ -346,6 +410,32 @@ router.post('/', authenticateToken, async (req, res) => {
           joinDate, reportingManagerId || null, tenantId
         ]
       );
+      const createdEmployee = empResult.rows[0];
+
+      if (homeBranchId || homeDepartmentId || homeTeamId) {
+        await queryWithOrg(
+          `INSERT INTO employee_assignments (
+            org_id, user_id, employee_id, branch_id, department_id, team_id,
+            role, fte, start_date, is_home, metadata
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 1.0), COALESCE($9::date, $10::date), true, COALESCE($11::jsonb, '{}'::jsonb))`,
+          [
+            tenantId,
+            userId,
+            createdEmployee.id,
+            homeBranchId || null,
+            homeDepartmentId || null,
+            homeTeamId || null,
+            assignmentRole || position || 'Member',
+            assignmentFte || 1,
+            assignmentStartDate || joinDate || new Date().toISOString().slice(0, 10),
+            joinDate || new Date().toISOString().slice(0, 10),
+            assignmentMetadata || {}
+          ],
+          tenantId
+        );
+        await rebuildSegmentsForEmployee(tenantId, createdEmployee.id);
+      }
 
       // Create user role
       await query(
@@ -1032,6 +1122,143 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error deleting employee:', error);
     res.status(500).json({ error: error.message || 'Failed to delete employee' });
+  }
+});
+
+// Employee assignments management
+router.get('/:id/assignments', authenticateToken, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [req.user.id]
+    );
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    const assignments = await queryWithOrg(
+      `SELECT ea.*, 
+              ob.name as branch_name, 
+              dept.name as department_name, 
+              team.name as team_name
+       FROM employee_assignments ea
+       LEFT JOIN org_branches ob ON ob.id = ea.branch_id
+       LEFT JOIN departments dept ON dept.id = ea.department_id
+       LEFT JOIN teams team ON team.id = ea.team_id
+       WHERE ea.employee_id = $1
+       ORDER BY ea.is_home DESC, ea.start_date DESC NULLS LAST`,
+      [id],
+      tenantId
+    );
+
+    res.json(assignments.rows);
+  } catch (error) {
+    console.error('Error fetching employee assignments:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch assignments' });
+  }
+});
+
+router.post('/:id/assignments', authenticateToken, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      assignmentId,
+      branchId,
+      departmentId,
+      teamId,
+      startDate,
+      endDate,
+      fte,
+      roleTitle,
+      isHome,
+      metadata
+    } = req.body;
+
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [req.user.id]
+    );
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    const employeeRecord = await query(
+      'SELECT id, user_id FROM employees WHERE id = $1 AND tenant_id = $2',
+      [id, tenantId]
+    );
+
+    if (employeeRecord.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    let result;
+    if (assignmentId) {
+      result = await queryWithOrg(
+        `UPDATE employee_assignments
+         SET branch_id = $1,
+             department_id = $2,
+             team_id = $3,
+             start_date = COALESCE($4::date, start_date),
+             end_date = $5::date,
+             fte = COALESCE($6, fte),
+             role = COALESCE($7, role),
+             is_home = COALESCE($8, is_home),
+             metadata = COALESCE($9::jsonb, metadata),
+             updated_at = now()
+         WHERE id = $10 AND employee_id = $11
+         RETURNING *`,
+        [
+          branchId || null,
+          departmentId || null,
+          teamId || null,
+          startDate || null,
+          endDate || null,
+          fte || null,
+          roleTitle || null,
+          typeof isHome === 'boolean' ? isHome : null,
+          metadata || null,
+          assignmentId,
+          id
+        ],
+        tenantId
+      );
+    } else {
+      result = await queryWithOrg(
+        `INSERT INTO employee_assignments (
+          org_id, user_id, employee_id, branch_id, department_id, team_id,
+          role, fte, start_date, end_date, is_home, metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 1.0), COALESCE($9::date, now()::date), $10::date, COALESCE($11, false), COALESCE($12::jsonb, '{}'::jsonb))
+        RETURNING *`,
+        [
+          tenantId,
+          employeeRecord.rows[0].user_id,
+          employeeRecord.rows[0].id,
+          branchId || null,
+          departmentId || null,
+          teamId || null,
+          roleTitle || 'Assignment',
+          fte || 1,
+          startDate || null,
+          endDate || null,
+          Boolean(isHome),
+          metadata || {}
+        ],
+        tenantId
+      );
+    }
+
+    await rebuildSegmentsForEmployee(tenantId, employeeRecord.rows[0].id);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error saving assignment:', error);
+    res.status(500).json({ error: error.message || 'Failed to save assignment' });
   }
 });
 

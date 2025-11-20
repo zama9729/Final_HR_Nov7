@@ -669,7 +669,8 @@ async function checkIfHoliday(employeeId, workDate, tenantId) {
   try {
     // Get employee info (state, holiday_override)
     const empResult = await query(
-      `SELECT state, holiday_override FROM employees WHERE id = $1`,
+      `SELECT id, state, work_location, holiday_override
+       FROM employees WHERE id = $1`,
       [employeeId]
     );
 
@@ -695,9 +696,9 @@ async function checkIfHoliday(employeeId, workDate, tenantId) {
     // Check published holidays
     const holidays = await selectEmployeeHolidays({
       orgId: tenantId,
-      employee: employee,
-      year: year,
-      month: month
+      employee,
+      year,
+      month
     });
 
     const dateStr = workDate instanceof Date ? workDate.toISOString().slice(0, 10) : String(workDate).slice(0, 10);

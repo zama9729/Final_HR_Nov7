@@ -308,7 +308,10 @@ router.get('/', authenticateToken, async (req, res) => {
     // Get employee info for holidays (needed even if timesheet doesn't exist)
     const orgRes = await query('SELECT tenant_id FROM employees WHERE id = $1', [employeeId]);
     const orgId = orgRes.rows[0]?.tenant_id;
-    const empRes = await query('SELECT state, work_mode, holiday_override FROM employees WHERE id = $1', [employeeId]);
+    const empRes = await query(
+      'SELECT id, tenant_id, state, work_location, holiday_override FROM employees WHERE id = $1',
+      [employeeId]
+    );
     const employee = empRes.rows[0] || {};
     const month = String(weekStart).slice(0,7); // YYYY-MM
     
@@ -550,7 +553,10 @@ router.post('/', authenticateToken, async (req, res) => {
       }
 
       // Auto-persist holiday entries for this timesheet
-      const empRes = await query('SELECT state, work_mode, holiday_override FROM employees WHERE id = $1', [employeeId]);
+      const empRes = await query(
+        'SELECT id, tenant_id, state, work_location, holiday_override FROM employees WHERE id = $1',
+        [employeeId]
+      );
       const employee = empRes.rows[0] || {};
       const month = String(weekStart).slice(0,7); // YYYY-MM
       const existingEntriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1', [timesheetId]);

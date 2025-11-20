@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { User } from "lucide-react";
+import { api } from "@/lib/api";
 
 interface Employee {
   id: string;
@@ -29,29 +29,15 @@ export default function OrgChart() {
   }, []);
 
   const fetchOrgStructure = async () => {
-    const { data: employees, error } = await supabase
-      .from('employees')
-      .select(`
-        id,
-        employee_id,
-        position,
-        reporting_manager_id,
-        user_id,
-        profiles:profiles!employees_user_id_fkey(first_name, last_name, email)
-      `)
-      .eq('status', 'active');
-
-    if (error) {
+    try {
+      const data = await api.getOrgStructure();
+      if (data) {
+        const validEmployees = (data as Employee[]).filter((emp) => emp.profiles);
+        const orgTree = buildTree(validEmployees);
+        setTree(orgTree);
+      }
+    } catch (error) {
       console.error('Error fetching org structure:', error);
-      setLoading(false);
-      return;
-    }
-
-    if (employees) {
-      // Filter out any employees without profile data
-      const validEmployees = employees.filter(emp => emp.profiles);
-      const orgTree = buildTree(validEmployees as any);
-      setTree(orgTree);
     }
     setLoading(false);
   };

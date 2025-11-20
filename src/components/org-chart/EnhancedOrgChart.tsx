@@ -1,9 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Phone, Mail, MapPin, Circle } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+interface Assignment {
+  assignment_id: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  department_id: string | null;
+  department_name: string | null;
+  team_id: string | null;
+  team_name: string | null;
+  is_home: boolean;
+  fte: number;
+  role: string | null;
+}
 
 interface Employee {
   id: string;
@@ -20,6 +40,8 @@ interface Employee {
     email: string;
     phone: string | null;
   } | null;
+  home_assignment?: Assignment | null;
+  assignments?: Assignment[];
 }
 
 interface TreeNode extends Employee {
@@ -100,7 +122,13 @@ function renderNode(node: TreeNode, level: number = 0): JSX.Element {
                 <p className="text-sm font-medium text-primary mb-2">{node.position}</p>
               )}
               {node.department && (
-                <Badge variant="secondary" className="mb-3">{node.department}</Badge>
+                <Badge variant="secondary" className="mb-2">{node.department}</Badge>
+              )}
+              {node.home_assignment?.branch_name && (
+                <Badge variant="outline" className="mb-2">{node.home_assignment.branch_name}</Badge>
+              )}
+              {node.home_assignment?.team_name && (
+                <p className="text-xs text-muted-foreground mb-2">Team: {node.home_assignment.team_name}</p>
               )}
               
               <div className="space-y-1.5 text-xs text-muted-foreground">
@@ -168,19 +196,70 @@ function renderNode(node: TreeNode, level: number = 0): JSX.Element {
 }
 
 export default function EnhancedOrgChart() {
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hierarchy, setHierarchy] = useState<{ branches: any[]; departments: any[]; teams: any[] }>({
+    branches: [],
+    departments: [],
+    teams: [],
+  });
+  const [filters, setFilters] = useState({
+    branch: "all",
+    department: "all",
+    team: "all",
+  });
 
   useEffect(() => {
     loadOrgChart();
+    loadBranches();
   }, []);
 
   const loadOrgChart = async () => {
     const employees = await fetchOrgStructure();
+    setEmployees(employees);
     const orgTree = buildTree(employees);
     setTree(orgTree);
     setLoading(false);
   };
+
+  const loadBranches = async () => {
+    try {
+      const data = await api.getBranchHierarchy();
+      setHierarchy({
+        branches: data?.branches || [],
+        departments: data?.departments || [],
+        teams: data?.teams || [],
+      });
+    } catch (error) {
+      console.error("Failed to load branches", error);
+    }
+  };
+
+  const filteredEmployees = useMemo(() => {
+    return employees.filter((emp) => {
+      const home = emp.home_assignment;
+      if (filters.branch !== "all" && home?.branch_id !== filters.branch) return false;
+      if (filters.department !== "all" && home?.department_id !== filters.department)
+        return false;
+      if (filters.team !== "all" && home?.team_id !== filters.team) return false;
+      return true;
+    });
+  }, [employees, filters]);
+
+  useEffect(() => {
+    const orgTree = buildTree(filteredEmployees);
+    setTree(orgTree);
+  }, [filteredEmployees]);
+
+  const metrics = useMemo(() => {
+    const branchCounts: Record<string, number> = {};
+    filteredEmployees.forEach((emp) => {
+      const label = emp.home_assignment?.branch_name || "Unassigned";
+      branchCounts[label] = (branchCounts[label] || 0) + 1;
+    });
+    return branchCounts;
+  }, [filteredEmployees]);
 
   if (loading) {
     return (
@@ -201,10 +280,98 @@ export default function EnhancedOrgChart() {
     );
   }
 
+  const departmentOptions = useMemo(() => {
+    if (filters.branch === "all") return [];
+    return hierarchy.departments.filter((dept) => dept.branch_id === filters.branch);
+  }, [hierarchy.departments, filters.branch]);
+
+  const teamOptions = useMemo(() => {
+    if (filters.branch === "all") return [];
+    return hierarchy.teams.filter((team) => team.branch_id === filters.branch);
+  }, [hierarchy.teams, filters.branch]);
+
   return (
-    <div className="w-full overflow-auto pb-12">
+    <div className="w-full overflow-auto pb-12 space-y-6">
+      <div className="flex flex-wrap gap-4 items-end px-6 pt-6">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs uppercase text-muted-foreground">Branch</p>
+          <Select
+            value={filters.branch}
+            onValueChange={(value) =>
+              setFilters((prev) => ({ ...prev, branch: value, department: "all", team: "all" }))
+            }
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="All branches" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All branches</SelectItem>
+              {hierarchy.branches.map((branch: any) => (
+                <SelectItem value={branch.id} key={branch.id}>
+                  {branch.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className="text-xs uppercase text-muted-foreground">Department</p>
+          <Select
+            value={filters.department}
+            onValueChange={(value) =>
+              setFilters((prev) => ({ ...prev, department: value, team: "all" }))
+            }
+            disabled={filters.branch === "all"}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="All departments" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All departments</SelectItem>
+              {departmentOptions?.map((dept: any) => (
+                <SelectItem value={dept.id} key={dept.id}>
+                  {dept.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className="text-xs uppercase text-muted-foreground">Team</p>
+          <Select
+            value={filters.team}
+            onValueChange={(value) =>
+              setFilters((prev) => ({ ...prev, team: value }))
+            }
+            disabled={filters.branch === "all"}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="All teams" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All teams</SelectItem>
+              {teamOptions?.map((team: any) => (
+                <SelectItem value={team.id} key={team.id}>
+                  {team.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-4 px-6">
+        {Object.entries(metrics).map(([branch, count]) => (
+          <Card key={branch} className="min-w-[180px]">
+            <CardContent className="p-4">
+              <p className="text-xs uppercase text-muted-foreground">{branch}</p>
+              <p className="text-2xl font-semibold">{count}</p>
+              <p className="text-xs text-muted-foreground">Active employees</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
       <div className="inline-flex flex-col items-center gap-12 p-8 min-w-max">
-        {tree.map(root => renderNode(root))}
+        {tree.map((root) => renderNode(root))}
       </div>
     </div>
   );

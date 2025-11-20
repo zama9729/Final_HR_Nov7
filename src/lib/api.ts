@@ -222,6 +222,32 @@ class ApiClient {
     }, true);
   }
 
+  // Branch hierarchy
+  async getBranchHierarchy() {
+    return this.request('/api/branches');
+  }
+
+  async upsertBranch(payload: Record<string, any>) {
+    return this.request('/api/branches/upsert', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async upsertDepartment(payload: Record<string, any>) {
+    return this.request('/api/branches/departments/upsert', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async upsertTeam(payload: Record<string, any>) {
+    return this.request('/api/branches/teams/upsert', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   // Stats methods
   async getPendingCounts() {
     return this.request('/api/stats/pending-counts');
@@ -236,6 +262,116 @@ class ApiClient {
     return this.request(`/api/notifications/${id}/read`, {
       method: 'PATCH',
     });
+  }
+
+  // Organization setup
+  async getSetupStatus() {
+    return this.request('/api/setup/status');
+  }
+
+  async updateSetupStep(stepKey: string, payload: Record<string, any>) {
+    return this.request(`/api/setup/steps/${stepKey}`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  // Attendance settings
+  async getAttendanceSettings() {
+    return this.request('/api/attendance-settings');
+  }
+
+  async updateAttendanceSettings(payload: Record<string, any>) {
+    return this.request('/api/attendance-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async changePassword(newPassword: string) {
+    return this.request('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ newPassword }),
+    });
+  }
+
+  async getClockStatus() {
+    return this.request('/api/v1/attendance/punch/status');
+  }
+
+  async clockPunch(payload: { type: 'IN' | 'OUT'; timestamp?: string; location?: any; metadata?: any }) {
+    const body = {
+      type: payload.type,
+      timestamp: payload.timestamp || new Date().toISOString(),
+      location: payload.location,
+      metadata: payload.metadata,
+    };
+    return this.request('/api/v1/attendance/punch', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  // Policy platform
+  async getPolicyTemplates(params?: { search?: string; country?: string }) {
+    const query = new URLSearchParams();
+    if (params?.search) query.append('search', params.search);
+    if (params?.country) query.append('country', params.country);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/api/policy-platform/templates${qs}`);
+  }
+
+  async getPolicyPlatformPolicies() {
+    return this.request('/api/policy-platform/policies');
+  }
+
+  async savePolicyPlatformPolicy(payload: Record<string, any>) {
+    return this.request('/api/policy-platform/policies', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async publishPolicyPlatformPolicy(policyId: string, payload: Record<string, any>) {
+    return this.request(`/api/policy-platform/policies/${policyId}/publish`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async getMyPerformanceReviews() {
+    return this.request('/api/performance-reviews/my');
+  }
+
+  async acknowledgePerformanceReview(reviewId: string) {
+    return this.request(`/api/performance-reviews/${reviewId}/acknowledge`, {
+      method: 'POST',
+    });
+  }
+
+  // Super admin analytics
+  async getSuperMetrics(params?: Record<string, string>, mfaCode?: string) {
+    const query = new URLSearchParams(params || {});
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/api/super/metrics${qs}`, {
+      headers: {
+        'X-MFA-Code': mfaCode || '',
+      } as HeadersInit,
+    });
+  }
+
+  async exportSuperMetrics(params?: Record<string, string>, mfaCode?: string) {
+    const query = new URLSearchParams(params || {});
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    const url = `${this.baseURL}/api/super/export${qs}`;
+    const headers: HeadersInit = {};
+    if (this._token) headers['Authorization'] = `Bearer ${this._token}`;
+    headers['X-MFA-Code'] = mfaCode || '';
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      throw new Error('Failed to export metrics');
+    }
+    return response.json();
   }
 
   // Check if employee needs password change

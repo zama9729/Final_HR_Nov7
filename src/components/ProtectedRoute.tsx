@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth, UserRole } from "@/contexts/AuthContext";
+import { useOrgSetup } from "@/contexts/OrgSetupContext";
 import { ReactNode, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
@@ -19,6 +20,7 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
   const { user, userRole, isLoading } = useAuth();
   const location = useLocation();
+  const { status: setupStatus, loading: setupLoading, shouldGate } = useOrgSetup();
   const [onboardingStatus, setOnboardingStatus] = useState<{
     status: string | null;
     loading: boolean;
@@ -58,8 +60,11 @@ export function ProtectedRoute({
     }
   }, [user, userRole, isLoading, location.pathname, requireOnboarding]);
 
-  // Show initial loading only while auth state is resolving
-  if (isLoading) {
+  const isSetupRoute = location.pathname.startsWith("/setup");
+  const requiresSetupGate = shouldGate && !!setupStatus && !setupStatus.isCompleted;
+
+  // Show initial loading while auth/setup state resolves
+  if (isLoading || (shouldGate && setupLoading && !isSetupRoute)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-pulse">Loading...</div>
@@ -70,6 +75,14 @@ export function ProtectedRoute({
   // If no authenticated user, redirect immediately to login
   if (!user) {
     return <Navigate to="/auth/login" replace />;
+  }
+
+  if (requiresSetupGate && !isSetupRoute) {
+    return <Navigate to="/setup" replace />;
+  }
+
+  if (isSetupRoute && (!shouldGate || setupStatus?.isCompleted)) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   // For authenticated users, wait for any onboarding checks (if applicable)

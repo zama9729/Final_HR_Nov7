@@ -11,6 +11,7 @@
     "test:permissions": "node server/tests/permissions.test.js",
     "test:routes": "node server/tests/routes.test.js",
     "seed:policies": "node server/scripts/seed-policy-catalog.js",
+    "seed:super": "node server/scripts/seed-super-user.js",
     "org:reset": "node server/scripts/reset-org.js",
     "fix:role": "node server/scripts/fix-user-role.js"
   },
@@ -27,6 +28,7 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.7",
     "openai": "^4.104.0",
+    "otplib": "^12.0.1",
     "pdfkit": "^0.13.0",
     "pg": "^8.11.3",
     "redis": "^4.6.10",

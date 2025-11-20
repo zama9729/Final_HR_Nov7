@@ -49,15 +49,14 @@ export async function withClient(fn, orgId) {
   const client = await pool.connect();
   try {
     if (orgId) {
-      // PostgreSQL SET SESSION doesn't support parameters, so we need to format it
-      // Validate it's a UUID format (basic check)
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (uuidRegex.test(orgId)) {
-        // Set session variable for RLS
-        await client.query(`SET LOCAL app.org_id = '${orgId}'`);
-      } else {
+      if (!uuidRegex.test(orgId)) {
         throw new Error(`Invalid org ID format: ${orgId}`);
       }
+      const escapedOrgId = orgId.replace(/'/g, "''");
+      await client.query(`SET LOCAL app.org_id = '${escapedOrgId}'`);
+      await client.query(`SET LOCAL app.current_tenant = '${escapedOrgId}'`);
+      await client.query(`SET LOCAL app.current_org_id = '${escapedOrgId}'`);
     }
     const result = await fn(client);
     return result;

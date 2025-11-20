@@ -35,6 +35,7 @@ import importsRoutes from './routes/imports.js';
 import checkInOutRoutes from './routes/check-in-out.js';
 import opalMiniAppsRoutes from './routes/opal-mini-apps.js';
 import attendanceRoutes from './routes/attendance.js';
+import attendanceSettingsRoutes from './routes/attendance-settings.js';
 import payrollRoutes from './routes/payroll.js';
 import backgroundChecksRoutes from './routes/background-checks.js';
 import terminationsRoutes from './routes/terminations.js';
@@ -42,17 +43,23 @@ import documentsRoutes from './routes/documents.js';
 import offboardingRoutes from './routes/offboarding.js';
 import rehireRoutes from './routes/rehire.js';
 import policiesRoutes from './routes/policies.js';
+import policyPlatformRoutes from './routes/policy-platform.js';
 import usersRoutes from './routes/users.js';
 import payrollSsoRoutes from './routes/payroll-sso.js';
 import taxDeclarationsRoutes from './routes/tax-declarations.js';
 import reimbursementRoutes from './routes/reimbursements.js';
 import reportsRoutes from './routes/reports.js';
+import setupRoutes from './routes/setup.js';
+import branchesRoutes from './routes/branches.js';
+import superRoutes from './routes/super.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules } from './services/cron.js';
+import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
 import { createAttendanceTables } from './utils/createAttendanceTables.js';
 import { ensureAdminRole } from './utils/runMigration.js';
 import { ensureOnboardingColumns } from './utils/ensureOnboardingColumns.js';
+import { scheduleAnalyticsRefresh } from './services/analytics-refresh.js';
 
 dotenv.config();
 
@@ -146,6 +153,7 @@ app.use('/api/employee-stats', authenticateToken, employeeStatsRoutes);
 app.use('/api/migrations', migrationsRoutes);
 app.use('/api/check-in-out', checkInOutRoutes);
 app.use('/api/v1/attendance', attendanceRoutes);
+app.use('/api/attendance-settings', attendanceSettingsRoutes);
 app.use('/api/opal-mini-apps', authenticateToken, setTenantContext, opalMiniAppsRoutes);
 app.use('/api/payroll', authenticateToken, payrollRoutes);
 app.use('/api/background-checks', authenticateToken, backgroundChecksRoutes);
@@ -153,9 +161,13 @@ app.use('/api/terminations', authenticateToken, terminationsRoutes);
 app.use('/api/documents', authenticateToken, documentsRoutes);
 app.use('/api/offboarding', authenticateToken, offboardingRoutes);
 app.use('/api/rehire', authenticateToken, rehireRoutes);
+app.use('/api/setup', setupRoutes);
+app.use('/api/branches', branchesRoutes);
+app.use('/api/super', superRoutes);
 // Multi-tenant routes
 app.use('/api/orgs', organizationsRoutes);
 app.use('/api/policies', authenticateToken, setTenantContext, policiesRoutes);
+app.use('/api/policy-platform', policyPlatformRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/promotion', authenticateToken, setTenantContext, promotionsRoutes);
 // Payroll SSO integration (separate from payroll routes)
@@ -382,6 +394,8 @@ createPool().then(async () => {
   // Schedule cron jobs
   scheduleHolidayNotifications();
   scheduleNotificationRules();
+  scheduleAnalyticsRefresh();
+  scheduleAssignmentSegmentation();
   await scheduleOffboardingJobs();
   console.log('✅ Cron jobs scheduled');
 
