@@ -10,40 +10,45 @@
  * - Any other high-risk actions
  */
 
-import { query } from '../db/pool.js';
+import { query, createPool } from '../db/pool.js';
 
 // Ensure audit_logs table exists
+let ensurePromise = null;
 const ensureAuditLogsTable = async () => {
-  await query(`
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-      actor_id UUID REFERENCES profiles(id),
-      actor_role TEXT,
-      action TEXT NOT NULL,
-      entity_type TEXT NOT NULL,
-      entity_id UUID,
-      reason TEXT,
-      details JSONB DEFAULT '{}'::jsonb,
-      diff JSONB,
-      scope TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
+  if (ensurePromise) return ensurePromise;
+  ensurePromise = (async () => {
+    try {
+      await createPool();
+      await query(`
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+          actor_id UUID REFERENCES profiles(id),
+          actor_role TEXT,
+          action TEXT NOT NULL,
+          entity_type TEXT NOT NULL,
+          entity_id UUID,
+          reason TEXT,
+          details JSONB DEFAULT '{}'::jsonb,
+          diff JSONB,
+          scope TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
 
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
-    CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
-  `).catch(err => {
-    // Table might already exist, ignore
-    if (!err.message.includes('already exists')) {
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
+      `);
+    } catch (err) {
       console.error('Error creating audit_logs table:', err);
     }
-  });
+  })();
+  return ensurePromise;
 };
 
-// Initialize table on import
+// Initialize table on import (best effort)
 ensureAuditLogsTable();
 
 /**
@@ -71,6 +76,7 @@ export async function audit({
   scope = null,
 }) {
   try {
+    await ensureAuditLogsTable();
     // Get actor role and tenant
     const actorResult = await query(
       `SELECT 

@@ -1,5 +1,5 @@
 """Application configuration."""
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 
 
@@ -21,8 +21,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_version: Optional[str] = None
+    openai_proxy: Optional[str] = None
     embedding_model: str = "text-embedding-ada-002"
     chat_model: str = "gpt-4-turbo-preview"
+    vite_rag_api_url: Optional[str] = None  # ignore frontend env var when inherited
     
     # JWT - Use same secret as HR app for compatibility
     jwt_secret: str = "your-secret-key"  # Default matches HR app default
@@ -62,9 +64,11 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6381/0"
     celery_result_backend: str = "redis://localhost:6381/0"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="allow",
+    )
 
 
 settings = Settings()

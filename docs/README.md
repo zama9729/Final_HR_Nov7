@@ -100,6 +100,29 @@ Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/c
 - `npm install` (adds `reactflow`)
 - Start backend and frontend; log in as HR/CEO to access staffing routes.
 
+### RAG Service / AI Assistant
+1. Copy `rag-service/.env.example` → `rag-service/.env` and set:
+   ```
+   OPENAI_API_KEY=sk-...
+   DATABASE_URL=postgresql://rag_user:rag_password@rag-postgres:5432/rag_db
+   ```
+2. Start the rag stack:
+   ```bash
+   cd rag-service
+   docker compose up -d  # exposes FastAPI on http://localhost:8001
+   ```
+3. In the root `.env` ensure the frontend points to it:
+   ```
+   VITE_RAG_API_URL=http://localhost:8001
+   ```
+4. Verify: `curl http://localhost:8001/health` → should return `{"status":"healthy",...}`.
+5. Restart the Vite dev server after changing env vars.
+6. Start the Celery worker if you plan to ingest documents:
+   ```bash
+   cd rag-service
+   docker compose up -d celery-worker
+   ```
+
 
 ---
 

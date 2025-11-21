@@ -2,7 +2,14 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, Upload, AlertCircle, CheckCircle } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+
+const headerExamples = (field: string) => {
+  const camel = field.replace(/_([a-z])/g, (_, char) => char.toUpperCase());
+  const noUnderscore = field.replace(/_/g, "");
+  const variants = Array.from(new Set([field, camel, noUnderscore]));
+  return variants.join(", ");
+};
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -14,6 +21,22 @@ export default function EmployeeImport() {
   const [preview, setPreview] = useState<any | null>(null);
   const [mapping, setMapping] = useState<Record<string,string>>({});
   const { toast } = useToast();
+  const columnGuide = useMemo(() => [
+    { field: 'first_name', required: true, description: 'Given name' },
+    { field: 'last_name', required: true, description: 'Surname' },
+    { field: 'email', required: true, description: 'Work email (must be unique)' },
+    { field: 'employee_id', required: true, description: 'Company employee code (unique)' },
+    { field: 'role', required: false, description: "Role / permission (defaults to 'employee')" },
+    { field: 'department', required: false, description: 'Department name (e.g., Engineering)' },
+    { field: 'department_code', required: false, description: 'Department code (used if provided)' },
+    { field: 'branch_name', required: false, description: 'Branch / site name' },
+    { field: 'branch_code', required: false, description: 'Branch code (preferred if available)' },
+    { field: 'team_name', required: false, description: 'Team name (within branch/department)' },
+    { field: 'work_location', required: false, description: 'Free-text work location' },
+    { field: 'join_date', required: false, description: 'Date format YYYY-MM-DD or DD-MM-YYYY' },
+    { field: 'manager_email', required: false, description: 'Reporting manager email' },
+    { field: 'phone', required: false, description: 'Contact number' }
+  ], []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -139,10 +162,9 @@ export default function EmployeeImport() {
   };
 
   const downloadTemplate = () => {
-    // Correct template with all required fields
-    const csvContent = `firstName,lastName,email,employeeId,role,department,position,joinDate,managerEmail,workLocation
-John,Doe,john.doe@company.com,EMP001,employee,Engineering,Software Engineer,2024-01-15,manager@company.com,Remote
-Jane,Smith,jane.smith@company.com,EMP002,employee,Engineering,Senior Engineer,2024-02-01,,Hyderabad`;
+    const csvContent = `first_name,last_name,email,employee_id,role,department,department_code,branch_name,branch_code,team_name,work_location,join_date,manager_email,phone
+John,Doe,john.doe@company.com,EMP001,employee,Engineering,ENG,Hyderabad Campus,HYD01,SRE,Hyderabad,2024-01-15,manager@company.com,+91-9876501234
+Jane,Smith,jane.smith@company.com,EMP002,manager,Product,PROD,Bengaluru Tech Park,BLR02,Product Ops,Bengaluru,15-02-2024,ceo@company.com,+91-9876509999`;
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -161,6 +183,34 @@ Jane,Smith,jane.smith@company.com,EMP002,employee,Engineering,Senior Engineer,20
         </div>
         <Card>
           <CardHeader>
+            <CardTitle>Column Mapping Reference</CardTitle>
+            <CardDescription>
+              Match each CSV header to the internal field name. Template already uses the recommended headers.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              {columnGuide.map((col) => (
+                <div key={col.field} className="border rounded-lg p-3 bg-muted/40">
+                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-muted-foreground">
+                    <span>{col.field}</span>
+                    {col.required ? (
+                      <span className="text-red-500 font-semibold">Required</span>
+                    ) : (
+                      <span className="text-muted-foreground">Optional</span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-muted-foreground">{col.description}</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground/70">
+                    Auto-mapped header examples: {headerExamples(col.field)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
             <CardTitle>Download Template</CardTitle>
             <CardDescription>
               Start with our CSV template to ensure proper formatting
@@ -172,13 +222,16 @@ Jane,Smith,jane.smith@company.com,EMP002,employee,Engineering,Senior Engineer,20
               Download CSV Template
             </Button>
             <div className="mt-4 p-4 bg-muted rounded-lg">
-              <p className="text-sm font-medium mb-2">Template includes:</p>
+              <p className="text-sm font-medium mb-2">Template columns (snake_case recommended):</p>
               <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                <li><strong>Required:</strong> firstName, lastName, email, employeeId</li>
-                <li><strong>Optional:</strong> role (defaults to 'employee'), department, position</li>
-                <li><strong>Optional:</strong> joinDate (format: YYYY-MM-DD or DD-MM-YYYY), managerEmail, workLocation</li>
+                <li><strong>Required:</strong> first_name, last_name, email, employee_id</li>
+                <li><strong>Role & Reporting:</strong> role, manager_email</li>
+                <li><strong>Org placement:</strong> department / department_code, branch_name / branch_code, team_name</li>
+                <li><strong>Dates & misc:</strong> join_date (YYYY-MM-DD or DD-MM-YYYY), work_location, phone</li>
               </ul>
-              <p className="text-xs text-muted-foreground mt-2">Note: Column names are case-insensitive. Supported formats: firstName, firstname, first_name</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Header names are case-insensitive — e.g. we map firstName ⇢ first_name automatically. Use the table below for exact mappings.
+              </p>
             </div>
           </CardContent>
         </Card>

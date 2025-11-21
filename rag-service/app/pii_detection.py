@@ -1,10 +1,19 @@
-"""PII detection and redaction using Presidio."""
+"""PII detection and redaction using Presidio (if available)."""
 from typing import List, Dict, Optional
-from presidio_analyzer import AnalyzerEngine
-from presidio_anonymizer import AnonymizerEngine
-from presidio_anonymizer.entities import OperatorConfig
-from app.config import settings
 import logging
+
+try:
+    from presidio_analyzer import AnalyzerEngine
+    from presidio_anonymizer import AnonymizerEngine
+    from presidio_anonymizer.entities import OperatorConfig
+    PRESIDIO_AVAILABLE = True
+except ImportError:
+    AnalyzerEngine = None  # type: ignore
+    AnonymizerEngine = None  # type: ignore
+    OperatorConfig = None  # type: ignore
+    PRESIDIO_AVAILABLE = False
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +25,8 @@ _anonymizer = None
 def _get_analyzer():
     """Lazy initialization of AnalyzerEngine."""
     global _analyzer
+    if not PRESIDIO_AVAILABLE:
+        return None
     if _analyzer is None:
         try:
             _analyzer = AnalyzerEngine()
@@ -28,6 +39,8 @@ def _get_analyzer():
 def _get_anonymizer():
     """Lazy initialization of AnonymizerEngine."""
     global _anonymizer
+    if not PRESIDIO_AVAILABLE:
+        return None
     if _anonymizer is None:
         try:
             _anonymizer = AnonymizerEngine()
@@ -41,7 +54,7 @@ class PIIDetector:
     """PII detection and redaction."""
     
     def __init__(self):
-        self.enabled = settings.pii_redaction_enabled
+        self.enabled = settings.pii_redaction_enabled and PRESIDIO_AVAILABLE
         self.entities = settings.pii_entities
         self._analyzer = None
         self._anonymizer = None
@@ -51,6 +64,10 @@ class PIIDetector:
         if not self.enabled:
             return []
         
+        if not PRESIDIO_AVAILABLE:
+            logger.debug("Presidio not available; skipping PII detection.")
+            return []
+
         analyzer = _get_analyzer()
         if analyzer is None:
             return []
@@ -78,6 +95,10 @@ class PIIDetector:
     def redact_pii(self, text: str, replacement: str = "[REDACTED]") -> str:
         """Redact PII from text."""
         if not self.enabled:
+            return text
+
+        if not PRESIDIO_AVAILABLE or OperatorConfig is None:
+            logger.debug("Presidio not available; returning original text.")
             return text
         
         analyzer = _get_analyzer()

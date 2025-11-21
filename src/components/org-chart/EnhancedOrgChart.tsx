@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Phone, Mail, MapPin, Circle } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -81,11 +79,16 @@ function buildTree(employees: Employee[]): TreeNode[] {
 
 function getPresenceColor(status?: string) {
   switch (status) {
-    case 'online': return 'text-green-500';
-    case 'away': return 'text-red-500';
-    case 'break': return 'text-yellow-500';
-    case 'out_of_office': return 'text-blue-500';
-    default: return 'text-gray-400';
+    case "online":
+      return "bg-green-500";
+    case "away":
+      return "bg-red-500";
+    case "break":
+      return "bg-yellow-500";
+    case "out_of_office":
+      return "bg-blue-500";
+    default:
+      return "bg-gray-300";
   }
 }
 
@@ -98,93 +101,40 @@ function renderNode(node: TreeNode, level: number = 0): JSX.Element {
 
   return (
     <div key={node.id} className="flex flex-col items-center">
-      <Card className="w-80 hover:shadow-lg transition-all duration-300 border-2 hover:border-primary/50 bg-gradient-to-br from-card to-card/80">
-        <CardContent className="p-6">
-          <div className="flex items-start gap-4">
-            <div className="relative">
-              <Avatar className="h-16 w-16 border-2 border-primary/20">
-                <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-              {node.presence_status && (
-                <div className="absolute -bottom-1 -right-1">
-                  <Circle className={`h-4 w-4 ${getPresenceColor(node.presence_status)} rounded-full border-2 border-background`} fill="currentColor" />
-                </div>
-              )}
-            </div>
-            
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-bold text-lg text-foreground">{fullName}</h3>
-              </div>
-              {node.position && (
-                <p className="text-sm font-medium text-primary mb-2">{node.position}</p>
-              )}
-              {node.department && (
-                <Badge variant="secondary" className="mb-2">{node.department}</Badge>
-              )}
-              {node.home_assignment?.branch_name && (
-                <Badge variant="outline" className="mb-2">{node.home_assignment.branch_name}</Badge>
-              )}
-              {node.home_assignment?.team_name && (
-                <p className="text-xs text-muted-foreground mb-2">Team: {node.home_assignment.team_name}</p>
-              )}
-              
-              <div className="space-y-1.5 text-xs text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <Mail className="h-3.5 w-3.5" />
-                  <span className="truncate">{node.profiles.email}</span>
-                </div>
-                {node.profiles.phone && (
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-3.5 w-3.5" />
-                    <span>{node.profiles.phone}</span>
-                  </div>
-                )}
-                {node.work_location && (
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-3.5 w-3.5" />
-                    <span>{node.work_location}</span>
-                  </div>
-                )}
-              </div>
-            </div>
+      <Card className="w-44 rounded-2xl border border-border/60 bg-background/70 shadow-sm">
+        <CardContent className="p-4 flex flex-col items-center gap-3">
+          <div className="relative">
+            <Avatar className="h-14 w-14 border border-border">
+              <AvatarFallback className="bg-muted text-primary text-base font-semibold">
+                {initials || "?"}
+              </AvatarFallback>
+            </Avatar>
+            <span
+              className={`absolute -bottom-1 right-0 h-3.5 w-3.5 rounded-full border border-background ${getPresenceColor(
+                node.presence_status
+              )}`}
+            />
           </div>
-          
-          {hasChildren && (
-            <div className="mt-4 pt-4 border-t border-border">
-              <p className="text-xs text-muted-foreground">
-                {node.children.length} Direct Report{node.children.length !== 1 ? 's' : ''}
-              </p>
-            </div>
-          )}
+          <div className="text-center space-y-1">
+            <p className="font-semibold text-sm text-foreground truncate">{fullName || "Unnamed"}</p>
+            {node.position && (
+              <p className="text-xs text-muted-foreground font-medium truncate">{node.position}</p>
+            )}
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              {node.department || "Unassigned"}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
       {hasChildren && (
-        <div className="relative mt-8">
-          {/* Vertical line from parent */}
-          <div className="absolute left-1/2 top-0 h-8 w-0.5 bg-border -translate-x-1/2 -translate-y-8" />
-          
-          <div className="flex gap-12 relative">
-            {/* Horizontal connector line */}
-            {node.children.length > 1 && (
-              <div 
-                className="absolute top-0 h-0.5 bg-border" 
-                style={{
-                  left: '50%',
-                  right: '50%',
-                  transform: `translateX(-${(node.children.length - 1) * 6}rem) scaleX(${node.children.length - 1})`,
-                  transformOrigin: 'center',
-                }}
-              />
-            )}
-            
-            {node.children.map((child, index) => (
-              <div key={child.id} className="relative">
-                {/* Vertical line to child */}
-                <div className="absolute left-1/2 top-0 h-8 w-0.5 bg-border -translate-x-1/2" />
+        <div className="mt-6 flex flex-col items-center gap-4">
+          <div className="h-6 w-px bg-border" />
+          <div className="relative flex items-start gap-6">
+            <div className="absolute left-0 right-0 top-3 h-px bg-border" />
+            {node.children.map((child) => (
+              <div key={child.id} className="flex flex-col items-center pt-3">
+                <div className="h-6 w-px bg-border" />
                 {renderNode(child, level + 1)}
               </div>
             ))}
@@ -236,30 +186,27 @@ export default function EnhancedOrgChart() {
     }
   };
 
-  const filteredEmployees = useMemo(() => {
-    return employees.filter((emp) => {
-      const home = emp.home_assignment;
-      if (filters.branch !== "all" && home?.branch_id !== filters.branch) return false;
-      if (filters.department !== "all" && home?.department_id !== filters.department)
-        return false;
-      if (filters.team !== "all" && home?.team_id !== filters.team) return false;
-      return true;
-    });
-  }, [employees, filters]);
+  const filteredEmployees = employees.filter((emp) => {
+    const home = emp.home_assignment;
+    if (filters.branch !== "all" && home?.branch_id !== filters.branch) return false;
+    if (filters.department !== "all" && home?.department_id !== filters.department) return false;
+    if (filters.team !== "all" && home?.team_id !== filters.team) return false;
+    return true;
+  });
 
   useEffect(() => {
     const orgTree = buildTree(filteredEmployees);
     setTree(orgTree);
   }, [filteredEmployees]);
 
-  const metrics = useMemo(() => {
+  const metrics = (() => {
     const branchCounts: Record<string, number> = {};
     filteredEmployees.forEach((emp) => {
       const label = emp.home_assignment?.branch_name || "Unassigned";
       branchCounts[label] = (branchCounts[label] || 0) + 1;
     });
     return branchCounts;
-  }, [filteredEmployees]);
+  })();
 
   if (loading) {
     return (
@@ -280,15 +227,15 @@ export default function EnhancedOrgChart() {
     );
   }
 
-  const departmentOptions = useMemo(() => {
-    if (filters.branch === "all") return [];
-    return hierarchy.departments.filter((dept) => dept.branch_id === filters.branch);
-  }, [hierarchy.departments, filters.branch]);
+  const departmentOptions =
+    filters.branch === "all"
+      ? []
+      : hierarchy.departments.filter((dept) => dept.branch_id === filters.branch);
 
-  const teamOptions = useMemo(() => {
-    if (filters.branch === "all") return [];
-    return hierarchy.teams.filter((team) => team.branch_id === filters.branch);
-  }, [hierarchy.teams, filters.branch]);
+  const teamOptions =
+    filters.branch === "all"
+      ? []
+      : hierarchy.teams.filter((team) => team.branch_id === filters.branch);
 
   return (
     <div className="w-full overflow-auto pb-12 space-y-6">

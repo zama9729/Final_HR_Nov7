@@ -315,14 +315,43 @@ router.get('/attendance/histogram', authenticateToken, setTenantContext, require
     );
     const totalEmployees = parseInt(totalEmployeesResult.rows[0]?.count || '0');
 
-    const histogram = result.rows.map(row => ({
-      date: row.date,
-      present: parseInt(row.present || '0'),
-      absent: Math.max(0, totalEmployees - parseInt(row.present || '0')),
-      late: parseInt(row.late || '0'),
-      wfo: parseInt(row.wfo || '0'),
-      wfh: parseInt(row.wfh || '0'),
-    }));
+    // Normalize rows by date for quick lookup
+    const rowMap = new Map();
+    result.rows.forEach(row => {
+      // Ensure date string in YYYY-MM-DD
+      const dateKey = new Date(row.date).toISOString().split('T')[0];
+      rowMap.set(dateKey, {
+        present: parseInt(row.present || '0'),
+        late: parseInt(row.late || '0'),
+        wfo: parseInt(row.wfo || '0'),
+        wfh: parseInt(row.wfh || '0'),
+      });
+    });
+
+    // Fill every day in range to avoid gaps in timeline graph
+    const histogram = [];
+    for (
+      let cursor = new Date(fromDate);
+      cursor <= toDate;
+      cursor.setDate(cursor.getDate() + 1)
+    ) {
+      const dateKey = cursor.toISOString().split('T')[0];
+      const stats = rowMap.get(dateKey) || {
+        present: 0,
+        late: 0,
+        wfo: 0,
+        wfh: 0,
+      };
+      const absent = Math.max(0, totalEmployees - stats.present);
+      histogram.push({
+        date: dateKey,
+        present: stats.present,
+        absent,
+        late: stats.late,
+        wfo: stats.wfo,
+        wfh: stats.wfh,
+      });
+    }
 
     res.json({ histogram, total_employees: totalEmployees });
   } catch (error) {

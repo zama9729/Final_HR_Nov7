@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sidebar, SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
-import { Bot, Send, X, Loader2, MessageSquare, Trash2, Plus, Edit2, Check, XIcon, FileText, Sparkles, Shield } from "lucide-react";
+import { Bot, Send, X, Loader2, MessageSquare, Trash2, Plus, Edit2, Check, XIcon, FileText, Sparkles, Shield, ListFilter } from "lucide-react";
 import { format } from "date-fns";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -17,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 interface Message {
@@ -48,6 +47,31 @@ interface RAGAssistantProps {
   embedded?: boolean; // If true, always open and not floating
 }
 
+const QUICK_PROMPTS = [
+  "Summarise the leave policy in two sentences",
+  "Does our POSH policy cover third-party vendors?",
+  "What documents are needed for onboarding contractors?",
+  "Show the process for internal transfers",
+];
+
+const SAFETY_CARDS = [
+  {
+    title: "Source citations",
+    description: "Every answer links back to the original handbook or uploaded PDF so reviewers can verify quickly.",
+    icon: FileText,
+  },
+  {
+    title: "Policy first",
+    description: "Trained on internal HR, legal, and onboarding docs - not generic internet content.",
+    icon: Sparkles,
+  },
+  {
+    title: "Read-only",
+    description: "This assistant never executes tools or edits data. Perfect for audits and employee FAQs.",
+    icon: Shield,
+  },
+];
+
 export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
   const [isOpen, setIsOpen] = useState(embedded);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -61,6 +85,7 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   // Load conversations from localStorage
@@ -156,11 +181,16 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+  const handleSend = async (promptOverride?: string) => {
+    const messageText = (promptOverride ?? input).trim();
+    if (!messageText || isLoading) return;
 
-    const userMessage = input.trim();
-    setInput("");
+    if (!promptOverride) {
+      setInput("");
+    } else {
+      setInput("");
+    }
+    const userMessage = messageText;
     
     // Add user message immediately
     const userMsg: Message = { role: "user", content: userMessage };
@@ -211,6 +241,11 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
     }
   };
 
+  const handleQuickPrompt = (prompt: string) => {
+    handleSend(prompt);
+    composerRef.current?.focus();
+  };
+
   const startEditing = (conv: Conversation) => {
     setEditingConversationId(conv.id);
     setEditingTitle(conv.title || "");
@@ -243,86 +278,75 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
 
   return (
     <>
-      <div className={`${embedded ? 'w-full h-full' : 'fixed bottom-6 right-6 w-[900px] max-w-[calc(100vw-3rem)] h-[700px] max-h-[calc(100vh-3rem)]'} ${embedded ? '' : 'shadow-2xl'} z-50 flex gap-0 bg-background rounded-lg border overflow-hidden`}>
-        {/* Sidebar - Conversation History */}
-        {showHistory && (
-          <Sidebar className="w-64 border-r flex flex-col">
-            <SidebarHeader className="p-3 border-b">
-              <div className="flex items-center justify-between">
-                <h3 className="font-medium text-sm">Conversations</h3>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={startNewConversation}
-                  className="h-7 w-7"
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
+      <div
+        className={`${
+          embedded
+            ? "w-full h-full"
+            : "fixed bottom-6 right-6 w-[min(1000px,calc(100vw-2rem))] h-[min(720px,calc(100vh-2rem))]"
+        } ${embedded ? "" : "shadow-2xl"} z-50 rounded-3xl border bg-background/95 backdrop-blur`}
+      >
+        <div className="flex h-full flex-col gap-4 p-4 lg:grid lg:grid-cols-[280px,minmax(0,1fr)] lg:gap-6">
+          {/* Conversation / helper panel */}
+          <div
+            className={`${
+              showHistory ? "flex" : "hidden lg:flex"
+            } flex-col gap-4 rounded-2xl border bg-card/40 p-3 lg:p-4`}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Workspace</p>
+                <p className="text-base font-semibold">Conversations</p>
               </div>
-            </SidebarHeader>
-            <SidebarContent className="flex-1 p-2 overflow-auto">
-              <div className="space-y-1">
-                {conversations.map((conv) => (
-                  <div
-                    key={conv.id}
-                    className={`group relative p-2 rounded-md cursor-pointer transition-colors ${
-                      currentConversationId === conv.id
-                        ? "bg-accent"
-                        : "hover:bg-accent/50"
-                    }`}
-                    onClick={() => loadConversation(conv.id)}
-                  >
-                    {editingConversationId === conv.id ? (
-                      <div className="flex items-center gap-1">
-                        <Input
-                          value={editingTitle}
-                          onChange={(e) => setEditingTitle(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') saveEditing();
-                            if (e.key === 'Escape') cancelEditing();
-                          }}
-                          className="h-7 text-xs px-2"
-                          autoFocus
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            saveEditing();
-                          }}
+              <Button variant="secondary" size="icon" className="h-8 w-8" onClick={startNewConversation}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="grow">
+              <ScrollArea className="h-52 lg:h-[320px]">
+                <div className="space-y-1">
+                  {conversations.map((conv) => (
+                    <div
+                      key={conv.id}
+                      className={`rounded-xl border px-3 py-2 text-sm transition hover:border-primary/40 ${
+                        currentConversationId === conv.id
+                          ? "border-primary bg-primary/5"
+                          : "border-border/70"
+                      }`}
+                    >
+                      {editingConversationId === conv.id ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveEditing();
+                              if (e.key === "Escape") cancelEditing();
+                            }}
+                            className="h-8 text-xs"
+                            autoFocus
+                          />
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={saveEditing}>
+                            <Check className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={cancelEditing}>
+                            <XIcon className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <button
+                          className="flex w-full items-start justify-between text-left"
+                          onClick={() => loadConversation(conv.id)}
                         >
-                          <Check className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            cancelEditing();
-                          }}
-                        >
-                          <XIcon className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium truncate">
-                              {conv.title || "New Conversation"}
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium">{conv.title || "New Conversation"}</p>
+                            <p className="truncate text-[11px] text-muted-foreground">
+                              {conv.messages[0]?.content?.substring(0, 30) || "No messages yet"}
                             </p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                              {conv.messages[0]?.content?.substring(0, 30) || "No messages"}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground mt-1">
+                            <p className="text-[10px] text-muted-foreground">
                               {format(new Date(conv.updated_at), "MMM d, h:mm a")}
                             </p>
                           </div>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex flex-col gap-1">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -347,112 +371,123 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
                               <Trash2 className="h-3 w-3" />
                             </Button>
                           </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
-                {conversations.length === 0 && (
-                  <div className="text-center text-muted-foreground py-8 text-xs">
-                    <MessageSquare className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                    <p>No conversations yet</p>
-                  </div>
-                )}
-              </div>
-            </SidebarContent>
-          </Sidebar>
-        )}
-
-        {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <div className="flex items-center gap-2">
-              <Bot className="h-4 w-4" />
-              <span className="text-sm font-medium">RAG Assistant (Q&amp;A)</span>
-              <Badge variant="secondary" className="text-xs">
-                <Sparkles className="h-3 w-3 mr-1" />
-                Document Q&amp;A
-              </Badge>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {conversations.length === 0 && (
+                    <div className="rounded-2xl border border-dashed p-4 text-center text-xs text-muted-foreground">
+                      <MessageSquare className="mx-auto mb-2 h-6 w-6 opacity-60" />
+                      Start a new conversation to see it listed here.
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
             </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowHistory(!showHistory)}
-                className="h-7 w-7"
-              >
-                <MessageSquare className="h-4 w-4" />
-              </Button>
-              {!embedded && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsOpen(false)}
-                  className="h-7 w-7"
-                >
-                  <X className="h-4 w-4" />
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-muted-foreground">Quick prompts</p>
+                <Button variant="ghost" size="sm" className="text-xs" onClick={() => composerRef.current?.focus()}>
+                  Type & Ask
                 </Button>
-              )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {QUICK_PROMPTS.map((prompt) => (
+                  <Button
+                    key={prompt}
+                    variant="outline"
+                    className="h-auto rounded-full px-3 py-1 text-xs"
+                    onClick={() => handleQuickPrompt(prompt)}
+                    disabled={isLoading}
+                  >
+                    {prompt}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {SAFETY_CARDS.map((card) => (
+                <Card key={card.title} className="bg-muted/40">
+                  <CardHeader className="flex flex-row items-center gap-2 py-3">
+                    <card.icon className="h-4 w-4 text-primary" />
+                    <CardTitle className="text-sm">{card.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0 text-xs text-muted-foreground">{card.description}</CardContent>
+                </Card>
+              ))}
             </div>
           </div>
 
-          {/* Chat Messages */}
-          <ScrollArea className="flex-1" ref={scrollRef}>
-            <div className="p-4 space-y-4">
-              {messages.length === 0 && (
-                <div className="text-center text-muted-foreground py-12">
-                  <Bot className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm mb-2">Ask questions about your uploaded documents and policies</p>
-                  <div className="flex items-center justify-center gap-4 mt-4 text-xs">
-                    <div className="flex items-center gap-1">
-                      <Sparkles className="h-3 w-3" />
-                      <span>RAG-powered</span>
+          {/* Chat panel */}
+          <div className="flex flex-col rounded-2xl border bg-card/80 backdrop-blur">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Bot className="h-4 w-4" />
+                Retrieval Q&A
+                <Badge variant="secondary" className="text-[10px]">
+                  <Sparkles className="mr-1 h-3 w-3" />
+                  Document cited
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 lg:hidden"
+                  onClick={() => setShowHistory((prev) => !prev)}
+                >
+                  <ListFilter className="h-4 w-4" />
+                </Button>
+                {!embedded && (
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsOpen(false)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <ScrollArea className="flex-1" ref={scrollRef}>
+              <div className="space-y-4 p-4">
+                {messages.length === 0 && (
+                  <Card className="border-dashed text-center text-muted-foreground">
+                    <CardContent className="py-10">
+                      <Bot className="mx-auto mb-3 h-10 w-10 opacity-50" />
+                      <p className="text-sm">Ask anything about your uploaded HR policies and documents.</p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {messages.map((msg, idx) => (
+                  <div key={idx} className="space-y-2">
+                    <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
+                          msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Shield className="h-3 w-3" />
-                      <span>Secure & Private</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {messages.map((msg, idx) => (
-                <div key={idx} className="space-y-2">
-                  <div
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-                        msg.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-foreground"
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                    </div>
-                  </div>
-                  
-                  {/* Show provenance and tool calls for assistant messages */}
-                  {msg.role === "assistant" && (msg.provenance || msg.tool_calls) && (
-                    <div className="flex justify-start">
-                      <Card className="max-w-[75%] p-2 text-xs">
-                        <CardContent className="p-2 space-y-2">
+
+                    {msg.role === "assistant" && (msg.provenance || msg.tool_calls) && (
+                      <Card className="max-w-[80%] border-l-4 border-primary bg-muted/40 pl-3 text-xs">
+                        <CardContent className="space-y-2 p-3">
                           {msg.provenance?.confidence && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">Confidence:</span>
-                              <Badge
-                                variant={msg.provenance.confidence > 0.7 ? "default" : "secondary"}
-                              >
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              Confidence
+                              <Badge variant={msg.provenance.confidence > 0.7 ? "default" : "secondary"}>
                                 {(msg.provenance.confidence * 100).toFixed(0)}%
                               </Badge>
                             </div>
                           )}
                           {msg.tool_calls && msg.tool_calls.length > 0 && (
                             <div>
-                              <span className="text-muted-foreground">Tools used:</span>
-                              <div className="flex flex-wrap gap-1 mt-1">
+                              <p className="text-muted-foreground">Tools referenced</p>
+                              <div className="mt-1 flex flex-wrap gap-1">
                                 {msg.tool_calls.map((tc, i) => (
-                                  <Badge key={i} variant="outline" className="text-xs">
+                                  <Badge key={i} variant="outline" className="text-[10px]">
                                     {tc.name}
                                   </Badge>
                                 ))}
@@ -460,13 +495,11 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
                             </div>
                           )}
                           {msg.provenance?.snippets && msg.provenance.snippets.length > 0 && (
-                            <details className="text-xs">
-                              <summary className="cursor-pointer text-muted-foreground">
-                                Sources ({msg.provenance.snippets.length})
-                              </summary>
-                              <div className="mt-2 space-y-1">
+                            <details className="rounded-md bg-background/60 p-2">
+                              <summary className="cursor-pointer text-muted-foreground">Sources</summary>
+                              <div className="mt-2 space-y-2">
                                 {msg.provenance.snippets.map((snippet, i) => (
-                                  <div key={i} className="p-2 bg-muted rounded text-xs">
+                                  <div key={i} className="rounded-md bg-muted/60 p-2">
                                     {snippet}
                                   </div>
                                 ))}
@@ -475,40 +508,36 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
                           )}
                         </CardContent>
                       </Card>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-muted rounded-lg px-3 py-2 flex items-center gap-2">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span className="text-xs text-muted-foreground">Querying RAG service...</span>
+                    )}
                   </div>
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+                ))}
 
-          {/* Input */}
-          <div className="border-t p-3">
-            <div className="flex gap-2">
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                placeholder="Ask about your uploaded HR policies or documents..."
-                disabled={isLoading}
-                className="text-sm"
-              />
-              <Button
-                onClick={handleSend}
-                disabled={isLoading || !input.trim()}
-                size="icon"
-                className="h-9 w-9"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Searching documents…
+                    </div>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+
+            <div className="border-t bg-background/50 p-3">
+              <div className="flex gap-2">
+                <Input
+                  ref={composerRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+                  placeholder="Ask about your HR docs…"
+                  disabled={isLoading}
+                  className="text-sm"
+                />
+                <Button onClick={() => handleSend()} disabled={isLoading || !input.trim()} size="icon" className="h-9 w-9">
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
         </div>

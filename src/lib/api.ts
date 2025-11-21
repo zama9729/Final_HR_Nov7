@@ -1,6 +1,7 @@
 // API Client - Replaces Supabase client
 
 const API_URL = (import.meta as any).env.VITE_API_URL || 'http://localhost:3001';
+const RAG_API_URL = (import.meta as any).env.VITE_RAG_API_URL || 'http://localhost:8001';
 
 class ApiClient {
   private baseURL: string;
@@ -63,6 +64,47 @@ class ApiClient {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
         throw new Error('Request timeout. Please check your connection.');
+      }
+      throw error;
+    }
+  }
+
+  private async ragRequest(endpoint: string, options: RequestInit = {}, isFormData = false) {
+    const url = `${RAG_API_URL}${endpoint}`;
+    const headers: HeadersInit = {
+      ...options.headers,
+    };
+
+    if (!isFormData) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    if (this._token) {
+      headers['Authorization'] = `Bearer ${this._token}`;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Request failed' }));
+        throw new Error(error.error || `HTTP error! status: ${response.status}`);
+      }
+
+      return response.json();
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('RAG service timeout. Please check the connection.');
       }
       throw error;
     }
@@ -380,6 +422,90 @@ class ApiClient {
     if (params.branch_id) query.append('branch_id', params.branch_id);
     if (params.team_id) query.append('team_id', params.team_id);
     return this.request(`/api/analytics/attendance/distribution?${query.toString()}`);
+  }
+
+  // Background check methods
+  async getBackgroundChecks() {
+    return this.request('/api/background-checks');
+  }
+
+  async createBackgroundCheck(payload: {
+    employee_id?: string;
+    candidate_id?: string;
+    type?: 'prehire' | 'rehire' | 'periodic';
+    vendor_id?: string;
+    notes?: string;
+    scope?: any;
+    consent?: any;
+  }) {
+    return this.request('/api/background-checks', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateBackgroundCheckStatus(id: string, data: { status: string; result_summary?: any; notes?: string }) {
+    return this.request(`/api/background-checks/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getBackgroundCheckReport(id: string) {
+    return this.request(`/api/background-checks/${id}/report`);
+  }
+
+  // AI assistant conversation methods
+  async listAIConversations() {
+    return this.request('/api/ai/conversations');
+  }
+
+  async getAIConversation(id: string) {
+    return this.request(`/api/ai/conversations/${id}`);
+  }
+
+  async deleteAIConversation(id: string) {
+    return this.request(`/api/ai/conversations/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async renameAIConversation(id: string, title: string) {
+    return this.request(`/api/ai/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    });
+  }
+
+  // RAG service helpers
+  async queryRAG(query: string, topK?: number, useTools = true) {
+    return this.ragRequest('/api/v1/query', {
+      method: 'POST',
+      body: JSON.stringify({
+        query,
+        top_k: typeof topK === 'number' ? topK : undefined,
+        use_tools: useTools,
+      }),
+    });
+  }
+
+  async ingestDocument(file: File, isConfidential = false) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('is_confidential', String(isConfidential));
+    return this.ragRequest('/api/v1/ingest', {
+      method: 'POST',
+      body: formData,
+      headers: {} as HeadersInit,
+    }, true);
+  }
+
+  async getRAGDocumentStatus(documentId: string) {
+    return this.ragRequest(`/api/v1/documents/${documentId}/status`);
+  }
+
+  async getRAGDocumentProgress(documentId: string) {
+    return this.ragRequest(`/api/v1/documents/${documentId}/progress`);
   }
 
   // Policy platform
@@ -822,12 +948,21 @@ class ApiClient {
     return this.request('/api/terminations');
   }
 
+  async getTermination(id: string) {
+    return this.request(`/api/terminations/${id}`);
+  }
+
+  async previewTermination(id: string) {
+    return this.request(`/api/terminations/${id}/preview_settlement`);
+  }
+
   async createTermination(data: {
     employee_id: string;
-    termination_date: string;
-    termination_type: string;
-    reason?: string;
-    notes?: string;
+    type: 'resignation' | 'cause' | 'retrenchment' | 'redundancy' | 'mutual';
+    proposed_lwd?: string;
+    reason_text?: string;
+    attachments?: any[];
+    evidence_refs?: any[];
   }) {
     return this.request('/api/terminations', {
       method: 'POST',
@@ -835,62 +970,38 @@ class ApiClient {
     });
   }
 
-  async approveTermination(id: string, notes?: string) {
+  async approveTermination(id: string, data?: { action?: 'approve' | 'reject'; note?: string }) {
     return this.request(`/api/terminations/${id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify(data || { action: 'approve' }),
     });
   }
 
-  async updateTermination(id: string, data: {
-    termination_date?: string;
-    termination_type?: string;
-    reason?: string;
+  // Rehire methods (new workflow)
+  async getRehireRequests() {
+    return this.request('/api/rehire');
+  }
+
+  async getRehireRequest(id: string) {
+    return this.request(`/api/rehire/${id}`);
+  }
+
+  async createRehireRequest(data: {
+    ex_employee_id: string;
+    requested_start_date?: string;
+    prior_termination_id?: string;
     notes?: string;
   }) {
-    return this.request(`/api/terminations/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteTermination(id: string) {
-    return this.request(`/api/terminations/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  // Rehire methods
-  async getRehires() {
-    return this.request('/api/terminations/rehires');
-  }
-
-  async createRehire(data: {
-    original_employee_id?: string;
-    new_employee_id: string;
-    rehire_date: string;
-    reason?: string;
-    previous_termination_id?: string;
-  }) {
-    return this.request('/api/terminations/rehire', {
+    return this.request('/api/rehire', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async updateRehire(id: string, data: {
-    rehire_date?: string;
-    reason?: string;
-  }) {
-    return this.request(`/api/terminations/rehires/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteRehire(id: string) {
-    return this.request(`/api/terminations/rehires/${id}`, {
-      method: 'DELETE',
+  async decideRehire(id: string, payload: { action: 'approve' | 'reject'; note?: string }) {
+    return this.request(`/api/rehire/${id}/decision`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 
@@ -1017,51 +1128,6 @@ class ApiClient {
   async finalizeOffboarding(id: string) {
     return this.request(`/api/offboarding/${id}/finalize`, {
       method: 'POST',
-    });
-  }
-
-  // Rehire methods
-  async searchOffboardedIdentities(data: { email?: string; emp_code?: string }) {
-    return this.request('/api/rehire/search', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async createRehireRequest(data: {
-    offboarded_identity_id: string;
-    manager_id?: string;
-    department?: string;
-    position?: string;
-    email: string;
-    first_name: string;
-    last_name: string;
-  }) {
-    return this.request('/api/rehire/request', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getRehireRequests() {
-    return this.request('/api/rehire');
-  }
-
-  async getRehireRequest(id: string) {
-    return this.request(`/api/rehire/${id}`);
-  }
-
-  async approveRehire(id: string, comment?: string) {
-    return this.request(`/api/rehire/${id}/approve`, {
-      method: 'POST',
-      body: JSON.stringify({ comment }),
-    });
-  }
-
-  async denyRehire(id: string, comment: string) {
-    return this.request(`/api/rehire/${id}/deny`, {
-      method: 'POST',
-      body: JSON.stringify({ comment }),
     });
   }
 

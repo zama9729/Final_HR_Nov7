@@ -1,10 +1,9 @@
-import { ComponentType, useEffect, useRef, useState } from "react";
+import { ComponentType, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Sidebar, SidebarHeader, SidebarContent } from "@/components/ui/sidebar";
 import {
   Bot,
   Send,
@@ -18,6 +17,7 @@ import {
   Users,
   BarChart3,
   ShieldQuestion,
+  ListFilter,
 } from "lucide-react";
 import { format } from "date-fns";
 import { api } from "@/lib/api";
@@ -51,9 +51,19 @@ export function AIActionAssistant() {
   const [streamingContent, setStreamingContent] = useState("");
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [showUtilityPanel, setShowUtilityPanel] = useState(true);
+  const [conversationSearch, setConversationSearch] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  const filteredConversations = useMemo(() => {
+    if (!conversationSearch.trim()) return conversations;
+    const term = conversationSearch.toLowerCase();
+    return conversations.filter((conv) =>
+      (conv.title || "").toLowerCase().includes(term) ||
+      (conv.preview || "").toLowerCase().includes(term)
+    );
+  }, [conversations, conversationSearch]);
 
 const QUICK_ACTIONS: Array<{
   key: string;
@@ -465,143 +475,132 @@ const handleQuickAction = async (prompt: string) => {
 };
 
   return (
-    <div className="flex h-full rounded-lg border bg-background overflow-hidden">
-      {/* Sidebar */}
-      {isSidebarOpen && (
-        <Sidebar className="w-64 border-r flex flex-col">
-          <SidebarHeader className="p-3 border-b">
+    <div className="flex h-full flex-col gap-4 lg:grid lg:grid-cols-[280px,minmax(0,1fr)] lg:gap-6">
+      <div className={`${showUtilityPanel ? "flex" : "hidden lg:flex"} flex-col gap-4`}>
+        <Card className="flex flex-col">
+          <CardHeader className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="font-medium text-sm">Conversations</h3>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={startNewConversation}
-                className="h-7 w-7"
-              >
+              <CardTitle className="text-base">Conversations</CardTitle>
+              <Button variant="secondary" size="icon" className="h-8 w-8" onClick={startNewConversation}>
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
-          </SidebarHeader>
-          <SidebarContent className="flex-1 p-2 overflow-auto">
-            <div className="space-y-1">
-              {conversations.map((conv) => (
-                <div
-                  key={conv.id}
-                  className={`group rounded-md p-2 cursor-pointer transition-colors ${
-                    currentConversationId === conv.id
-                      ? "bg-accent"
-                      : "hover:bg-accent/50"
-                  }`}
-                  onClick={() => loadConversation(conv.id)}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate">
-                        {conv.title || "New Conversation"}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground truncate">
-                        {conv.preview || "No messages yet"}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        {format(new Date(conv.updated_at), "MMM d, h:mm a")}
-                      </p>
+            <Input
+              value={conversationSearch}
+              onChange={(e) => setConversationSearch(e.target.value)}
+              placeholder="Search history"
+              className="h-8 text-xs"
+            />
+          </CardHeader>
+          <CardContent className="p-0">
+            <ScrollArea className="h-56 lg:h-[360px]">
+              <div className="space-y-1 p-2">
+                {filteredConversations.map((conv) => (
+                  <button
+                    key={conv.id}
+                    className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
+                      currentConversationId === conv.id ? "border-primary bg-primary/5" : "border-border"
+                    }`}
+                    onClick={() => loadConversation(conv.id)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-semibold">{conv.title || "New Conversation"}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{conv.preview || "No messages yet"}</p>
+                        <p className="text-[10px] text-muted-foreground">{format(new Date(conv.updated_at), "MMM d, h:mm a")}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteConversation(conv.id);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteConversation(conv.id);
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              {conversations.length === 0 && (
-                <div className="text-center text-muted-foreground py-8 text-xs">
-                  <MessageSquare className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                  <p>No conversations yet</p>
-                  <p className="mt-1">Start a new chat to begin</p>
-                </div>
-              )}
-            </div>
-          </SidebarContent>
-        </Sidebar>
-      )}
+                  </button>
+                ))}
 
-      {/* Main pane */}
-      <div className="flex-1 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b">
-          <div className="flex items-center gap-2">
+                {filteredConversations.length === 0 && (
+                  <div className="rounded-xl border border-dashed p-4 text-center text-xs text-muted-foreground">
+                    <MessageSquare className="mx-auto mb-2 h-6 w-6 opacity-60" />
+                    No conversations found
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Quick automations</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Pre-filled prompts to execute HR workflows faster.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <TooltipProvider>
+              <div className="space-y-2">
+                {QUICK_ACTIONS.map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <Tooltip key={action.key}>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start gap-3 py-3 text-left"
+                          disabled={isLoading}
+                          onClick={() => handleQuickAction(action.prompt)}
+                        >
+                          <Icon className="h-4 w-4 text-primary" />
+                          <div>
+                            <p className="text-sm font-medium">{action.title}</p>
+                            <p className="text-xs text-muted-foreground">{action.description}</p>
+                          </div>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-xs">{action.tooltip}</TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+            </TooltipProvider>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="flex flex-col rounded-2xl border bg-card/70 backdrop-blur">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
             <Bot className="h-4 w-4" />
-            <span className="text-sm font-medium">AI Assistant (Actions)</span>
-            <Badge variant="secondary" className="text-xs flex items-center gap-1">
+            AI Assistant · Actions
+            <Badge variant="secondary" className="text-[10px] flex items-center gap-1">
               <Zap className="h-3 w-3" />
-              Tool Calling
+              Tool calling
             </Badge>
           </div>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
-            onClick={() => setIsSidebarOpen((prev) => !prev)}
+            className="h-8 w-8 lg:hidden"
+            onClick={() => setShowUtilityPanel((prev) => !prev)}
           >
-            <MessageSquare className="h-4 w-4" />
+            <ListFilter className="h-4 w-4" />
           </Button>
         </div>
 
         <ScrollArea className="flex-1" ref={scrollRef}>
-          <div className="p-4 space-y-4">
-            <Card className="border-dashed">
-              <CardContent className="py-4">
-                <TooltipProvider>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {QUICK_ACTIONS.map((action) => {
-                      const Icon = action.icon;
-                      return (
-                        <Tooltip key={action.key}>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className="justify-start h-auto py-3 px-4 text-left transition hover:border-primary/60"
-                              disabled={isLoading}
-                              onClick={() => handleQuickAction(action.prompt)}
-                            >
-                              <div className="flex items-start gap-3">
-                                <Icon className="h-5 w-5 text-primary mt-0.5" />
-                                <div>
-                                  <p className="text-sm font-medium">
-                                    {action.title}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {action.description}
-                                  </p>
-                                </div>
-                              </div>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" align="start">
-                            <p className="max-w-xs text-xs">
-                              {action.tooltip}
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    })}
-                  </div>
-                </TooltipProvider>
-              </CardContent>
-            </Card>
-
+          <div className="space-y-4 p-4">
             {messages.length === 0 && !streamingContent && (
-              <Card className="border-dashed">
-                <CardContent className="py-8 text-center space-y-2">
-                  <Bot className="h-10 w-10 mx-auto opacity-50" />
-                  <p className="text-sm text-muted-foreground">
-                    Ask me to perform HR actions like creating leave requests, checking balances, or approving requests.
+              <Card className="border-dashed text-center text-muted-foreground">
+                <CardContent className="py-10">
+                  <Bot className="mx-auto mb-3 h-10 w-10 opacity-50" />
+                  <p className="text-sm">
+                    Ask me to create leave requests, pull KPIs, or approve workflows. I will confirm before executing tools.
                   </p>
                 </CardContent>
               </Card>
@@ -611,14 +610,12 @@ const handleQuickAction = async (prompt: string) => {
               if (msg.role === "tool") {
                 return (
                   <div key={`tool-${idx}`} className="flex justify-start">
-                    <Card className="max-w-[75%] bg-muted/60 text-xs">
-                      <CardContent className="p-3 space-y-2">
-                        <Badge variant="outline" className="text-xs">
-                          Tool Result
+                    <Card className="max-w-[80%] border-l-4 border-primary bg-muted/40 text-xs">
+                      <CardContent className="space-y-2 p-3">
+                        <Badge variant="outline" className="text-[10px]">
+                          Tool result
                         </Badge>
-                        <pre className="whitespace-pre-wrap text-xs">
-                          {msg.content}
-                        </pre>
+                        <pre className="whitespace-pre-wrap">{msg.content}</pre>
                       </CardContent>
                     </Card>
                   </div>
@@ -627,20 +624,13 @@ const handleQuickAction = async (prompt: string) => {
 
               const isUser = msg.role === "user";
               return (
-                <div
-                  key={`${msg.role}-${idx}-${msg.content}`}
-                  className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                >
+                <div key={`${msg.role}-${idx}-${msg.content}`} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                   <div
-                    className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-                      isUser
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground"
+                    className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
+                      isUser ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap leading-relaxed">
-                      {msg.content}
-                    </p>
+                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                   </div>
                 </div>
               );
@@ -648,10 +638,10 @@ const handleQuickAction = async (prompt: string) => {
 
             {streamingContent && (
               <div className="flex justify-start">
-                <div className="bg-muted rounded-lg px-3 py-2 text-sm">
+                <div className="rounded-2xl bg-muted px-4 py-2 text-sm">
                   <p className="whitespace-pre-wrap leading-relaxed">
                     {streamingContent}
-                    <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1" />
+                    <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-current" />
                   </p>
                 </div>
               </div>
@@ -659,18 +649,16 @@ const handleQuickAction = async (prompt: string) => {
 
             {isLoading && !streamingContent && (
               <div className="flex justify-start">
-                <div className="bg-muted rounded-lg px-3 py-2 flex items-center gap-2">
+                <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  <span className="text-xs text-muted-foreground">
-                    Executing requested action...
-                  </span>
+                  Executing requested action…
                 </div>
               </div>
             )}
           </div>
         </ScrollArea>
 
-        <div className="border-t p-3">
+        <div className="border-t bg-background/60 p-3">
           <div className="flex gap-2">
             <Input
               value={input}
@@ -680,16 +668,11 @@ const handleQuickAction = async (prompt: string) => {
                   handleSend();
                 }
               }}
-              placeholder="Ask me to perform an HR task..."
+              placeholder="Ask me to perform an HR task…"
               disabled={isLoading}
               className="text-sm"
             />
-            <Button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              size="icon"
-              className="h-9 w-9"
-            >
+            <Button onClick={handleSend} disabled={isLoading || !input.trim()} size="icon" className="h-9 w-9">
               <Send className="h-4 w-4" />
             </Button>
           </div>
