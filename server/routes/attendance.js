@@ -5,6 +5,7 @@ import { authenticateToken, requireRole } from '../middleware/auth.js';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { processAttendanceUpload } from '../services/attendance-processor.js';
+import { geocodeAddress, reverseGeocode } from '../services/geocoding.js';
 
 const router = express.Router();
 
@@ -754,6 +755,405 @@ router.post('/upload/:upload_id/cancel', authenticateToken, requireRole('hr', 'd
   } catch (error) {
     console.error('Cancel upload error:', error);
     res.status(500).json({ error: error.message || 'Failed to cancel upload' });
+  }
+});
+
+// POST /api/attendance/clock
+// New clock in/out API with geolocation, address capture, and WFO/WFH determination
+// Feature flag: multi_branch_attendance_v1 (optional - enabled by default)
+router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
+  try {
+    // Check feature flag (default to enabled if not set)
+    const featureFlag = process.env.MULTI_BRANCH_ATTENDANCE_V1 !== 'false';
+    if (!featureFlag) {
+      // Fallback to old endpoint
+      return res.status(404).json({ error: 'Feature not enabled' });
+    }
+
+    const {
+      employee_id: providedEmployeeId,
+      action, // 'IN' or 'OUT'
+      ts, // ISO8601 timestamp
+      lat,
+      lon,
+      address_text,
+      capture_method = 'unknown', // 'geo', 'manual', 'kiosk', 'unknown'
+      consent = false,
+      device_id
+    } = req.body;
+
+    if (!action || !['IN', 'OUT'].includes(action)) {
+      return res.status(400).json({ error: 'action must be "IN" or "OUT"' });
+    }
+
+    if (!ts) {
+      return res.status(400).json({ error: 'ts (timestamp) is required' });
+    }
+
+    const userTenantId = await getTenantIdForUser(req.user.id);
+    if (!userTenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    let employeeId = providedEmployeeId;
+    if (employeeId) {
+      await verifyEmployeeInTenant(employeeId, userTenantId);
+    } else {
+      employeeId = await getEmployeeIdForUser(req.user.id, userTenantId);
+      if (!employeeId) {
+        return res.status(404).json({ error: 'Employee record not found for current user' });
+      }
+    }
+
+    const punchTime = new Date(ts);
+    if (isNaN(punchTime.getTime())) {
+      return res.status(400).json({ error: 'Invalid timestamp format' });
+    }
+
+    // Get employee's current assignment to determine home branch
+    const assignmentResult = await query(
+      `SELECT branch_id, org_id
+       FROM employee_assignments
+       WHERE employee_id = $1
+         AND is_home = true
+         AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+       ORDER BY start_date DESC
+       LIMIT 1`,
+      [employeeId]
+    );
+
+    const orgId = userTenantId;
+    let resolvedLat = lat ? parseFloat(lat) : null;
+    let resolvedLon = lon ? parseFloat(lon) : null;
+    let resolvedAddress = address_text || null;
+
+    // Geocode if we have address but no coordinates
+    if (!resolvedLat || !resolvedLon) {
+      if (resolvedAddress) {
+        try {
+          const geocoded = await geocodeAddress(resolvedAddress);
+          resolvedLat = geocoded.lat;
+          resolvedLon = geocoded.lon;
+          resolvedAddress = geocoded.formatted_address || resolvedAddress;
+        } catch (error) {
+          console.warn('Geocoding failed:', error.message);
+          // Continue without coordinates
+        }
+      }
+    }
+
+    // Reverse geocode if we have coordinates but no address
+    if (resolvedLat && resolvedLon && !resolvedAddress) {
+      try {
+        resolvedAddress = await reverseGeocode(resolvedLat, resolvedLon);
+      } catch (error) {
+        console.warn('Reverse geocoding failed:', error.message);
+        resolvedAddress = `${resolvedLat}, ${resolvedLon}`;
+      }
+    }
+
+    // Resolve branch from coordinates using geofences
+    let resolvedBranchId = null;
+    let workType = 'WFH'; // Default to WFH
+
+    if (resolvedLat && resolvedLon) {
+      const branchResult = await query(
+        `SELECT resolve_branch_from_coords($1, $2, $3) as branch_id`,
+        [resolvedLat, resolvedLon, orgId]
+      );
+      resolvedBranchId = branchResult.rows[0]?.branch_id || null;
+
+      if (resolvedBranchId) {
+        workType = 'WFO';
+      }
+    }
+
+    const consentTs = consent ? new Date() : null;
+
+    // Validate capture_method
+    const validCaptureMethods = ['geo', 'manual', 'kiosk', 'unknown'];
+    const finalCaptureMethod = validCaptureMethods.includes(capture_method) ? capture_method : 'unknown';
+
+    // Check for open session if clocking in
+    if (action === 'IN') {
+      const openSessionResult = await query(
+        `SELECT id FROM clock_punch_sessions
+         WHERE tenant_id = $1 AND employee_id = $2 AND clock_out_at IS NULL
+         LIMIT 1`,
+        [userTenantId, employeeId]
+      );
+
+      if (openSessionResult.rows.length > 0) {
+        return res.status(400).json({ error: 'Already clocked in. Please clock out before clocking in again.' });
+      }
+    }
+
+    // Create attendance event
+    const eventResult = await query(
+      `INSERT INTO attendance_events (
+        tenant_id, employee_id, raw_timestamp, event_type, device_id,
+        lat, lon, address_text, capture_method, consent, consent_ts,
+        work_location_branch_id, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING id, raw_timestamp, event_type`,
+      [
+        userTenantId,
+        employeeId,
+        punchTime,
+        action,
+        device_id || null,
+        resolvedLat,
+        resolvedLon,
+        resolvedAddress,
+        finalCaptureMethod,
+        consent,
+        consentTs,
+        resolvedBranchId,
+        req.user.id
+      ]
+    );
+
+    const event = eventResult.rows[0];
+    let pairedTimesheetEntryId = null;
+
+    // Update work_type on the event
+    await query(
+      `UPDATE attendance_events SET work_type = $1 WHERE id = $2`,
+      [workType, event.id]
+    );
+
+    // Handle clock in
+    if (action === 'IN') {
+      await query(
+        `INSERT INTO clock_punch_sessions (
+          tenant_id, employee_id, in_event_id, clock_in_at, device_in,
+          lat_in, lon_in, address_text_in, capture_method_in,
+          consent_in, consent_ts_in, work_location_branch_id, work_type
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          userTenantId,
+          employeeId,
+          event.id,
+          punchTime,
+          device_id || null,
+          resolvedLat,
+          resolvedLon,
+          resolvedAddress,
+          finalCaptureMethod,
+          consent,
+          consentTs,
+          resolvedBranchId,
+          workType
+        ]
+      );
+    }
+
+    // Handle clock out
+    if (action === 'OUT') {
+      const inEventResult = await query(
+        `SELECT id, raw_timestamp
+         FROM attendance_events
+         WHERE employee_id = $1
+           AND event_type = 'IN'
+           AND paired_timesheet_entry_id IS NULL
+           AND DATE(raw_timestamp) = DATE($2)
+         ORDER BY raw_timestamp DESC
+         LIMIT 1`,
+        [employeeId, punchTime]
+      );
+
+      if (inEventResult.rows.length > 0) {
+        const inEvent = inEventResult.rows[0];
+        const startTime = new Date(inEvent.raw_timestamp);
+        const endTime = punchTime;
+        const workDate = startTime.toISOString().split('T')[0];
+        const totalHours = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
+
+        const weekStart = getWeekStart(workDate);
+        const weekEnd = getWeekEnd(weekStart);
+
+        let timesheetResult = await query(
+          `SELECT id FROM timesheets 
+           WHERE employee_id = $1 AND week_start_date = $2`,
+          [employeeId, weekStart]
+        );
+
+        let timesheetId;
+        if (timesheetResult.rows.length === 0) {
+          const newTimesheetResult = await query(
+            `INSERT INTO timesheets (employee_id, week_start_date, week_end_date, total_hours, tenant_id)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id`,
+            [employeeId, weekStart, weekEnd, 0, userTenantId]
+          );
+          timesheetId = newTimesheetResult.rows[0].id;
+        } else {
+          timesheetId = timesheetResult.rows[0].id;
+        }
+
+        const entryResult = await query(
+          `INSERT INTO timesheet_entries (
+            timesheet_id, employee_id, work_date, hours, tenant_id, source, 
+            attendance_event_id, start_time_utc, end_time_utc, payroll_status, description
+          )
+          VALUES ($1, $2, $3, $4, $5, 'api', $6, $7, $8, 'pending_for_payroll', 'Punch In/Out')
+          RETURNING id`,
+          [
+            timesheetId,
+            employeeId,
+            workDate,
+            totalHours,
+            userTenantId,
+            event.id,
+            startTime,
+            endTime
+          ]
+        );
+
+        pairedTimesheetEntryId = entryResult.rows[0].id;
+
+        await query(
+          'UPDATE attendance_events SET paired_timesheet_entry_id = $1 WHERE id IN ($2, $3)',
+          [pairedTimesheetEntryId, inEvent.id, event.id]
+        );
+
+        await query(
+          `UPDATE timesheets 
+           SET total_hours = (
+             SELECT COALESCE(SUM(hours), 0) 
+             FROM timesheet_entries 
+             WHERE timesheet_id = $1
+           )
+           WHERE id = $1`,
+          [timesheetId]
+        );
+
+        const durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
+        
+        // Update clock_punch_sessions
+        const sessionUpdate = await query(
+          `WITH open_session AS (
+            SELECT id FROM clock_punch_sessions
+            WHERE tenant_id = $1 AND employee_id = $2 AND clock_out_at IS NULL
+            ORDER BY clock_in_at DESC
+            LIMIT 1
+          )
+          UPDATE clock_punch_sessions cps
+          SET out_event_id = $3,
+              clock_out_at = $4,
+              duration_minutes = $5,
+              device_out = $6,
+              lat_out = $7,
+              lon_out = $8,
+              address_text_out = $9,
+              capture_method_out = $10,
+              consent_out = $11,
+              consent_ts_out = $12,
+              work_location_branch_id = $13,
+              work_type = $14,
+              timesheet_entry_id = $15,
+              updated_at = now()
+          FROM open_session
+          WHERE cps.id = open_session.id
+          RETURNING cps.id`,
+          [
+            userTenantId,
+            employeeId,
+            event.id,
+            endTime,
+            durationMinutes,
+            device_id || null,
+            resolvedLat,
+            resolvedLon,
+            resolvedAddress,
+            finalCaptureMethod,
+            consent,
+            consentTs,
+            resolvedBranchId,
+            workType,
+            pairedTimesheetEntryId
+          ]
+        );
+
+        if (!sessionUpdate.rows.length) {
+          // Create session if it doesn't exist
+          await query(
+            `INSERT INTO clock_punch_sessions (
+              tenant_id, employee_id, in_event_id, out_event_id,
+              clock_in_at, clock_out_at, duration_minutes,
+              device_in, device_out,
+              lat_in, lon_in, address_text_in, capture_method_in,
+              lat_out, lon_out, address_text_out, capture_method_out,
+              consent_in, consent_ts_in, consent_out, consent_ts_out,
+              work_location_branch_id, work_type, timesheet_entry_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+            [
+              userTenantId,
+              employeeId,
+              inEvent.id,
+              event.id,
+              startTime,
+              endTime,
+              durationMinutes,
+              null,
+              device_id || null,
+              null,
+              null,
+              null,
+              null,
+              resolvedLat,
+              resolvedLon,
+              resolvedAddress,
+              finalCaptureMethod,
+              false,
+              null,
+              consent,
+              consentTs,
+              resolvedBranchId,
+              workType,
+              pairedTimesheetEntryId
+            ]
+          );
+        }
+      }
+    }
+
+    // Emit event for analytics (placeholder - can be extended with event emitter)
+    // Event: attendance.clocked
+
+    // Audit log
+    await query(
+      `INSERT INTO attendance_audit_logs (tenant_id, actor_id, action, object_type, object_id, details)
+       VALUES ($1, $2, 'clock_${action.toLowerCase()}', 'attendance_event', $3, $4)`,
+      [
+        userTenantId,
+        req.user.id,
+        event.id,
+        JSON.stringify({
+          action,
+          work_type: workType,
+          resolved_branch_id: resolvedBranchId,
+          capture_method: finalCaptureMethod,
+          consent,
+          has_coordinates: !!(resolvedLat && resolvedLon)
+        })
+      ]
+    );
+
+    res.json({
+      status: 'ok',
+      entry_id: event.id,
+      work_type: workType,
+      resolved_branch_id: resolvedBranchId,
+      message: action === 'IN'
+        ? `Clocked in - ${workType}`
+        : `Clocked out - ${workType}`
+    });
+  } catch (error) {
+    const status = error.statusCode || 500;
+    console.error('Clock API error:', error);
+    res.status(status).json({ error: error.message || 'Failed to process clock action' });
   }
 });
 

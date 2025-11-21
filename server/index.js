@@ -44,6 +44,7 @@ import offboardingRoutes from './routes/offboarding.js';
 import rehireRoutes from './routes/rehire.js';
 import policiesRoutes from './routes/policies.js';
 import policyPlatformRoutes from './routes/policy-platform.js';
+import policyManagementRoutes from './routes/policy-management.js';
 import usersRoutes from './routes/users.js';
 import payrollSsoRoutes from './routes/payroll-sso.js';
 import taxDeclarationsRoutes from './routes/tax-declarations.js';
@@ -153,6 +154,7 @@ app.use('/api/employee-stats', authenticateToken, employeeStatsRoutes);
 app.use('/api/migrations', migrationsRoutes);
 app.use('/api/check-in-out', checkInOutRoutes);
 app.use('/api/v1/attendance', attendanceRoutes);
+app.use('/api/attendance', attendanceRoutes); // Also mount at /api/attendance for compatibility
 app.use('/api/attendance-settings', attendanceSettingsRoutes);
 app.use('/api/opal-mini-apps', authenticateToken, setTenantContext, opalMiniAppsRoutes);
 app.use('/api/payroll', authenticateToken, payrollRoutes);
@@ -168,6 +170,7 @@ app.use('/api/super', superRoutes);
 app.use('/api/orgs', organizationsRoutes);
 app.use('/api/policies', authenticateToken, setTenantContext, policiesRoutes);
 app.use('/api/policy-platform', policyPlatformRoutes);
+app.use('/api/policy-management', authenticateToken, setTenantContext, policyManagementRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/promotion', authenticateToken, setTenantContext, promotionsRoutes);
 // Payroll SSO integration (separate from payroll routes)

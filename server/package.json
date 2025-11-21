@@ -12,8 +12,11 @@
     "test:routes": "node server/tests/routes.test.js",
     "seed:policies": "node server/scripts/seed-policy-catalog.js",
     "seed:super": "node server/scripts/seed-super-user.js",
+    "seed:default-policies": "node scripts/seed-policies.js",
+    "seed:demo-data": "node scripts/seed-demo-data.js",
     "org:reset": "node server/scripts/reset-org.js",
-    "fix:role": "node server/scripts/fix-user-role.js"
+    "fix:role": "node server/scripts/fix-user-role.js",
+    "list:emails": "node scripts/list-emails.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
