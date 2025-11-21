@@ -302,6 +302,28 @@ class ApiClient {
     return this.request('/api/stats/pending-counts');
   }
 
+  async getAuditLogs(params?: {
+    limit?: number;
+    action?: string;
+    entity_type?: string;
+    entity_id?: string;
+    actor_id?: string;
+    from?: string;
+    to?: string;
+  }) {
+    const query = new URLSearchParams();
+    const safeLimit = params?.limit ? Math.min(Math.max(params.limit, 1), 500) : 100;
+    query.append('limit', String(safeLimit));
+    if (params?.action) query.append('action', params.action);
+    if (params?.entity_type) query.append('entity_type', params.entity_type);
+    if (params?.entity_id) query.append('entity_id', params.entity_id);
+    if (params?.actor_id) query.append('actor_id', params.actor_id);
+    if (params?.from) query.append('from', params.from);
+    if (params?.to) query.append('to', params.to);
+    const qs = query.toString();
+    return this.request(`/api/audit-logs${qs ? `?${qs}` : ''}`);
+  }
+
   // Notifications methods
   async getNotifications() {
     return this.request('/api/notifications');

@@ -50,6 +50,7 @@ type NavItem = {
   showBadge?: boolean;
   sso?: boolean;
   feature?: "timesheets" | "clock";
+  roles?: string[];
 };
 
 type NavGroup = {
@@ -86,6 +87,7 @@ const hrGroups: NavGroup[] = [
       { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
       { title: "Policy Management", url: "/policies/management", icon: FileText },
       { title: "New Project", url: "/projects/new", icon: Building2 },
+      { title: "Audit Logs", url: "/audit-logs", icon: History, roles: ["ceo", "hr"] },
     ],
   },
   {
@@ -374,6 +376,9 @@ export function AppSidebar() {
   }, [navigationGroups, activeGroup]);
 
   const shouldRenderItem = (item: NavItem) => {
+    if (item.roles && (!userRole || !item.roles.includes(userRole))) {
+      return false;
+    }
     if (item.feature === 'timesheets' && !isTimesheetMode) return false;
     if (item.feature === 'clock' && !isClockMode) return false;
     if (item.sso && !payrollIntegrationEnabled) return false;
