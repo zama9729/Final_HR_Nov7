@@ -9,6 +9,8 @@ import { Loader2, Clock, MapPin, LogIn, LogOut } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { useOrgSetup } from "@/contexts/OrgSetupContext";
+import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
+import { useClockResultToast } from "@/components/attendance/ClockResultToast";
 
 interface ClockSession {
   id: string;
@@ -35,11 +37,14 @@ interface ClockStatusResponse {
 
 const ClockInOut = () => {
   const { toast } = useToast();
+  const { showSuccess, showError } = useClockResultToast();
   const { attendanceSettings } = useOrgSetup();
   const [status, setStatus] = useState<ClockStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [punching, setPunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'IN' | 'OUT' | null>(null);
 
   const captureMethod = useMemo(
     () => attendanceSettings?.capture_method || status?.capture_method || "timesheets",
@@ -65,23 +70,72 @@ const ClockInOut = () => {
     }
   };
 
-  const requestLocation = () =>
-    new Promise<GeolocationPosition | undefined>((resolve) => {
-      if (!("geolocation" in navigator)) {
-        resolve(undefined);
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve(pos),
-        () => resolve(undefined),
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }
-      );
-    });
+  const handlePunchClick = () => {
+    if (!status) return;
+    const action = status.is_clocked_in ? "OUT" : "IN";
+    
+    // Always use new clock API with geolocation and consent
+    setPendingAction(action);
+    setShowConsentModal(true);
+  };
 
-  const handlePunch = async () => {
+  const handleConsentConfirm = async (data: {
+    lat?: number;
+    lon?: number;
+    address_text: string;
+    capture_method: 'geo' | 'manual' | 'kiosk' | 'unknown';
+    consent: boolean;
+  }) => {
+    if (!pendingAction || !status) return;
+
+    setShowConsentModal(false);
+    setPunching(true);
+
+    try {
+      const result = await api.clock({
+        action: pendingAction,
+        ts: new Date().toISOString(),
+        lat: data.lat,
+        lon: data.lon,
+        address_text: data.address_text,
+        capture_method: data.capture_method,
+        consent: data.consent,
+      });
+
+      showSuccess({
+        action: pendingAction,
+        workType: result.work_type,
+        branchName: undefined, // Branch name can be fetched separately if needed
+        address: data.address_text,
+        timestamp: new Date().toISOString(),
+      });
+
+      await fetchStatus();
+    } catch (err: any) {
+      showError(err?.message || "Unable to record attendance");
+    } finally {
+      setPunching(false);
+      setPendingAction(null);
+    }
+  };
+
+  const handlePunchLegacy = async () => {
     if (!status) return;
     setPunching(true);
     try {
+      const requestLocation = () =>
+        new Promise<GeolocationPosition | undefined>((resolve) => {
+          if (!("geolocation" in navigator)) {
+            resolve(undefined);
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(
+            (pos) => resolve(pos),
+            () => resolve(undefined),
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }
+          );
+        });
+
       let geoPayload;
       if (status.enable_geofence) {
         const geo = await requestLocation();
@@ -222,8 +276,8 @@ const ClockInOut = () => {
                 </div>
                 <Button
                   size="lg"
-                  onClick={handlePunch}
-                  disabled={punching}
+                  onClick={handlePunchClick}
+                  disabled={punching || showConsentModal}
                   className={`w-full md:w-auto ${status?.is_clocked_in ? "bg-destructive hover:bg-destructive/90" : ""}`}
                 >
                   {punching ? (
@@ -293,6 +347,18 @@ const ClockInOut = () => {
               </CardContent>
             </Card>
           </>
+        )}
+
+        {showConsentModal && pendingAction && (
+          <AddressConsentModal
+            open={showConsentModal}
+            onClose={() => {
+              setShowConsentModal(false);
+              setPendingAction(null);
+            }}
+            onConfirm={handleConsentConfirm}
+            action={pendingAction}
+          />
         )}
       </div>
     </AppLayout>

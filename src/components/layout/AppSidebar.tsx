@@ -84,6 +84,7 @@ const hrGroups: NavGroup[] = [
       { title: "Skills", url: "/profile/skills", icon: Award },
       { title: "Workflows", url: "/workflows", icon: Workflow },
       { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
+      { title: "Policy Management", url: "/policies/management", icon: FileText },
       { title: "New Project", url: "/projects/new", icon: Building2 },
     ],
   },
@@ -92,6 +93,7 @@ const hrGroups: NavGroup[] = [
     label: "Attendance & Leave",
     items: [
       { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
+      { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
       { title: "Timesheets", url: "/timesheets", icon: Clock, feature: "timesheets" },
       { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
       { title: "Shift Management", url: "/shifts", icon: CalendarClock, feature: "timesheets" },

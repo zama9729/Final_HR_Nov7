@@ -319,6 +319,69 @@ class ApiClient {
     });
   }
 
+  // New clock endpoint with geolocation and consent
+  async clock(payload: {
+    action: 'IN' | 'OUT';
+    ts: string;
+    lat?: number;
+    lon?: number;
+    address_text?: string;
+    capture_method?: 'geo' | 'manual' | 'kiosk' | 'unknown';
+    consent: boolean;
+    device_id?: string;
+  }) {
+    return this.request('/api/attendance/clock', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Analytics endpoints
+  async getAttendanceOverview(params: { from: string; to: string; branch_id?: string }) {
+    const query = new URLSearchParams();
+    query.append('from', params.from);
+    query.append('to', params.to);
+    if (params.branch_id) query.append('branch_id', params.branch_id);
+    return this.request(`/api/analytics/attendance/overview?${query.toString()}`);
+  }
+
+  async getAttendanceHistogram(params: { from: string; to: string; branch_id?: string; team_id?: string; department_id?: string }) {
+    const query = new URLSearchParams();
+    query.append('from', params.from);
+    query.append('to', params.to);
+    if (params.branch_id) query.append('branch_id', params.branch_id);
+    if (params.team_id) query.append('team_id', params.team_id);
+    if (params.department_id) query.append('department_id', params.department_id);
+    return this.request(`/api/analytics/attendance/histogram?${query.toString()}`);
+  }
+
+  async getAttendanceHeatmap(params: { from: string; to: string; branch_id?: string; group_by?: string }) {
+    const query = new URLSearchParams();
+    query.append('from', params.from);
+    query.append('to', params.to);
+    if (params.branch_id) query.append('branch_id', params.branch_id);
+    if (params.group_by) query.append('group_by', params.group_by);
+    return this.request(`/api/analytics/attendance/heatmap?${query.toString()}`);
+  }
+
+  async getAttendanceMap(params: { from: string; to: string; branch_id?: string; team_id?: string }) {
+    const query = new URLSearchParams();
+    query.append('from', params.from);
+    query.append('to', params.to);
+    if (params.branch_id) query.append('branch_id', params.branch_id);
+    if (params.team_id) query.append('team_id', params.team_id);
+    return this.request(`/api/analytics/attendance/map?${query.toString()}`);
+  }
+
+  async getAttendanceDistribution(params: { from: string; to: string; branch_id?: string; team_id?: string }) {
+    const query = new URLSearchParams();
+    query.append('from', params.from);
+    query.append('to', params.to);
+    if (params.branch_id) query.append('branch_id', params.branch_id);
+    if (params.team_id) query.append('team_id', params.team_id);
+    return this.request(`/api/analytics/attendance/distribution?${query.toString()}`);
+  }
+
   // Policy platform
   async getPolicyTemplates(params?: { search?: string; country?: string }) {
     const query = new URLSearchParams();
