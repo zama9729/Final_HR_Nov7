@@ -241,52 +241,68 @@ export default function AttendanceAnalytics() {
                   <div className="space-y-4">
                     <div className="h-[300px] overflow-x-auto">
                       <div className="flex items-end gap-2 h-full min-w-full">
-                        {histogram.map((item, idx) => {
-                          const maxValue = Math.max(
-                            ...histogram.map((h) => Math.max(h.present, h.absent, h.late))
+                        {(() => {
+                          const totals = histogram.map(
+                            (h) => h.present + h.absent + h.late
                           );
-                          const presentHeight = (item.present / maxValue) * 100;
-                          const absentHeight = (item.absent / maxValue) * 100;
-                          const lateHeight = (item.late / maxValue) * 100;
+                          const maxValue = Math.max(...totals, 1); // prevent divide-by-zero
 
-                          return (
-                            <div
-                              key={idx}
-                              className="flex-1 flex flex-col items-center gap-1 group relative"
-                            >
-                              <div className="flex flex-col-reverse gap-0.5 w-full h-full">
-                                <div
-                                  className="bg-primary rounded-t"
-                                  style={{ height: `${presentHeight}%` }}
-                                  title={`Present: ${item.present}`}
-                                />
-                                <div
-                                  className="bg-destructive rounded-t"
-                                  style={{ height: `${absentHeight}%` }}
-                                  title={`Absent: ${item.absent}`}
-                                />
-                                <div
-                                  className="bg-yellow-500 rounded-t"
-                                  style={{ height: `${lateHeight}%` }}
-                                  title={`Late: ${item.late}`}
-                                />
-                              </div>
-                              <span className="text-xs text-muted-foreground transform -rotate-45 origin-top-left whitespace-nowrap">
-                                {format(new Date(item.date), "MMM dd")}
-                              </span>
-                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block bg-popover border rounded p-2 shadow-lg z-10">
-                                <div className="text-xs space-y-1">
-                                  <div>Date: {format(new Date(item.date), "MMM dd, yyyy")}</div>
-                                  <div>Present: {item.present}</div>
-                                  <div>Absent: {item.absent}</div>
-                                  <div>Late: {item.late}</div>
-                                  <div>WFO: {item.wfo}</div>
-                                  <div>WFH: {item.wfh}</div>
+                          return histogram.map((item, idx) => {
+                            const presentHeight = (item.present / maxValue) * 100;
+                            const absentHeight = (item.absent / maxValue) * 100;
+                            const lateHeight = (item.late / maxValue) * 100;
+
+                            const totalCount = item.present + item.absent + item.late;
+                            const attendanceSummary =
+                              totalCount === 0
+                                ? "No records"
+                                : `${totalCount} total events`;
+
+                            return (
+                              <div
+                                key={idx}
+                                className="flex-1 flex flex-col items-center gap-1 group relative"
+                              >
+                                <div className="flex flex-col-reverse gap-0.5 w-full h-full">
+                                  <div
+                                    className="bg-primary rounded-t transition-all"
+                                    style={{ height: `${presentHeight}%` }}
+                                    title={`Present: ${item.present}`}
+                                  />
+                                  <div
+                                    className="bg-destructive rounded-t transition-all"
+                                    style={{ height: `${absentHeight}%` }}
+                                    title={`Absent: ${item.absent}`}
+                                  />
+                                  <div
+                                    className="bg-yellow-500 rounded-t transition-all"
+                                    style={{ height: `${lateHeight}%` }}
+                                    title={`Late: ${item.late}`}
+                                  />
+                                </div>
+                                <span className="text-xs text-muted-foreground transform -rotate-45 origin-top-left whitespace-nowrap">
+                                  {format(new Date(item.date), "MMM dd")}
+                                </span>
+                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block bg-popover border rounded p-2 shadow-lg z-10 min-w-[160px]">
+                                  <div className="text-xs space-y-1">
+                                    <div className="font-semibold">
+                                      {format(new Date(item.date), "MMM dd, yyyy")}
+                                    </div>
+                                    <div className="text-muted-foreground">
+                                      {attendanceSummary}
+                                    </div>
+                                    <div>Present: {item.present}</div>
+                                    <div>Absent: {item.absent}</div>
+                                    <div>Late: {item.late}</div>
+                                    <div className="pt-1 border-t text-muted-foreground">
+                                      WFO: {item.wfo} · WFH: {item.wfh}
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          });
+                        })()}
                       </div>
                     </div>
                     <div className="flex items-center gap-4 text-sm">

@@ -857,14 +857,46 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
     let workType = 'WFH'; // Default to WFH
 
     if (resolvedLat && resolvedLon) {
-      const branchResult = await query(
-        `SELECT resolve_branch_from_coords($1, $2, $3) as branch_id`,
-        [resolvedLat, resolvedLon, orgId]
-      );
-      resolvedBranchId = branchResult.rows[0]?.branch_id || null;
+      try {
+        // Explicitly cast parameters to ensure PostgreSQL recognizes the function signature
+        const branchResult = await query(
+          `SELECT resolve_branch_from_coords($1::NUMERIC, $2::NUMERIC, $3::UUID) as branch_id`,
+          [resolvedLat, resolvedLon, orgId]
+        );
+        resolvedBranchId = branchResult.rows[0]?.branch_id || null;
 
-      if (resolvedBranchId) {
-        workType = 'WFO';
+        if (resolvedBranchId) {
+          workType = 'WFO';
+          console.log(`[Clock] WFO detected: branch_id=${resolvedBranchId}, coords=(${resolvedLat}, ${resolvedLon}), org_id=${orgId}`);
+        } else {
+          console.log(`[Clock] WFH: No branch found for coords=(${resolvedLat}, ${resolvedLon}), org_id=${orgId}`);
+        }
+      } catch (error) {
+        console.error('[Clock] Error resolving branch from coords:', error.message);
+        // Fallback: check if coordinates are very close to any branch geofence
+        try {
+          const fallbackResult = await query(
+            `SELECT bg.branch_id
+             FROM branch_geofences bg
+             JOIN org_branches ob ON ob.id = bg.branch_id
+             WHERE ob.org_id = $3::UUID
+               AND bg.is_active = true
+               AND bg.type = 'circle'
+               AND point_in_circle($1::NUMERIC, $2::NUMERIC, 
+                   (bg.coords->'center'->>'lat')::NUMERIC,
+                   (bg.coords->'center'->>'lon')::NUMERIC,
+                   bg.radius_meters)
+             LIMIT 1`,
+            [resolvedLat, resolvedLon, orgId]
+          );
+          if (fallbackResult.rows.length > 0) {
+            resolvedBranchId = fallbackResult.rows[0].branch_id;
+            workType = 'WFO';
+            console.log(`[Clock] WFO detected (fallback): branch_id=${resolvedBranchId}`);
+          }
+        } catch (fallbackError) {
+          console.error('[Clock] Fallback geofence check also failed:', fallbackError.message);
+        }
       }
     }
 
