@@ -5,8 +5,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 import { z } from "zod";
 
 const passwordSchema = z.object({
@@ -20,7 +19,6 @@ const passwordSchema = z.object({
 export default function ChangePassword() {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -35,20 +33,7 @@ export default function ChangePassword() {
       const validated = passwordSchema.parse(formData);
       setLoading(true);
 
-      // Update password
-      const { error } = await supabase.auth.updateUser({
-        password: validated.newPassword,
-      });
-
-      if (error) throw error;
-
-      // Update employee must_change_password flag
-      if (user) {
-        await supabase
-          .from('employees')
-          .update({ must_change_password: false })
-          .eq('user_id', user.id);
-      }
+      await api.changePassword(validated.newPassword);
 
       toast({
         title: "Password updated",

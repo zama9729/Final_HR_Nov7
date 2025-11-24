@@ -35,8 +35,10 @@ export async function scheduleHolidayNotifications() {
           const team = await query('SELECT id FROM employees WHERE reporting_manager_id = $1', [m.employee_id]);
           const summary = [];
           for (const r of team.rows) {
-            // get holiday rows
-            const empRes = await query('SELECT state, work_mode, holiday_override, tenant_id FROM employees WHERE id = $1', [r.id]);
+            const empRes = await query(
+              'SELECT id, tenant_id, state, work_location, holiday_override FROM employees WHERE id = $1',
+              [r.id]
+            );
             const emp = empRes.rows[0];
             const { selectEmployeeHolidays } = await import('./holidays.js');
             const holidays = await selectEmployeeHolidays({ orgId: emp.tenant_id, employee: emp, year: Number(month.slice(0,4)), month: Number(month.slice(5,7)) });

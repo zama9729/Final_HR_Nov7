@@ -248,6 +248,44 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Update workflow
+router.put('/:id', authenticateToken, async (req, res) => {
+  try {
+    await ensureWorkflowsTable();
+    const { id } = req.params;
+    const { name, description, workflow_json, status } = req.body;
+    const userId = req.user.id;
+    const tenantId = await getTenantId(userId);
+
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Validate workflow
+    const validation = validateWorkflow(workflow_json);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
+
+    const result = await query(
+      `UPDATE workflows 
+       SET name = $1, description = $2, workflow_json = $3::jsonb, status = $4, updated_at = now()
+       WHERE id = $5 AND tenant_id = $6
+       RETURNING *`,
+      [name, description, JSON.stringify(workflow_json), status || 'draft', id, tenantId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Workflow not found' });
+    }
+
+    res.json({ workflow: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating workflow:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Delete workflow
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
@@ -315,6 +353,87 @@ router.post('/:id/start', authenticateToken, async (req, res) => {
     res.json({ success: true, instance_id: instanceId });
   } catch (error) {
     console.error('Error starting workflow:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Execute/Preview workflow (for testing without saving)
+router.post('/execute', authenticateToken, async (req, res) => {
+  try {
+    const { workflow } = req.body;
+    
+    if (!workflow || !workflow.nodes || !workflow.connections) {
+      return res.status(400).json({ error: 'Workflow must have nodes and connections' });
+    }
+
+    // Validate workflow structure
+    const validation = validateWorkflow(workflow);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
+
+    // Simulate workflow execution to generate preview
+    const steps = [];
+    const approvals = [];
+    
+    // Build connection map
+    const nextBy = {};
+    (workflow.connections || []).forEach(c => {
+      if (!nextBy[c.from]) nextBy[c.from] = [];
+      nextBy[c.from].push(c.to);
+    });
+    
+    // Build node map
+    const nodesById = Object.fromEntries(workflow.nodes.map(n => [n.id, n]));
+    
+    // Find trigger nodes
+    const triggerNodes = workflow.nodes.filter(n => n.type?.startsWith('trigger_'));
+    
+    // Simulate execution starting from triggers
+    const visited = new Set();
+    const queue = [...triggerNodes.map(n => n.id)];
+    
+    while (queue.length > 0) {
+      const nodeId = queue.shift();
+      if (visited.has(nodeId)) continue;
+      visited.add(nodeId);
+      
+      const node = nodesById[nodeId];
+      if (!node) continue;
+      
+      // Record step
+      steps.push({
+        nodeId: node.id,
+        type: node.type,
+        label: node.label || node.id,
+        props: node.props || {}
+      });
+      
+      // Check if it's an approval node
+      if (node.type?.startsWith('approval_')) {
+        const role = node.props?.approverRole || node.type.replace('approval_', '');
+        approvals.push({
+          nodeId: node.id,
+          label: node.label || node.id,
+          role: role,
+          type: node.type
+        });
+      }
+      
+      // Add next nodes to queue
+      const nextNodes = nextBy[nodeId] || [];
+      queue.push(...nextNodes);
+    }
+    
+    res.json({
+      success: true,
+      steps,
+      approvals,
+      totalSteps: steps.length,
+      totalApprovals: approvals.length
+    });
+  } catch (error) {
+    console.error('Error executing workflow preview:', error);
     res.status(500).json({ error: error.message });
   }
 });

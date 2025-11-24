@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { OrgSetupProvider } from "./contexts/OrgSetupContext";
 import { ProtectedRoute, PublicRoute } from "./components/ProtectedRoute";
 
 // Pages
@@ -19,14 +20,17 @@ import Appraisals from "./pages/Appraisals";
 import MyAppraisal from "./pages/MyAppraisal";
 import ShiftManagement from "./pages/ShiftManagement";
 import AIAssistantPage from "./pages/AIAssistantPage";
+import RAGDocumentUpload from "./pages/RAGDocumentUpload";
 import EmployeeImport from "./pages/EmployeeImport";
 import AttendanceUpload from "./pages/AttendanceUpload";
 import AttendanceUploadHistory from "./pages/AttendanceUploadHistory";
+import ClockInOut from "./pages/ClockInOut";
 import Workflows from "./pages/Workflows";
 import WorkflowEditor from "./pages/WorkflowEditor";
 import Timesheets from "./pages/Timesheets";
 import TimesheetApprovals from "./pages/TimesheetApprovals";
 import Analytics from "./pages/Analytics";
+import AttendanceAnalytics from "./pages/AttendanceAnalytics";
 import NotFound from "./pages/NotFound";
 import AddEmployee from "./pages/AddEmployee";
 import LeavePolicies from "./pages/LeavePolicies";
@@ -58,10 +62,13 @@ import OffboardingDetail from "./pages/OffboardingDetail";
 import OffboardingPolicies from "./pages/OffboardingPolicies";
 import OnboardingEnhanced from "./pages/OnboardingEnhanced";
 import PoliciesManagement from "./pages/PoliciesManagement";
+import PolicyEditor from "./pages/PolicyEditor";
 import PromotionCycles from "./pages/PromotionCycles";
 import TaxDeclaration from "./pages/TaxDeclaration";
 import TaxDeclarationReview from "./pages/TaxDeclarationReview";
 import Form16 from "./pages/Form16";
+import OrganizationSetup from "./pages/OrganizationSetup";
+import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 
 const queryClient = new QueryClient();
 
@@ -72,6 +79,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <OrgSetupProvider>
           <Routes>
             {/* Public routes */}
             <Route path="/auth/login" element={<PublicRoute><Login /></PublicRoute>} />
@@ -81,6 +89,8 @@ const App = () => (
             <Route path="/auth/first-time-login" element={<FirstTimeLogin />} />
             <Route path="/auth/first-login" element={<FirstLoginWithToken />} />
             <Route path="/setup-password" element={<SetupPassword />} />
+            <Route path="/setup" element={<ProtectedRoute allowedRoles={['hr','ceo','admin']}><OrganizationSetup /></ProtectedRoute>} />
+            <Route path="/super/dashboard" element={<ProtectedRoute allowedRoles={['super_user']}><SuperAdminDashboard /></ProtectedRoute>} />
             
             {/* Protected routes */}
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -119,8 +129,11 @@ const App = () => (
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
             <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><ShiftManagement /></ProtectedRoute>} />
             <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
+            <Route path="/rag/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><RAGDocumentUpload /></ProtectedRoute>} />
+            <Route path="/attendance/clock" element={<ProtectedRoute><ClockInOut /></ProtectedRoute>} />
             <Route path="/attendance/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><AttendanceUpload /></ProtectedRoute>} />
             <Route path="/attendance/history" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><AttendanceUploadHistory /></ProtectedRoute>} />
+            <Route path="/analytics/attendance" element={<ProtectedRoute allowedRoles={['ceo', 'hr', 'director', 'admin']}><AttendanceAnalytics /></ProtectedRoute>} />
             <Route path="/payroll" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin']}><Payroll /></ProtectedRoute>} />
             <Route path="/tax/declaration" element={<ProtectedRoute><TaxDeclaration /></ProtectedRoute>} />
             <Route path="/tax/declarations/review" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><TaxDeclarationReview /></ProtectedRoute>} />
@@ -137,6 +150,7 @@ const App = () => (
             {/* Multi-tenant routes */}
             <Route path="/onboarding/enhanced" element={<ProtectedRoute><OnboardingEnhanced /></ProtectedRoute>} />
             <Route path="/policies/management" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><PoliciesManagement /></ProtectedRoute>} />
+            <Route path="/policies/editor/:id" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><PolicyEditor /></ProtectedRoute>} />
             <Route path="/promotion/cycles" element={<ProtectedRoute><PromotionCycles /></ProtectedRoute>} />
             
             {/* Redirects */}
@@ -145,6 +159,7 @@ const App = () => (
             {/* 404 */}
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </OrgSetupProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

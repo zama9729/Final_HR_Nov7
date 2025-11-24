@@ -3,6 +3,7 @@ import multer from 'multer';
 import { parse } from 'csv-parse';
 import bcrypt from 'bcryptjs';
 import { query } from '../db/pool.js';
+import { rebuildSegmentsForEmployee } from '../services/assignment-segmentation.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -115,6 +116,54 @@ router.post('/v1/orgs/:orgId/employees/import', authenticateToken, requireRole('
   
   console.log(`Processing ${rows.length} rows for import`);
 
+  const branchLookup = await query(
+    'SELECT id, name, code FROM org_branches WHERE org_id = $1',
+    [tenantId]
+  );
+  const departmentLookup = await query(
+    'SELECT id, name, code, branch_id FROM departments WHERE org_id = $1',
+    [tenantId]
+  );
+  const teamLookup = await query(
+    'SELECT id, name, branch_id, department_id FROM teams WHERE org_id = $1',
+    [tenantId]
+  );
+
+  const normalizeValue = (value) => (value ? String(value).trim().toLowerCase() : '');
+
+  const findBranch = (rec) => {
+    const branchCode = normalizeValue(rec.branchCode);
+    const branchName = normalizeValue(rec.branchName || rec.workLocation);
+    if (!branchCode && !branchName) return null;
+    return branchLookup.rows.find((branch) => {
+      const codeMatch = branchCode && normalizeValue(branch.code) === branchCode;
+      const nameMatch = branchName && normalizeValue(branch.name) === branchName;
+      return codeMatch || nameMatch;
+    }) || null;
+  };
+
+  const findDepartment = (rec, branchId) => {
+    const departmentName = normalizeValue(rec.department);
+    const departmentCode = normalizeValue(rec.departmentCode);
+    if (!departmentName && !departmentCode) return null;
+    return departmentLookup.rows.find((dept) => {
+      if (branchId && dept.branch_id && dept.branch_id !== branchId) return false;
+      const codeMatch = departmentCode && normalizeValue(dept.code) === departmentCode;
+      const nameMatch = departmentName && normalizeValue(dept.name) === departmentName;
+      return codeMatch || nameMatch;
+    }) || null;
+  };
+
+  const findTeam = (rec, branchId, departmentId) => {
+    const teamName = normalizeValue(rec.teamName);
+    if (!teamName) return null;
+    return teamLookup.rows.find((team) => {
+      if (branchId && team.branch_id && team.branch_id !== branchId) return false;
+      if (departmentId && team.department_id && team.department_id !== departmentId) return false;
+      return normalizeValue(team.name) === teamName;
+    }) || null;
+  };
+
   // Auto-map if not provided
   if (!mapping || Object.keys(mapping).length === 0) {
     const headers = Object.keys(rows[0] || {});
@@ -131,7 +180,11 @@ router.post('/v1/orgs/:orgId/employees/import', authenticateToken, requireRole('
       manager_email: nm.manageremail || nm.manager_email,
       join_date: nm.joindate || nm.join_date,
       work_location: nm.worklocation || nm.work_location,
-      phone: nm.phone
+      phone: nm.phone,
+      branch_name: nm.branch || nm.branchname || nm.site,
+      branch_code: nm.branchcode || nm.branch_code,
+      department_code: nm.departmentcode || nm.department_code,
+      team_name: nm.team || nm.teamname
     };
     console.log('Auto-mapped columns:', mapping);
   }
@@ -165,7 +218,11 @@ router.post('/v1/orgs/:orgId/employees/import', authenticateToken, requireRole('
             role: row[mapping.role] || 'employee',
             workLocation: row[mapping.work_location] || null,
             joinDate: row[mapping.join_date] || null,
-            managerEmail: row[mapping.manager_email] || null
+          managerEmail: row[mapping.manager_email] || null,
+          branchName: row[mapping.branch_name] || null,
+          branchCode: row[mapping.branch_code] || null,
+          departmentCode: row[mapping.department_code] || null,
+          teamName: row[mapping.team_name] || null
           };
           
           console.log(`Processing row ${rowNum}:`, { firstName: rec.firstName, lastName: rec.lastName, email: rec.email, employeeId: rec.employeeId });
@@ -295,12 +352,37 @@ router.post('/v1/orgs/:orgId/employees/import', authenticateToken, requireRole('
           }
         }
         
-          await query(
+          const employeeInsert = await query(
             `INSERT INTO employees (user_id, employee_id, department, position, work_location, join_date, reporting_manager_id, tenant_id, must_change_password, onboarding_status)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,'not_started')`,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,'not_started')
+             RETURNING id`,
             [userId, rec.employeeId, rec.department, null, rec.workLocation, normalizedJoinDate, reportingManagerId, tenantId]
           );
+          const employeeDbId = employeeInsert.rows[0]?.id;
           await query('INSERT INTO user_roles (user_id, role, tenant_id) VALUES ($1,$2,$3)', [userId, rec.role, tenantId]);
+          const branchMatch = findBranch(rec);
+          const departmentMatch = findDepartment(rec, branchMatch?.id || null);
+          const teamMatch = findTeam(rec, branchMatch?.id || null, departmentMatch?.id || null);
+          if (employeeDbId && (branchMatch || departmentMatch || teamMatch)) {
+            await query(
+              `INSERT INTO employee_assignments (
+                org_id, user_id, employee_id, branch_id, department_id, team_id,
+                role, fte, start_date, is_home, metadata
+              )
+              VALUES ($1,$2,$3,$4,$5,$6,$7,1.0,COALESCE($8::date, now()::date),true,'{}'::jsonb)`,
+              [
+                tenantId,
+                userId,
+                employeeDbId,
+                branchMatch?.id || null,
+                departmentMatch?.id || null,
+                teamMatch?.id || null,
+                rec.role || 'employee',
+                normalizedJoinDate,
+              ]
+            );
+            await rebuildSegmentsForEmployee(tenantId, employeeDbId);
+          }
           console.log(`✅ Row ${rowNum}: Employee ${rec.employeeId} assigned to organization ${tenantId}`);
           report.imported_count++;
           console.log(`✅ Row ${rowNum}: Successfully imported ${rec.email} (employee_id: ${rec.employeeId}, role: ${rec.role})`);

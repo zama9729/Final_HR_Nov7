@@ -432,38 +432,118 @@ export default function PoliciesManagement() {
                           <Label htmlFor="value">
                             Value ({selectedCatalogItem?.value_type}) *
                           </Label>
-                          {selectedCatalogItem?.value_type === 'JSON' ? (
-                            <Textarea
-                              id="value"
-                              value={formData.value}
-                              onChange={(e) => setFormData({ ...formData, value: e.target.value })}
-                              placeholder='{"key": "value"}'
-                              rows={6}
-                              required
-                            />
-                          ) : selectedCatalogItem?.value_type === 'BOOLEAN' ? (
-                            <Select
-                              value={formData.value}
-                              onValueChange={(value) => setFormData({ ...formData, value })}
-                              required
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select value" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="true">True</SelectItem>
-                                <SelectItem value="false">False</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <Input
-                              id="value"
-                              type={selectedCatalogItem?.value_type === 'NUMBER' ? 'number' : 'text'}
-                              value={formData.value}
-                              onChange={(e) => setFormData({ ...formData, value: e.target.value })}
-                              required
-                            />
-                          )}
+                          {(() => {
+                            const key = selectedCatalogItem?.key || '';
+                            const getExample = () => {
+                              if (key.includes('probation')) return '90';
+                              if (key.includes('leave') && key.includes('annual')) return '12';
+                              if (key.includes('leave') && key.includes('sick')) return '10';
+                              if (key.includes('leave') && key.includes('maternity')) return '26';
+                              if (key.includes('leave') && key.includes('paternity')) return '5';
+                              if (key.includes('overtime')) return '1.5';
+                              if (key.includes('wfh') && key.includes('days')) return '10';
+                              if (key.includes('start') || key.includes('end')) return '09:00';
+                              return '';
+                            };
+                            
+                            return selectedCatalogItem?.value_type === 'JSON' ? (
+                              <>
+                                <Textarea
+                                  id="value"
+                                  value={formData.value}
+                                  onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                                  placeholder='{"key": "value"}'
+                                  rows={6}
+                                  required
+                                />
+                                <div className="space-y-1">
+                                  <p className="text-xs text-muted-foreground font-medium">
+                                    Enter valid JSON. Examples:
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    • For leave policies: {`{"annual_leave_days": 12, "sick_leave_days": 10}`}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    • For working hours: {`{"start_time": "09:00", "end_time": "18:00"}`}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    • For arrays: {`["Monday", "Tuesday", "Wednesday"]`}
+                                  </p>
+                                </div>
+                              </>
+                            ) : selectedCatalogItem?.value_type === 'BOOLEAN' ? (
+                              <>
+                                <Select
+                                  value={formData.value}
+                                  onValueChange={(value) => setFormData({ ...formData, value })}
+                                  required
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select value" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="true">True (Enabled)</SelectItem>
+                                    <SelectItem value="false">False (Disabled)</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <p className="text-xs text-muted-foreground">
+                                  Select <strong>True</strong> to enable this policy, <strong>False</strong> to disable it
+                                </p>
+                              </>
+                            ) : selectedCatalogItem?.value_type === 'NUMBER' ? (
+                              <>
+                                <Input
+                                  id="value"
+                                  type="number"
+                                  value={formData.value}
+                                  onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                                  placeholder={getExample() || "Enter a number"}
+                                  required
+                                />
+                                <div className="space-y-1">
+                                  {key.includes('days') && (
+                                    <p className="text-xs text-muted-foreground">
+                                      💡 Enter number of days. Example: <strong>30</strong> for 30 days
+                                    </p>
+                                  )}
+                                  {key.includes('percent') && (
+                                    <p className="text-xs text-muted-foreground">
+                                      💡 Enter percentage. Example: <strong>50</strong> for 50%
+                                    </p>
+                                  )}
+                                  {key.includes('overtime') && (
+                                    <p className="text-xs text-muted-foreground">
+                                      💡 Enter multiplier. Example: <strong>1.5</strong> for 1.5x rate
+                                    </p>
+                                  )}
+                                  {key.includes('weeks') && (
+                                    <p className="text-xs text-muted-foreground">
+                                      💡 Enter number of weeks. Example: <strong>26</strong> for 26 weeks
+                                    </p>
+                                  )}
+                                  {!key.includes('days') && !key.includes('percent') && !key.includes('overtime') && !key.includes('weeks') && (
+                                    <p className="text-xs text-muted-foreground">
+                                      💡 Enter a numeric value. Example: <strong>{getExample() || '0'}</strong>
+                                    </p>
+                                  )}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <Input
+                                  id="value"
+                                  type="text"
+                                  value={formData.value}
+                                  onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                                  placeholder={getExample() || "Enter text value"}
+                                  required
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  💡 Enter a text value. Example: <strong>{getExample() || '"Monthly"'}</strong>
+                                </p>
+                              </>
+                            );
+                          })()}
                         </div>
                       </>
                     );

@@ -25,6 +25,63 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
+router.get("/my", authenticateToken, async (req, res) => {
+  try {
+    const employeeRes = await query(
+      'SELECT id FROM employees WHERE user_id = $1 LIMIT 1',
+      [req.user.id]
+    );
+    if (!employeeRes.rows.length) {
+      return res.json([]);
+    }
+    const employeeId = employeeRes.rows[0].id;
+    const { rows } = await query(
+      `SELECT pr.*,
+              ac.cycle_name,
+              ac.cycle_year,
+              reviewer_profiles.first_name AS reviewer_first_name,
+              reviewer_profiles.last_name AS reviewer_last_name
+       FROM performance_reviews pr
+       LEFT JOIN appraisal_cycles ac ON ac.id = pr.appraisal_cycle_id
+       LEFT JOIN employees reviewer ON reviewer.id = pr.reviewer_id
+       LEFT JOIN profiles reviewer_profiles ON reviewer_profiles.id = reviewer.user_id
+       WHERE pr.employee_id = $1
+       ORDER BY pr.created_at DESC`,
+      [employeeId]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Failed to fetch employee reviews', error);
+    res.status(500).json({ error: error?.message || "Failed to fetch" });
+  }
+});
+
+router.post('/:id/acknowledge', authenticateToken, async (req, res) => {
+  try {
+    const employeeRes = await query(
+      'SELECT id FROM employees WHERE user_id = $1 LIMIT 1',
+      [req.user.id]
+    );
+    if (!employeeRes.rows.length) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    const result = await query(
+      `UPDATE performance_reviews
+       SET status = 'acknowledged', updated_at = now()
+       WHERE id = $1 AND employee_id = $2
+       RETURNING id`,
+      [req.params.id, employeeRes.rows[0].id]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Review not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to acknowledge review', error);
+    res.status(500).json({ error: error?.message || "Failed to acknowledge" });
+  }
+});
+
 // Upsert review
 router.post("/", authenticateToken, async (req, res) => {
   try {

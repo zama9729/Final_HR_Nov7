@@ -1,451 +1,252 @@
-/**
- * Rehire API Routes
- * 
- * Handles rehire requests and approvals for offboarded employees
- */
-
 import express from 'express';
 import { query } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { hashString } from '../utils/masking.js';
 import { audit } from '../utils/auditLog.js';
 
 const router = express.Router();
-
-// Ensure tables exist
-let tablesEnsured = false;
-const ensureTables = async () => {
-  if (tablesEnsured) return;
-  try {
-    await query(`
-      DO $$ BEGIN
-        CREATE TYPE IF NOT EXISTS rehire_status AS ENUM ('pending', 'approved', 'denied');
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$;
-
-      CREATE TABLE IF NOT EXISTS rehire_requests (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        org_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
-        former_emp_id UUID,
-        offboarded_identity_id UUID,
-        new_employee_id UUID REFERENCES employees(id),
-        status rehire_status NOT NULL DEFAULT 'pending',
-        created_by UUID REFERENCES profiles(id),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-
-      CREATE TABLE IF NOT EXISTS rehire_approvals (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        rehire_id UUID REFERENCES rehire_requests(id) ON DELETE CASCADE NOT NULL,
-        role approver_role NOT NULL CHECK (role IN ('hr', 'manager')),
-        approver_id UUID REFERENCES profiles(id),
-        decision approval_decision NOT NULL DEFAULT 'pending',
-        decided_at TIMESTAMPTZ,
-        comment TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE(rehire_id, role)
-      );
-
-      CREATE TABLE IF NOT EXISTS offboarded_identities (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        org_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
-        former_emp_id UUID NOT NULL,
-        emp_code TEXT NOT NULL,
-        full_name TEXT NOT NULL,
-        email_hash TEXT NOT NULL,
-        last_working_day DATE NOT NULL,
-        designation TEXT,
-        grade TEXT,
-        reason TEXT,
-        letter_url TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE(org_id, former_emp_id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_rehire_org ON rehire_requests(org_id);
-      CREATE INDEX IF NOT EXISTS idx_rehire_status ON rehire_requests(status);
-      CREATE INDEX IF NOT EXISTS idx_rehire_approvals_rehire ON rehire_approvals(rehire_id);
-      CREATE INDEX IF NOT EXISTS idx_offboarded_org ON offboarded_identities(org_id);
-      CREATE INDEX IF NOT EXISTS idx_offboarded_email_hash ON offboarded_identities(email_hash);
-      CREATE INDEX IF NOT EXISTS idx_offboarded_emp_code ON offboarded_identities(emp_code);
-    `);
-    tablesEnsured = true;
-  } catch (err) {
-    if (!err.message.includes('already exists') && !err.message.includes('duplicate')) {
-      console.error('Error creating rehire tables:', err);
-    } else {
-      tablesEnsured = true;
-    }
-  }
-};
+const FEATURE_ENABLED = process.env.TERMINATION_REHIRE_V1 !== 'false';
 
 const getTenantId = async (userId) => {
   const result = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
-  return result.rows[0]?.tenant_id;
+  return result.rows[0]?.tenant_id || null;
 };
 
-const getUserRole = async (userId) => {
-  const result = await query('SELECT role FROM user_roles WHERE user_id = $1 LIMIT 1', [userId]);
-  return result.rows[0]?.role;
+const getUserRoles = async (userId) => {
+  const result = await query('SELECT role FROM user_roles WHERE user_id = $1', [userId]);
+  return result.rows.map((r) => r.role?.toLowerCase()).filter(Boolean);
 };
 
-// POST /api/rehire/search - Search offboarded identities (HR)
-router.post('/search', authenticateToken, async (req, res) => {
+const evaluateEligibility = async (exEmployeeId, tenantId) => {
+  if (!exEmployeeId) {
+    return { status: 'needs_review', reason: 'UNKNOWN_EMPLOYEE' };
+  }
+  const doNotRehire = await query(
+    `
+    SELECT id FROM do_not_rehire_flags
+    WHERE tenant_id = $1 AND (employee_id = $2 OR profile_id = $3) AND (expires_at IS NULL OR expires_at >= current_date)
+    LIMIT 1
+    `,
+    [tenantId, exEmployeeId, exEmployeeId]
+  );
+  if (doNotRehire.rows.length) {
+    return { status: 'ineligible', reason: 'DO_NOT_REHIRE_FLAG' };
+  }
+  const lastTermination = await query(
+    `
+    SELECT final_lwd, type FROM terminations
+    WHERE tenant_id = $1 AND employee_id = $2
+    ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    [tenantId, exEmployeeId]
+  );
+  if (!lastTermination.rows.length) {
+    return { status: 'needs_review', reason: 'NO_TERMINATION_RECORD' };
+  }
+  const record = lastTermination.rows[0];
+  const lwd = record.final_lwd ? new Date(record.final_lwd) : null;
+  const diffDays = lwd ? Math.floor((Date.now() - lwd.getTime()) / (1000 * 60 * 60 * 24)) : 999;
+  const coolOff = Number(process.env.REHIRE_COOLOFF_DAYS || 90);
+  if (diffDays < coolOff) {
+    return { status: 'needs_review', reason: 'COOL_OFF' };
+  }
+  if (record.type === 'cause') {
+    return { status: 'ineligible', reason: 'TERMINATED_FOR_CAUSE' };
+  }
+  return { status: 'eligible', reason: null };
+};
+
+router.use((req, res, next) => {
+  if (!FEATURE_ENABLED) {
+    return res.status(404).json({ error: 'termination_rehire_v1 feature flag disabled' });
+  }
+  next();
+});
+
+router.get('/', authenticateToken, async (req, res) => {
   try {
-    await ensureTables();
     const tenantId = await getTenantId(req.user.id);
-    if (!tenantId) return res.status(403).json({ error: 'No organization found' });
-
-    const role = await getUserRole(req.user.id);
-    if (!['hr', 'admin'].includes(role)) {
-      return res.status(403).json({ error: 'Insufficient permissions' });
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
     }
-
-    const { email, emp_code } = req.body;
-
-    let queryStr = 'SELECT * FROM offboarded_identities WHERE org_id = $1';
-    const params = [tenantId];
-    let paramIndex = 2;
-
-    if (email) {
-      const emailHash = await hashString(email.toLowerCase());
-      queryStr += ` AND email_hash = $${paramIndex++}`;
-      params.push(emailHash);
-    }
-
-    if (emp_code) {
-      queryStr += ` AND emp_code = $${paramIndex++}`;
-      params.push(emp_code);
-    }
-
-    queryStr += ` ORDER BY created_at DESC LIMIT 20`;
-
-    const result = await query(queryStr, params);
-    res.json(result.rows);
+    const { rows } = await query(
+      `
+      SELECT 
+        rr.*,
+        json_build_object(
+          'id', t.id,
+          'type', t.type,
+          'final_lwd', t.final_lwd
+        ) AS prior_termination
+      FROM rehire_requests rr
+      LEFT JOIN terminations t ON t.id = rr.prior_termination_id
+      WHERE rr.tenant_id = $1
+      ORDER BY rr.created_at DESC
+      LIMIT 200
+      `,
+      [tenantId]
+    );
+    res.json(rows);
   } catch (error) {
-    console.error('Error searching offboarded identities:', error);
-    res.status(500).json({ error: error.message || 'Failed to search' });
+    console.error('Error fetching rehire requests:', error);
+    res.status(500).json({ error: 'Failed to fetch rehire requests' });
   }
 });
 
-// POST /api/rehire/request - Create rehire request (HR)
-router.post('/request', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    await ensureTables();
     const tenantId = await getTenantId(req.user.id);
-    if (!tenantId) return res.status(403).json({ error: 'No organization found' });
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+    const { rows } = await query(
+      `
+      SELECT rr.*, json_build_object(
+        'id', t.id,
+        'type', t.type,
+        'final_lwd', t.final_lwd,
+        'status', t.status
+      ) AS prior_termination
+      FROM rehire_requests rr
+      LEFT JOIN terminations t ON t.id = rr.prior_termination_id
+      WHERE rr.id = $1 AND rr.tenant_id = $2
+      `,
+      [req.params.id, tenantId]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Rehire request not found' });
+    }
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error fetching rehire request:', error);
+    res.status(500).json({ error: 'Failed to fetch rehire request' });
+  }
+});
 
-    const role = await getUserRole(req.user.id);
-    if (!['hr', 'admin'].includes(role)) {
+router.post('/', authenticateToken, async (req, res) => {
+  try {
+    const tenantId = await getTenantId(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+    const roles = await getUserRoles(req.user.id);
+    if (!roles.some((role) => ['hr', 'admin', 'orgadmin'].includes(role))) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
-    const { offboarded_identity_id, manager_id, department, position, email, first_name, last_name } = req.body;
-
-    if (!offboarded_identity_id || !email || !first_name || !last_name) {
-      return res.status(400).json({ error: 'offboarded_identity_id, email, first_name, and last_name are required' });
+    const { ex_employee_id, requested_start_date, prior_termination_id, notes } = req.body;
+    if (!ex_employee_id) {
+      return res.status(400).json({ error: 'ex_employee_id is required' });
     }
 
-    // Get offboarded identity
-    const identityResult = await query(
-      'SELECT * FROM offboarded_identities WHERE id = $1 AND org_id = $2',
-      [offboarded_identity_id, tenantId]
+    const eligibility = await evaluateEligibility(ex_employee_id, tenantId);
+
+    const insertResult = await query(
+      `
+      INSERT INTO rehire_requests (
+        tenant_id,
+        ex_employee_id,
+        requested_by,
+        requested_start_date,
+        prior_termination_id,
+        eligibility_status,
+        eligibility_reason,
+        status,
+        rehire_policy_snapshot
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *
+      `,
+      [
+        tenantId,
+        ex_employee_id,
+        req.user.id,
+        requested_start_date || null,
+        prior_termination_id || null,
+        eligibility.status,
+        eligibility.reason,
+        eligibility.status === 'eligible' ? 'awaiting_checks' : 'draft',
+        JSON.stringify({
+          cool_off_days: process.env.REHIRE_COOLOFF_DAYS || 90,
+        }),
+      ]
     );
 
-    if (identityResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Offboarded identity not found' });
-    }
-
-    const identity = identityResult.rows[0];
-
-    // Create rehire request
-    const rehireResult = await query(`
-      INSERT INTO rehire_requests (
-        org_id, offboarded_identity_id, former_emp_id, created_by, status
-      )
-      VALUES ($1, $2, $3, $4, 'pending')
-      RETURNING *
-    `, [tenantId, offboarded_identity_id, identity.former_emp_id, req.user.id]);
-
-    const rehire = rehireResult.rows[0];
-
-    // Create approval records
-    // HR approval
-    await query(`
-      INSERT INTO rehire_approvals (rehire_id, role, approver_id)
-      VALUES ($1, 'hr', $2)
-      ON CONFLICT (rehire_id, role) DO NOTHING
-    `, [rehire.id, req.user.id]);
-
-    // Manager approval (if manager_id provided)
-    if (manager_id) {
-      const managerProfileResult = await query(
-        'SELECT user_id FROM employees WHERE id = $1',
-        [manager_id]
-      );
-      if (managerProfileResult.rows.length > 0) {
-        await query(`
-          INSERT INTO rehire_approvals (rehire_id, role, approver_id)
-          VALUES ($1, 'manager', $2)
-          ON CONFLICT (rehire_id, role) DO NOTHING
-        `, [rehire.id, managerProfileResult.rows[0].user_id]);
-      }
-    }
+    const rehireRequest = insertResult.rows[0];
 
     await audit({
       actorId: req.user.id,
       action: 'rehire_request_created',
       entityType: 'rehire_request',
-      entityId: rehire.id,
-      details: { offboarded_identity_id, former_emp_id: identity.former_emp_id },
+      entityId: rehireRequest.id,
+      details: { eligibility },
+      reason: notes || null,
     });
 
-    res.status(201).json(rehire);
+    res.status(201).json(rehireRequest);
   } catch (error) {
     console.error('Error creating rehire request:', error);
     res.status(500).json({ error: error.message || 'Failed to create rehire request' });
   }
 });
 
-// GET /api/rehire - List rehire requests (Role-gated)
-router.get('/', authenticateToken, async (req, res) => {
+router.post('/:id/decision', authenticateToken, async (req, res) => {
   try {
-    await ensureTables();
     const tenantId = await getTenantId(req.user.id);
-    const role = await getUserRole(req.user.id);
-
-    let queryStr = `
-      SELECT 
-        rr.*,
-        json_build_object(
-          'id', oi.id,
-          'emp_code', oi.emp_code,
-          'full_name', oi.full_name,
-          'designation', oi.designation,
-          'last_working_day', oi.last_working_day
-        ) as offboarded_identity,
-        json_agg(
-          json_build_object(
-            'id', ra.id,
-            'role', ra.role,
-            'decision', ra.decision,
-            'comment', ra.comment,
-            'decided_at', ra.decided_at
-          )
-        ) as approvals
-      FROM rehire_requests rr
-      JOIN offboarded_identities oi ON oi.id = rr.offboarded_identity_id
-      LEFT JOIN rehire_approvals ra ON ra.rehire_id = rr.id
-      WHERE rr.org_id = $1
-    `;
-    const params = [tenantId];
-
-    // Manager can only see requests where they are an approver
-    if (role === 'manager') {
-      const empResult = await query('SELECT id FROM employees WHERE user_id = $1', [req.user.id]);
-      if (empResult.rows.length > 0) {
-        queryStr += ` AND rr.id IN (
-          SELECT rehire_id FROM rehire_approvals WHERE approver_id = $2 AND role = 'manager'
-        )`;
-        params.push(req.user.id);
-      }
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
     }
-
-    queryStr += ` GROUP BY rr.id, oi.id ORDER BY rr.created_at DESC LIMIT 100`;
-
-    const result = await query(queryStr, params);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching rehire requests:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch requests' });
-  }
-});
-
-// GET /api/rehire/:id - Get rehire request details
-router.get('/:id', authenticateToken, async (req, res) => {
-  try {
-    await ensureTables();
-    const { id } = req.params;
-    const tenantId = await getTenantId(req.user.id);
-
-    const result = await query(`
-      SELECT 
-        rr.*,
-        json_build_object(
-          'id', oi.id,
-          'emp_code', oi.emp_code,
-          'full_name', oi.full_name,
-          'designation', oi.designation,
-          'last_working_day', oi.last_working_day,
-          'letter_url', oi.letter_url
-        ) as offboarded_identity,
-        json_agg(
-          json_build_object(
-            'id', ra.id,
-            'role', ra.role,
-            'decision', ra.decision,
-            'comment', ra.comment,
-            'decided_at', ra.decided_at,
-            'approver', json_build_object(
-              'first_name', p.first_name,
-              'last_name', p.last_name
-            )
-          )
-        ) as approvals
-      FROM rehire_requests rr
-      JOIN offboarded_identities oi ON oi.id = rr.offboarded_identity_id
-      LEFT JOIN rehire_approvals ra ON ra.rehire_id = rr.id
-      LEFT JOIN profiles p ON p.id = ra.approver_id
-      WHERE rr.id = $1 AND rr.org_id = $2
-      GROUP BY rr.id, oi.id
-    `, [id, tenantId]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Request not found' });
+    const { rows } = await query(
+      `
+      SELECT * FROM rehire_requests WHERE id = $1 AND tenant_id = $2
+      `,
+      [req.params.id, tenantId]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Rehire request not found' });
     }
-
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error fetching rehire request:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch request' });
-  }
-});
-
-// POST /api/rehire/:id/approve - Approve rehire (HR/Manager)
-router.post('/:id/approve', authenticateToken, async (req, res) => {
-  try {
-    await ensureTables();
-    const { id } = req.params;
-    const { comment } = req.body;
-
-    const role = await getUserRole(req.user.id);
-    
-    let approverRole;
-    if (role === 'hr') approverRole = 'hr';
-    else if (role === 'manager') approverRole = 'manager';
-    else {
+    const requestRecord = rows[0];
+    const action = (req.body?.action || 'approve').toLowerCase();
+    const note = req.body?.note || null;
+    const roles = await getUserRoles(req.user.id);
+    if (!roles.some((role) => ['hr', 'admin', 'orgadmin'].includes(role))) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
+    let nextStatus = requestRecord.status;
+    if (action === 'reject') {
+      nextStatus = 'rejected';
+    } else if (requestRecord.status === 'awaiting_checks') {
+      nextStatus = 'offer';
+    } else if (requestRecord.status === 'offer') {
+      nextStatus = 'onboarding';
+    } else if (requestRecord.status === 'onboarding') {
+      nextStatus = 'completed';
+    }
 
-    const approvalResult = await query(
-      'SELECT * FROM rehire_approvals WHERE rehire_id = $1 AND role = $2',
-      [id, approverRole]
+    await query(
+      `
+      UPDATE rehire_requests
+      SET status = $1,
+          updated_at = now(),
+          approvals = approvals || jsonb_build_array(jsonb_build_object('actor', $2, 'action', $3, 'note', $4, 'ts', now()))
+      WHERE id = $5
+      `,
+      [nextStatus, req.user.id, action, note, req.params.id]
     );
-
-    if (approvalResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Approval record not found' });
-    }
-
-    const approval = approvalResult.rows[0];
-
-    if (approval.decision !== 'pending') {
-      return res.status(400).json({ error: 'Already decided' });
-    }
-
-    // Update approval
-    await query(`
-      UPDATE rehire_approvals
-      SET decision = 'approved', decided_at = now(), approver_id = $1, comment = $2
-      WHERE id = $3
-    `, [req.user.id, comment || null, approval.id]);
-
-    // Check if all approvals are complete
-    const allApprovalsResult = await query(
-      'SELECT decision FROM rehire_approvals WHERE rehire_id = $1',
-      [id]
-    );
-
-    const allApproved = allApprovalsResult.rows.every(a => a.decision === 'approved');
-    const anyDenied = allApprovalsResult.rows.some(a => a.decision === 'denied');
-
-    if (anyDenied) {
-      await query('UPDATE rehire_requests SET status = $1 WHERE id = $2', ['denied', id]);
-    } else if (allApproved) {
-      await query('UPDATE rehire_requests SET status = $1 WHERE id = $2', ['approved', id]);
-      
-      // TODO: Create/restore employee record here
-      // This would typically involve:
-      // 1. Creating a new profile and employee record
-      // 2. Linking to the offboarded identity
-      // 3. Setting status to 'rehired' or 'active'
-      // 4. Assigning manager and department
-    }
 
     await audit({
       actorId: req.user.id,
-      action: 'rehire_approved',
+      action: 'rehire_decision',
       entityType: 'rehire_request',
-      entityId: id,
-      reason: comment,
-      details: { approverRole },
+      entityId: req.params.id,
+      reason: note,
+      details: { from: requestRecord.status, to: nextStatus, action },
     });
 
-    res.json({ success: true, message: 'Rehire approved' });
+    res.json({ success: true, status: nextStatus });
   } catch (error) {
-    console.error('Error approving rehire:', error);
-    res.status(500).json({ error: error.message || 'Failed to approve rehire' });
-  }
-});
-
-// POST /api/rehire/:id/deny - Deny rehire (HR/Manager)
-router.post('/:id/deny', authenticateToken, async (req, res) => {
-  try {
-    await ensureTables();
-    const { id } = req.params;
-    const { comment } = req.body;
-
-    if (!comment) {
-      return res.status(400).json({ error: 'Comment is required for denial' });
-    }
-
-    const role = await getUserRole(req.user.id);
-    
-    let approverRole;
-    if (role === 'hr') approverRole = 'hr';
-    else if (role === 'manager') approverRole = 'manager';
-    else {
-      return res.status(403).json({ error: 'Insufficient permissions' });
-    }
-
-    const approvalResult = await query(
-      'SELECT * FROM rehire_approvals WHERE rehire_id = $1 AND role = $2',
-      [id, approverRole]
-    );
-
-    if (approvalResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Approval record not found' });
-    }
-
-    const approval = approvalResult.rows[0];
-
-    if (approval.decision !== 'pending') {
-      return res.status(400).json({ error: 'Already decided' });
-    }
-
-    // Update approval
-    await query(`
-      UPDATE rehire_approvals
-      SET decision = 'denied', decided_at = now(), approver_id = $1, comment = $2
-      WHERE id = $3
-    `, [req.user.id, comment, approval.id]);
-
-    // Update request status
-    await query('UPDATE rehire_requests SET status = $1 WHERE id = $2', ['denied', id]);
-
-    await audit({
-      actorId: req.user.id,
-      action: 'rehire_denied',
-      entityType: 'rehire_request',
-      entityId: id,
-      reason: comment,
-      details: { approverRole },
-    });
-
-    res.json({ success: true, message: 'Rehire denied' });
-  } catch (error) {
-    console.error('Error denying rehire:', error);
-    res.status(500).json({ error: error.message || 'Failed to deny rehire' });
+    console.error('Error deciding rehire request:', error);
+    res.status(500).json({ error: error.message || 'Failed to update rehire request' });
   }
 });
 

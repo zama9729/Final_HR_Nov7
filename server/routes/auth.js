@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { query } from '../db/pool.js';
 import { sendPasswordResetEmail } from '../services/email.js';
+import { ensureOrgSetupState } from '../services/setup-state.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -220,6 +222,12 @@ router.post('/signup', async (req, res) => {
 
       await query('COMMIT');
 
+      try {
+        await ensureOrgSetupState(orgId);
+      } catch (setupError) {
+        console.warn('⚠️  Failed to initialize org setup status', setupError?.message || setupError);
+      }
+
       // Provision Payroll tenant and create admin user simultaneously AFTER HR profile is created
       // This ensures the user exists in HR before syncing to Payroll
       if (payrollSubdomain) {
@@ -282,6 +290,31 @@ router.post('/signup', async (req, res) => {
   } catch (error) {
     console.error('Signup error:', error);
     res.status(500).json({ error: error.message || 'Signup failed' });
+  }
+});
+
+router.post('/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { newPassword } = req.body || {};
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await query(
+      `UPDATE user_auth SET password_hash = $1, updated_at = now()
+       WHERE user_id = $2`,
+      [hashed, req.user.id]
+    );
+    await query(
+      `UPDATE employees
+       SET must_change_password = false, updated_at = now()
+       WHERE user_id = $1`,
+      [req.user.id]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error changing password:', error);
+    res.status(500).json({ error: error.message || 'Failed to change password' });
   }
 });
 

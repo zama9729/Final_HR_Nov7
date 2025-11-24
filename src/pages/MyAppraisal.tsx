@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Star, CheckCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -16,62 +15,25 @@ interface PerformanceReview {
   goals: string | null;
   comments: string | null;
   status: string;
-  appraisal_cycles: {
-    cycle_name: string;
-    cycle_year: number;
-  };
-  reviewer: {
-    profiles: {
-      first_name: string;
-      last_name: string;
-    };
-  };
+  cycle_name?: string;
+  cycle_year?: number;
+  reviewer_first_name?: string;
+  reviewer_last_name?: string;
 }
 
 export default function MyAppraisal() {
-  const { user } = useAuth();
   const [reviews, setReviews] = useState<PerformanceReview[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchMyReviews();
-  }, [user]);
+  }, []);
 
   const fetchMyReviews = async () => {
     try {
-      const { data: employeeData } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('user_id', user?.id)
-        .single();
-
-      if (!employeeData) {
-        setLoading(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('performance_reviews')
-        .select(`
-          *,
-          appraisal_cycles (
-            cycle_name,
-            cycle_year
-          ),
-          reviewer:employees!performance_reviews_reviewer_id_fkey (
-            profiles!employees_user_id_fkey (
-              first_name,
-              last_name
-            )
-          )
-        `)
-        .eq('employee_id', employeeData.id)
-        .eq('status', 'submitted')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
+      const data = await api.getMyPerformanceReviews();
       setReviews(data || []);
-    } catch (error: any) {
+    } catch (error) {
       toast.error("Failed to fetch your reviews");
     } finally {
       setLoading(false);
@@ -80,12 +42,7 @@ export default function MyAppraisal() {
 
   const acknowledgeReview = async (reviewId: string) => {
     try {
-      const { error } = await supabase
-        .from('performance_reviews')
-        .update({ status: 'acknowledged' })
-        .eq('id', reviewId);
-
-      if (error) throw error;
+      await api.acknowledgePerformanceReview(reviewId);
       toast.success("Review acknowledged");
       fetchMyReviews();
     } catch (error: any) {
@@ -130,10 +87,10 @@ export default function MyAppraisal() {
                 <div className="flex justify-between items-start">
                   <div>
                     <CardTitle>
-                      {review.appraisal_cycles?.cycle_name} - {review.appraisal_cycles?.cycle_year}
+                      {review.cycle_name} - {review.cycle_year}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Reviewed by: {review.reviewer?.profiles?.first_name} {review.reviewer?.profiles?.last_name}
+                      Reviewed by: {review.reviewer_first_name} {review.reviewer_last_name}
                     </p>
                   </div>
                   <Badge variant={review.status === 'acknowledged' ? 'secondary' : 'default'}>

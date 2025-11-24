@@ -3,6 +3,7 @@ import multer from 'multer';
 import { query, queryWithOrg } from '../db/pool.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { resolveOrgFromSlug } from '../middleware/tenant.js';
+import { ensureOrgSetupState } from '../services/setup-state.js';
 
 const router = express.Router();
 
@@ -136,6 +137,12 @@ router.post('/', async (req, res) => {
     }
 
     const org = result.rows[0];
+
+    try {
+      await ensureOrgSetupState(org.id);
+    } catch (setupErr) {
+      console.warn('Failed to seed org setup status for new organization', setupErr?.message || setupErr);
+    }
 
     // Call Payroll provisioning API if subdomain provided
     if (org.subdomain) {

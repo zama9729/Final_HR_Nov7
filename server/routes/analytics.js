@@ -1,139 +1,581 @@
 import express from 'express';
-import { query } from '../db/pool.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { query, queryWithOrg } from '../db/pool.js';
+import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { setTenantContext } from '../middleware/tenant.js';
 
 const router = express.Router();
 
-// Get analytics data for organization
-router.get('/', authenticateToken, async (req, res) => {
+// GET /api/analytics - General analytics overview
+router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
-    // Get user's tenant_id
-    const tenantResult = await query(
-      'SELECT tenant_id FROM profiles WHERE id = $1',
-      [req.user.id]
-    );
-    const tenantId = tenantResult.rows[0]?.tenant_id;
+    const orgId = req.orgId;
 
-    if (!tenantId) {
-      return res.status(403).json({ error: 'No organization found' });
-    }
-
-    // Employee Growth (last 6 months)
-    const employeeGrowthRes = await query(
-      `WITH months AS (
-        SELECT date_trunc('month', now()) - (n || ' months')::interval AS month
-        FROM generate_series(0, 5) AS n
-      )
-      SELECT 
-        to_char(months.month, 'Mon YY') AS month,
-        COUNT(e.id) AS count
-      FROM months
-      LEFT JOIN employees e ON date_trunc('month', e.created_at) = months.month AND e.tenant_id = $1 AND e.status = 'active'
-      GROUP BY months.month
-      ORDER BY months.month`,
-      [tenantId]
-    );
-
-    // Department Distribution
-    const deptRes = await query(
+    // Employee growth over time
+    const employeeGrowthResult = await queryWithOrg(
       `SELECT 
-        COALESCE(department, 'Unassigned') AS name,
-        COUNT(*) AS value
-      FROM employees
-      WHERE tenant_id = $1 AND status = 'active'
-      GROUP BY department
-      ORDER BY value DESC`,
-      [tenantId]
+         TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') as month,
+         COUNT(*) as count
+       FROM employees
+       WHERE tenant_id = $1
+       GROUP BY DATE_TRUNC('month', created_at)
+       ORDER BY month`,
+      [orgId],
+      orgId
     );
 
-    // Leave Requests Trend (last 6 months)
-    const leaveTrendRes = await query(
-      `WITH months AS (
-        SELECT date_trunc('month', now()) - (n || ' months')::interval AS month
-        FROM generate_series(0, 5) AS n
-      )
-      SELECT 
-        to_char(months.month, 'Mon YY') AS month,
-        COALESCE(SUM(CASE WHEN lr.status = 'approved' THEN 1 ELSE 0 END), 0) AS approved,
-        COALESCE(SUM(CASE WHEN lr.status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
-        COALESCE(SUM(CASE WHEN lr.status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected
-      FROM months
-      LEFT JOIN leave_requests lr ON date_trunc('month', lr.submitted_at) = months.month AND lr.tenant_id = $1
-      GROUP BY months.month
-      ORDER BY months.month`,
-      [tenantId]
-    );
-
-    // Attendance/Timesheet Trends (last 6 months)
-    const attendanceRes = await query(
-      `WITH months AS (
-        SELECT date_trunc('month', now()) - (n || ' months')::interval AS month
-        FROM generate_series(0, 5) AS n
-      )
-      SELECT 
-        to_char(months.month, 'Mon YY') AS month,
-        COALESCE(AVG(t.total_hours), 0) AS avg_hours,
-        COUNT(DISTINCT t.employee_id) AS active_employees
-      FROM months
-      LEFT JOIN timesheets t ON date_trunc('month', t.week_start_date) = months.month AND t.tenant_id = $1 AND t.status = 'approved'
-      GROUP BY months.month
-      ORDER BY months.month`,
-      [tenantId]
-    );
-
-    // Project Utilization (current)
-    const projectUtilRes = await query(
+    // Department distribution
+    const departmentResult = await queryWithOrg(
       `SELECT 
-        p.name AS project_name,
-        COUNT(DISTINCT a.employee_id) AS assigned_employees,
-        AVG(a.allocation_percent) AS avg_allocation,
-        SUM(CASE WHEN a.end_date IS NULL OR a.end_date >= now()::date THEN 1 ELSE 0 END) AS active_assignments
-      FROM projects p
-      LEFT JOIN assignments a ON a.project_id = p.id
-      WHERE p.org_id = $1 AND p.status = 'open'
-      GROUP BY p.id, p.name
-      ORDER BY active_assignments DESC`,
-      [tenantId]
+         COALESCE(d.name, 'Unassigned') as name,
+         COUNT(DISTINCT e.id) as value
+       FROM employees e
+       LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
+       LEFT JOIN departments d ON d.id = ea.department_id
+       WHERE e.tenant_id = $1 AND e.status = 'active'
+       GROUP BY d.name
+       ORDER BY value DESC`,
+      [orgId],
+      orgId
     );
 
-    // Skills Distribution
-    const skillsRes = await query(
+    // Leave data by month
+    const leaveResult = await queryWithOrg(
       `SELECT 
-        s.name,
-        COUNT(*) AS count,
-        AVG(s.level) AS avg_level
-      FROM skills s
-      JOIN employees e ON e.id = s.employee_id
-      WHERE e.tenant_id = $1
-      GROUP BY s.name
-      ORDER BY count DESC
-      LIMIT 10`,
-      [tenantId]
+         TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') as month,
+         COUNT(*) FILTER (WHERE status = 'approved') as approved,
+         COUNT(*) FILTER (WHERE status = 'pending') as pending,
+         COUNT(*) FILTER (WHERE status = 'rejected') as rejected
+       FROM leave_requests
+       WHERE tenant_id = $1
+       GROUP BY DATE_TRUNC('month', created_at)
+       ORDER BY month DESC
+       LIMIT 12`,
+      [orgId],
+      orgId
     );
 
-    // Overall Stats
-    const overallRes = await query(
+    // Attendance data by month
+    const attendanceResult = await queryWithOrg(
       `SELECT 
-        (SELECT COUNT(*) FROM employees WHERE tenant_id = $1 AND status = 'active') AS total_employees,
-        (SELECT COUNT(*) FROM leave_requests WHERE tenant_id = $1 AND status = 'pending') AS pending_leaves,
-        (SELECT COUNT(*) FROM timesheets WHERE tenant_id = $1 AND status = 'pending') AS pending_timesheets,
-        (SELECT COUNT(*) FROM projects WHERE org_id = $1 AND status = 'open') AS active_projects,
-        (SELECT COUNT(*) FROM assignments a JOIN projects p ON p.id = a.project_id WHERE p.org_id = $1 AND (a.end_date IS NULL OR a.end_date >= now()::date)) AS active_assignments`,
-      [tenantId]
+         TO_CHAR(DATE_TRUNC('month', raw_timestamp), 'YYYY-MM') as month,
+         AVG(EXTRACT(EPOCH FROM (
+           COALESCE(
+             (SELECT MIN(ae2.raw_timestamp) FROM attendance_events ae2 
+              WHERE ae2.employee_id = ae.employee_id 
+                AND DATE(ae2.raw_timestamp) = DATE(ae.raw_timestamp)
+                AND ae2.event_type = 'OUT'),
+             ae.raw_timestamp + INTERVAL '8 hours'
+           ) - ae.raw_timestamp
+         )) / 3600) as avg_hours,
+         COUNT(DISTINCT ae.employee_id) as active_employees
+       FROM attendance_events ae
+       WHERE tenant_id = $1 AND event_type = 'IN'
+       GROUP BY DATE_TRUNC('month', raw_timestamp)
+       ORDER BY month DESC
+       LIMIT 12`,
+      [orgId],
+      orgId
+    );
+
+    // Project utilization
+    const projectResult = await queryWithOrg(
+      `SELECT 
+         p.name,
+         COUNT(DISTINCT a.employee_id) as employees,
+         COUNT(DISTINCT a.id) as assignments
+       FROM projects p
+       LEFT JOIN assignments a ON a.project_id = p.id
+       WHERE p.org_id = $1
+       GROUP BY p.id, p.name
+       ORDER BY employees DESC
+       LIMIT 10`,
+      [orgId],
+      orgId
+    );
+
+    // Top skills
+    const skillsResult = await queryWithOrg(
+      `SELECT 
+         s.name,
+         COUNT(*) as count,
+         AVG(s.level) as avg_level
+       FROM skills s
+       JOIN employees e ON e.id = s.employee_id
+       WHERE e.tenant_id = $1
+       GROUP BY s.name
+       ORDER BY count DESC
+       LIMIT 10`,
+      [orgId],
+      orgId
+    );
+
+    // Overall stats
+    const overallResult = await queryWithOrg(
+      `SELECT 
+         (SELECT COUNT(*) FROM projects WHERE org_id = $1 AND status = 'open') as active_projects,
+         (SELECT COUNT(*) FROM leave_requests WHERE tenant_id = $1 AND status = 'pending') as pending_leaves,
+         (SELECT COUNT(*) FROM assignments a 
+          JOIN projects p ON p.id = a.project_id 
+          WHERE p.org_id = $1 AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)) as active_assignments`,
+      [orgId],
+      orgId
     );
 
     res.json({
-      employeeGrowth: employeeGrowthRes.rows,
-      departmentData: deptRes.rows,
-      leaveData: leaveTrendRes.rows,
-      attendanceData: attendanceRes.rows,
-      projectUtilization: projectUtilRes.rows,
-      topSkills: skillsRes.rows,
-      overall: overallRes.rows[0] || {}
+      employeeGrowth: employeeGrowthResult.rows,
+      departmentData: departmentResult.rows,
+      leaveData: leaveResult.rows,
+      attendanceData: attendanceResult.rows,
+      projectUtilization: projectResult.rows,
+      topSkills: skillsResult.rows,
+      overall: overallResult.rows[0] || {},
     });
   } catch (error) {
-    console.error('Error fetching analytics:', error);
+    console.error('Analytics overview error:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch analytics' });
+  }
+});
+
+// GET /api/analytics/attendance/overview
+router.get('/attendance/overview', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
+  try {
+    const { from, to, branch_id } = req.query;
+    const orgId = req.orgId;
+
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from and to dates are required (YYYY-MM-DD)' });
+    }
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    
+    if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid date format' });
+    }
+
+    // Build branch filter
+    const branchFilter = branch_id ? 'AND ae.work_location_branch_id = $4' : '';
+
+    // Total employees
+    const totalEmployeesResult = await queryWithOrg(
+      `SELECT COUNT(DISTINCT e.id) as count
+       FROM employees e
+       WHERE e.tenant_id = $1 AND e.status = 'active'`,
+      [orgId],
+      orgId
+    );
+    const totalEmployees = parseInt(totalEmployeesResult.rows[0]?.count || '0');
+
+    // Today's present count
+    const today = new Date().toISOString().split('T')[0];
+    const todayParams = [orgId, today];
+    if (branch_id) {
+      todayParams.push(branch_id);
+    }
+    const todayPresentResult = await queryWithOrg(
+      `SELECT COUNT(DISTINCT ae.employee_id) as count
+       FROM attendance_events ae
+       JOIN employees e ON e.id = ae.employee_id
+       WHERE ae.tenant_id = $1
+         AND DATE(ae.raw_timestamp) = $2
+         AND ae.event_type = 'IN'
+         ${branchFilter}`,
+      todayParams,
+      orgId
+    );
+    const todayPresent = parseInt(todayPresentResult.rows[0]?.count || '0');
+    const todayPresentPercent = totalEmployees > 0 ? Math.round((todayPresent / totalEmployees) * 100) : 0;
+
+    // On-time percentage (assuming 9 AM as standard start time)
+    const onTimeParams = [orgId, fromDate, toDate];
+    if (branch_id) onTimeParams.push(branch_id);
+    const onTimeResult = await queryWithOrg(
+      `SELECT COUNT(*) as on_time, COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM ae.raw_timestamp) > 9) as late
+       FROM attendance_events ae
+       JOIN employees e ON e.id = ae.employee_id
+       WHERE ae.tenant_id = $1
+         AND DATE(ae.raw_timestamp) >= $2
+         AND DATE(ae.raw_timestamp) <= $3
+         AND ae.event_type = 'IN'
+         ${branchFilter}`,
+      onTimeParams,
+      orgId
+    );
+    const onTime = parseInt(onTimeResult.rows[0]?.on_time || '0');
+    const late = parseInt(onTimeResult.rows[0]?.late || '0');
+    const onTimePercent = (onTime + late) > 0 ? Math.round((onTime / (onTime + late)) * 100) : 0;
+
+    // WFO vs WFH percentage (handle NULL work_type)
+    const wfoWfhParams = [orgId, fromDate, toDate];
+    if (branch_id) wfoWfhParams.push(branch_id);
+    const wfoWfhResult = await queryWithOrg(
+      `SELECT 
+         COUNT(*) FILTER (WHERE COALESCE(ae.work_type, 'WFH') = 'WFO') as wfo_count,
+         COUNT(*) FILTER (WHERE COALESCE(ae.work_type, 'WFH') = 'WFH') as wfh_count
+       FROM attendance_events ae
+       JOIN employees e ON e.id = ae.employee_id
+       WHERE ae.tenant_id = $1
+         AND DATE(ae.raw_timestamp) >= $2
+         AND DATE(ae.raw_timestamp) <= $3
+         AND ae.event_type = 'IN'
+         ${branchFilter}`,
+      wfoWfhParams,
+      orgId
+    );
+    const wfoCount = parseInt(wfoWfhResult.rows[0]?.wfo_count || '0');
+    const wfhCount = parseInt(wfoWfhResult.rows[0]?.wfh_count || '0');
+    const total = wfoCount + wfhCount;
+    const wfoPercent = total > 0 ? Math.round((wfoCount / total) * 100) : 0;
+    const wfhPercent = total > 0 ? Math.round((wfhCount / total) * 100) : 0;
+
+    // Pending approvals (timesheet approvals)
+    const pendingApprovalsResult = await queryWithOrg(
+      `SELECT COUNT(*) as count
+       FROM timesheets t
+       JOIN employees e ON e.id = t.employee_id
+       WHERE t.tenant_id = $1
+         AND t.status = 'pending'
+         ${branch_id ? 'AND EXISTS (SELECT 1 FROM employee_assignments ea WHERE ea.employee_id = e.id AND ea.branch_id = $2)' : ''}`,
+      branch_id ? [orgId, branch_id] : [orgId],
+      orgId
+    );
+    const pendingApprovals = parseInt(pendingApprovalsResult.rows[0]?.count || '0');
+
+    res.json({
+      total_employees: totalEmployees,
+      today_present: todayPresent,
+      today_present_percent: todayPresentPercent,
+      on_time_percent: onTimePercent,
+      wfo_percent: wfoPercent,
+      wfh_percent: wfhPercent,
+      pending_approvals: pendingApprovals,
+    });
+  } catch (error) {
+    console.error('Analytics overview error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch overview' });
+  }
+});
+
+// GET /api/analytics/attendance/histogram
+router.get('/attendance/histogram', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
+  try {
+    const { from, to, branch_id, team_id, department_id } = req.query;
+    const orgId = req.orgId;
+
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from and to dates are required' });
+    }
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+
+    // Build filters
+    const filters = ['ae.tenant_id = $1', 'DATE(ae.raw_timestamp) >= $2', 'DATE(ae.raw_timestamp) <= $3'];
+    const params = [orgId, fromDate, toDate];
+    let paramIndex = 4;
+
+    if (branch_id) {
+      filters.push(`ae.work_location_branch_id = $${paramIndex++}`);
+      params.push(branch_id);
+    }
+
+    if (team_id || department_id) {
+      filters.push(`EXISTS (
+        SELECT 1 FROM employee_assignments ea
+        WHERE ea.employee_id = ae.employee_id
+          ${team_id ? `AND ea.team_id = $${paramIndex++}` : ''}
+          ${department_id ? `AND ea.department_id = $${paramIndex++}` : ''}
+      )`);
+      if (team_id) params.push(team_id);
+      if (department_id) params.push(department_id);
+    }
+
+    const result = await queryWithOrg(
+      `SELECT 
+         DATE(ae.raw_timestamp) as date,
+         COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN') as present,
+         COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN' AND COALESCE(ae.work_type, 'WFH') = 'WFO') as wfo,
+         COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN' AND COALESCE(ae.work_type, 'WFH') = 'WFH') as wfh,
+         COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN' AND EXTRACT(HOUR FROM ae.raw_timestamp) > 9) as late
+       FROM attendance_events ae
+       WHERE ${filters.join(' AND ')}
+       GROUP BY DATE(ae.raw_timestamp)
+       ORDER BY date`,
+      params,
+      orgId
+    );
+
+    // Get total employees for absent calculation
+    const totalEmployeesResult = await queryWithOrg(
+      `SELECT COUNT(DISTINCT e.id) as count
+       FROM employees e
+       WHERE e.tenant_id = $1 AND e.status = 'active'`,
+      [orgId],
+      orgId
+    );
+    const totalEmployees = parseInt(totalEmployeesResult.rows[0]?.count || '0');
+
+    // Normalize rows by date for quick lookup
+    const rowMap = new Map();
+    result.rows.forEach(row => {
+      // Ensure date string in YYYY-MM-DD
+      const dateKey = new Date(row.date).toISOString().split('T')[0];
+      rowMap.set(dateKey, {
+        present: parseInt(row.present || '0'),
+        late: parseInt(row.late || '0'),
+        wfo: parseInt(row.wfo || '0'),
+        wfh: parseInt(row.wfh || '0'),
+      });
+    });
+
+    // Fill every day in range to avoid gaps in timeline graph
+    const histogram = [];
+    for (
+      let cursor = new Date(fromDate);
+      cursor <= toDate;
+      cursor.setDate(cursor.getDate() + 1)
+    ) {
+      const dateKey = cursor.toISOString().split('T')[0];
+      const stats = rowMap.get(dateKey) || {
+        present: 0,
+        late: 0,
+        wfo: 0,
+        wfh: 0,
+      };
+      const absent = Math.max(0, totalEmployees - stats.present);
+      histogram.push({
+        date: dateKey,
+        present: stats.present,
+        absent,
+        late: stats.late,
+        wfo: stats.wfo,
+        wfh: stats.wfh,
+      });
+    }
+
+    res.json({ histogram, total_employees: totalEmployees });
+  } catch (error) {
+    console.error('Analytics histogram error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch histogram' });
+  }
+});
+
+// GET /api/analytics/attendance/heatmap
+router.get('/attendance/heatmap', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
+  try {
+    const { from, to, branch_id, group_by = 'department' } = req.query;
+    const orgId = req.orgId;
+
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from and to dates are required' });
+    }
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+
+    // Group by department or team
+    const groupColumn = group_by === 'team' 
+      ? 'ea.team_id, t.name as group_name'
+      : 'ea.department_id, d.name as group_name';
+    const groupJoin = group_by === 'team'
+      ? 'LEFT JOIN teams t ON t.id = ea.team_id'
+      : 'LEFT JOIN departments d ON d.id = ea.department_id';
+
+    const result = await queryWithOrg(
+      `SELECT 
+         ${groupColumn},
+         DATE(ae.raw_timestamp) as date,
+         COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN') as present_count,
+         COUNT(DISTINCT e.id) as total_employees
+       FROM attendance_events ae
+       JOIN employees e ON e.id = ae.employee_id
+       LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
+       ${groupJoin}
+       WHERE ae.tenant_id = $1
+         AND DATE(ae.raw_timestamp) >= $2
+         AND DATE(ae.raw_timestamp) <= $3
+         ${branch_id ? 'AND ae.work_location_branch_id = $4' : ''}
+       GROUP BY ${groupColumn}, DATE(ae.raw_timestamp)
+       ORDER BY date, group_name`,
+      branch_id ? [orgId, fromDate, toDate, branch_id] : [orgId, fromDate, toDate],
+      orgId
+    );
+
+    // Transform to heatmap format
+    const heatmap = {};
+    result.rows.forEach(row => {
+      const groupName = row.group_name || 'Unassigned';
+      const date = row.date;
+      if (!heatmap[groupName]) {
+        heatmap[groupName] = {};
+      }
+      const presentCount = parseInt(row.present_count || '0');
+      const total = parseInt(row.total_employees || '1');
+      heatmap[groupName][date] = {
+        present: presentCount,
+        total: total,
+        percentage: Math.round((presentCount / total) * 100),
+      };
+    });
+
+    res.json({ heatmap });
+  } catch (error) {
+    console.error('Analytics heatmap error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch heatmap' });
+  }
+});
+
+// GET /api/analytics/attendance/map
+router.get('/attendance/map', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
+  try {
+    const { from, to, branch_id, team_id } = req.query;
+    const orgId = req.orgId;
+
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from and to dates are required' });
+    }
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+
+    // Get most frequent work locations
+    const result = await queryWithOrg(
+      `SELECT 
+         ae.lat,
+         ae.lon,
+         ae.address_text,
+         ae.work_location_branch_id,
+         ob.name as branch_name,
+         COUNT(*) as frequency,
+         COUNT(DISTINCT ae.employee_id) as unique_employees
+       FROM attendance_events ae
+       LEFT JOIN org_branches ob ON ob.id = ae.work_location_branch_id
+       WHERE ae.tenant_id = $1
+         AND DATE(ae.raw_timestamp) >= $2
+         AND DATE(ae.raw_timestamp) <= $3
+         AND ae.lat IS NOT NULL
+         AND ae.lon IS NOT NULL
+         AND ae.event_type = 'IN'
+         ${branch_id ? 'AND ae.work_location_branch_id = $4' : ''}
+         ${team_id ? 'AND EXISTS (SELECT 1 FROM employee_assignments ea WHERE ea.employee_id = ae.employee_id AND ea.team_id = $5)' : ''}
+       GROUP BY ae.lat, ae.lon, ae.address_text, ae.work_location_branch_id, ob.name
+       HAVING COUNT(*) >= 3
+       ORDER BY frequency DESC
+       LIMIT 100`,
+      branch_id && team_id ? [orgId, fromDate, toDate, branch_id, team_id] :
+      branch_id ? [orgId, fromDate, toDate, branch_id] :
+      team_id ? [orgId, fromDate, toDate, team_id] :
+      [orgId, fromDate, toDate],
+      orgId
+    );
+
+    const locations = result.rows.map(row => ({
+      lat: parseFloat(row.lat),
+      lon: parseFloat(row.lon),
+      address: row.address_text,
+      branch_id: row.work_location_branch_id,
+      branch_name: row.branch_name,
+      frequency: parseInt(row.frequency || '0'),
+      unique_employees: parseInt(row.unique_employees || '0'),
+    }));
+
+    res.json({ locations });
+  } catch (error) {
+    console.error('Analytics map error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch map data' });
+  }
+});
+
+// GET /api/analytics/attendance/distribution
+router.get('/attendance/distribution', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
+  try {
+    const { from, to, branch_id, team_id } = req.query;
+    const orgId = req.orgId;
+
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from and to dates are required' });
+    }
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+
+    // Get daily hours worked per employee
+    const result = await queryWithOrg(
+      `SELECT 
+         e.id as employee_id,
+         p.first_name || ' ' || p.last_name as employee_name,
+         ea.team_id,
+         t.name as team_name,
+         ea.department_id,
+         d.name as department_name,
+         DATE(ae.raw_timestamp) as work_date,
+         EXTRACT(EPOCH FROM (
+           COALESCE(
+             (SELECT MIN(ae2.raw_timestamp) FROM attendance_events ae2 
+              WHERE ae2.employee_id = ae.employee_id 
+                AND DATE(ae2.raw_timestamp) = DATE(ae.raw_timestamp)
+                AND ae2.event_type = 'OUT'),
+             ae.raw_timestamp + INTERVAL '8 hours'
+           ) - ae.raw_timestamp
+         )) / 3600 as hours_worked
+       FROM attendance_events ae
+       JOIN employees e ON e.id = ae.employee_id
+       JOIN profiles p ON p.id = e.user_id
+       LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
+       LEFT JOIN teams t ON t.id = ea.team_id
+       LEFT JOIN departments d ON d.id = ea.department_id
+       WHERE ae.tenant_id = $1
+         AND DATE(ae.raw_timestamp) >= $2
+         AND DATE(ae.raw_timestamp) <= $3
+         AND ae.event_type = 'IN'
+         ${branch_id ? 'AND ae.work_location_branch_id = $4' : ''}
+         ${team_id ? 'AND ea.team_id = $5' : ''}
+       ORDER BY work_date, team_name, department_name`,
+      branch_id && team_id ? [orgId, fromDate, toDate, branch_id, team_id] :
+      branch_id ? [orgId, fromDate, toDate, branch_id] :
+      team_id ? [orgId, fromDate, toDate, team_id] :
+      [orgId, fromDate, toDate],
+      orgId
+    );
+
+    // Group by team/department
+    const distribution = {};
+    result.rows.forEach(row => {
+      const groupName = row.team_name || row.department_name || 'Unassigned';
+      const hours = parseFloat(row.hours_worked || '0');
+      if (!distribution[groupName]) {
+        distribution[groupName] = [];
+      }
+      distribution[groupName].push(hours);
+    });
+
+    // Calculate statistics for each group
+    const stats = Object.entries(distribution).map(([group, hours]) => {
+      const sorted = [...hours].sort((a, b) => a - b);
+      const mean = hours.reduce((a, b) => a + b, 0) / hours.length;
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const q1 = sorted[Math.floor(sorted.length * 0.25)];
+      const q3 = sorted[Math.floor(sorted.length * 0.75)];
+      const min = Math.min(...hours);
+      const max = Math.max(...hours);
+
+      return {
+        group,
+        values: hours,
+        mean: Math.round(mean * 100) / 100,
+        median: Math.round(median * 100) / 100,
+        q1: Math.round(q1 * 100) / 100,
+        q3: Math.round(q3 * 100) / 100,
+        min: Math.round(min * 100) / 100,
+        max: Math.round(max * 100) / 100,
+        count: hours.length,
+      };
+    });
+
+    res.json({ distribution: stats });
+  } catch (error) {
+    console.error('Analytics distribution error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch distribution' });
   }
 });
 

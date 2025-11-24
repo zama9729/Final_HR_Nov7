@@ -137,7 +137,11 @@ export const PayrollReviewDialog = ({
       (item.incentive_amount || 0);
 
     // Recalculate deductions (simplified - would need settings from backend)
-    const pfDeduction = (item.basic_salary * 12) / 100; // 12% of basic
+    // PF: 12% of basic, capped at ₹15,000
+    // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+    const pfWageCeiling = 15000;
+    const pfBasis = item.basic_salary <= pfWageCeiling ? item.basic_salary : pfWageCeiling;
+    const pfDeduction = (pfBasis * 12) / 100; // 12% of basic (capped)
     const esiDeduction = grossSalary <= 21000 ? (grossSalary * 0.75) / 100 : 0;
     const ptDeduction = 200; // Fixed
     const annualIncome = grossSalary * 12;

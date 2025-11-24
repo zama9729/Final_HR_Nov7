@@ -27,32 +27,109 @@ router.get('/org', authenticateToken, setTenantContext, async (req, res) => {
       return res.status(400).json({ error: 'Organization not found' });
     }
 
-    const { date } = req.query;
-    const effectiveDate = date || new Date().toISOString().split('T')[0];
+    // Try to get policies from org_policies table (policy_catalog based schema)
+    let legacyPolicies = [];
+    try {
+      // Check if the old schema table exists by checking for policy_key column
+      const tableCheck = await queryWithOrg(
+        `SELECT column_name FROM information_schema.columns 
+         WHERE table_name = 'org_policies' AND column_name = 'policy_key'`,
+        [],
+        orgId
+      );
+      
+      if (tableCheck.rows.length > 0) {
+        // Old schema exists
+        const legacyResult = await queryWithOrg(
+          `SELECT 
+            op.id,
+            op.org_id,
+            op.policy_key,
+            pc.display_name,
+            pc.category,
+            pc.description,
+            pc.value_type,
+            op.value,
+            op.effective_from,
+            op.effective_to
+          FROM org_policies op
+          JOIN policy_catalog pc ON pc.key = op.policy_key
+          WHERE op.org_id = $1
+          ORDER BY pc.category, pc.display_name`,
+          [orgId],
+          orgId
+        );
+        legacyPolicies = legacyResult.rows.map(row => ({
+          id: row.id,
+          org_id: row.org_id,
+          policy_key: row.policy_key,
+          display_name: row.display_name,
+          category: row.category,
+          description: row.description,
+          value_type: row.value_type,
+          value: row.value,
+          effective_from: row.effective_from,
+          effective_to: row.effective_to,
+        }));
+      }
+    } catch (err) {
+      // Old schema doesn't exist or has different structure, continue
+      console.log('Legacy schema not found, using new schema');
+    }
 
-    const result = await queryWithOrg(
-      `SELECT 
-        op.id,
-        op.org_id,
-        op.policy_key,
-        pc.display_name,
-        pc.category,
-        pc.description,
-        pc.value_type,
-        op.value,
-        op.effective_from,
-        op.effective_to
-      FROM org_policies op
-      JOIN policy_catalog pc ON pc.key = op.policy_key
-      WHERE op.org_id = $1
-        AND op.effective_from <= $2::date
-        AND (op.effective_to IS NULL OR op.effective_to >= $2::date)
-      ORDER BY pc.category, pc.display_name`,
-      [orgId, effectiveDate],
-      orgId
-    );
+    // Get policies from new schema (policy-platform)
+    let newPolicies = [];
+    try {
+      const newResult = await queryWithOrg(
+        `SELECT 
+          op.id,
+          op.org_id,
+          op.name as display_name,
+          op.status,
+          op.tags,
+          pt.name as template_name,
+          pt.country,
+          pv.variables,
+          pv.sections,
+          pv.version,
+          pv.effective_from
+        FROM org_policies op
+        LEFT JOIN policy_templates pt ON pt.id = op.template_id
+        LEFT JOIN LATERAL (
+          SELECT variables, sections, version, effective_from
+          FROM policy_versions
+          WHERE org_policy_id = op.id
+          ORDER BY version DESC
+          LIMIT 1
+        ) pv ON true
+        WHERE op.org_id = $1
+        ORDER BY op.created_at DESC`,
+        [orgId],
+        orgId
+      );
 
-    res.json(result.rows);
+      newPolicies = newResult.rows.map(row => ({
+        id: row.id,
+        org_id: row.org_id,
+        display_name: row.display_name,
+        category: row.tags?.[0] || 'General',
+        description: row.template_name || '',
+        value_type: 'JSON',
+        value: row.variables || {},
+        effective_from: row.effective_from || row.created_at,
+        effective_to: null,
+        status: row.status,
+        template_name: row.template_name,
+      }));
+    } catch (err) {
+      // New schema doesn't exist, that's okay
+      console.log('New schema not found');
+    }
+
+    // Combine both (legacy takes precedence if both exist)
+    const allPolicies = [...legacyPolicies, ...newPolicies];
+
+    res.json(allPolicies);
   } catch (error) {
     console.error('Error fetching org policies:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch org policies' });
@@ -83,10 +160,13 @@ router.post('/org', authenticateToken, setTenantContext, requireRole('hr', 'ceo'
       return res.status(400).json({ error: 'Invalid policy key' });
     }
 
+    // Use legacy table for policy_catalog based policies
+    const effectiveFrom = effective_from || new Date().toISOString().split('T')[0];
+    
     // Check for existing policy with same effective_from
     const existing = await queryWithOrg(
-      'SELECT id FROM org_policies WHERE org_id = $1 AND policy_key = $2 AND effective_from = $3',
-      [orgId, policy_key, effective_from || new Date().toISOString().split('T')[0]],
+      'SELECT id FROM org_policies_legacy WHERE org_id = $1 AND policy_key = $2 AND effective_from = $3',
+      [orgId, policy_key, effectiveFrom],
       orgId
     );
 
@@ -94,7 +174,7 @@ router.post('/org', authenticateToken, setTenantContext, requireRole('hr', 'ceo'
     if (existing.rows.length > 0) {
       // Update existing
       result = await queryWithOrg(
-        `UPDATE org_policies 
+        `UPDATE org_policies_legacy 
          SET value = $1, effective_to = $2, created_at = now()
          WHERE id = $3
          RETURNING id, org_id, policy_key, value, effective_from, effective_to`,
@@ -104,14 +184,14 @@ router.post('/org', authenticateToken, setTenantContext, requireRole('hr', 'ceo'
     } else {
       // Create new
       result = await queryWithOrg(
-        `INSERT INTO org_policies (org_id, policy_key, value, effective_from, effective_to)
+        `INSERT INTO org_policies_legacy (org_id, policy_key, value, effective_from, effective_to)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, org_id, policy_key, value, effective_from, effective_to`,
         [
           orgId,
           policy_key,
           JSON.stringify(value),
-          effective_from || new Date().toISOString().split('T')[0],
+          effectiveFrom,
           effective_to || null
         ],
         orgId

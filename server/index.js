@@ -35,6 +35,7 @@ import importsRoutes from './routes/imports.js';
 import checkInOutRoutes from './routes/check-in-out.js';
 import opalMiniAppsRoutes from './routes/opal-mini-apps.js';
 import attendanceRoutes from './routes/attendance.js';
+import attendanceSettingsRoutes from './routes/attendance-settings.js';
 import payrollRoutes from './routes/payroll.js';
 import backgroundChecksRoutes from './routes/background-checks.js';
 import terminationsRoutes from './routes/terminations.js';
@@ -42,34 +43,67 @@ import documentsRoutes from './routes/documents.js';
 import offboardingRoutes from './routes/offboarding.js';
 import rehireRoutes from './routes/rehire.js';
 import policiesRoutes from './routes/policies.js';
+import policyPlatformRoutes from './routes/policy-platform.js';
+import policyManagementRoutes from './routes/policy-management.js';
 import usersRoutes from './routes/users.js';
 import payrollSsoRoutes from './routes/payroll-sso.js';
 import taxDeclarationsRoutes from './routes/tax-declarations.js';
 import reimbursementRoutes from './routes/reimbursements.js';
 import reportsRoutes from './routes/reports.js';
+import setupRoutes from './routes/setup.js';
+import branchesRoutes from './routes/branches.js';
+import superRoutes from './routes/super.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules } from './services/cron.js';
+import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
 import { createAttendanceTables } from './utils/createAttendanceTables.js';
 import { ensureAdminRole } from './utils/runMigration.js';
 import { ensureOnboardingColumns } from './utils/ensureOnboardingColumns.js';
+import { scheduleAnalyticsRefresh } from './services/analytics-refresh.js';
 
 dotenv.config();
+
+// Ensure payroll integration is enabled in local/dev environments unless explicitly disabled at runtime
+if (process.env.PAYROLL_INTEGRATION_ENABLED === 'false') {
+  console.warn('[PAYROLL] PAYROLL_INTEGRATION_ENABLED was false, enabling for local environment.');
+}
+process.env.PAYROLL_INTEGRATION_ENABLED = 'true';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors({
-  origin: [
-    'http://localhost:8080',
-    'http://localhost:3000',
-    'http://localhost:3002', // Payroll frontend
-    process.env.FRONTEND_URL,
-    process.env.PAYROLL_FRONTEND_URL
-  ].filter(Boolean),
-  credentials: true
-}));
+const corsOptions = {
+  origin: function(origin, callback) {
+    // In production, check against allowed origins
+    if (process.env.NODE_ENV === 'production') {
+      const allowedOrigins = [
+        'http://localhost:8080',
+        'http://localhost:3000',
+        'http://localhost:3002', // Payroll frontend
+        process.env.FRONTEND_URL,
+        process.env.PAYROLL_FRONTEND_URL
+      ].filter(Boolean);
+      
+      // If no origin (e.g., mobile app, Postman), allow it
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    } else {
+      // Allow all origins in dev
+      callback(null, true);
+    }
+  },
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With','content-type','authorization']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -138,6 +172,8 @@ app.use('/api/employee-stats', authenticateToken, employeeStatsRoutes);
 app.use('/api/migrations', migrationsRoutes);
 app.use('/api/check-in-out', checkInOutRoutes);
 app.use('/api/v1/attendance', attendanceRoutes);
+app.use('/api/attendance', attendanceRoutes); // Also mount at /api/attendance for compatibility
+app.use('/api/attendance-settings', attendanceSettingsRoutes);
 app.use('/api/opal-mini-apps', authenticateToken, setTenantContext, opalMiniAppsRoutes);
 app.use('/api/payroll', authenticateToken, payrollRoutes);
 app.use('/api/background-checks', authenticateToken, backgroundChecksRoutes);
@@ -145,9 +181,14 @@ app.use('/api/terminations', authenticateToken, terminationsRoutes);
 app.use('/api/documents', authenticateToken, documentsRoutes);
 app.use('/api/offboarding', authenticateToken, offboardingRoutes);
 app.use('/api/rehire', authenticateToken, rehireRoutes);
+app.use('/api/setup', setupRoutes);
+app.use('/api/branches', branchesRoutes);
+app.use('/api/super', superRoutes);
 // Multi-tenant routes
 app.use('/api/orgs', organizationsRoutes);
 app.use('/api/policies', authenticateToken, setTenantContext, policiesRoutes);
+app.use('/api/policy-platform', policyPlatformRoutes);
+app.use('/api/policy-management', authenticateToken, setTenantContext, policyManagementRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/promotion', authenticateToken, setTenantContext, promotionsRoutes);
 // Payroll SSO integration (separate from payroll routes)
@@ -311,6 +352,8 @@ createPool().then(async () => {
       status TEXT NOT NULL DEFAULT 'running', -- running | completed | rejected | error
       current_node_ids TEXT[] DEFAULT '{}',
       trigger_payload JSONB,
+      resource_type TEXT, -- 'leave', 'expense', etc.
+      resource_id UUID, -- ID of the resource (leave_request.id, etc.)
       created_by UUID REFERENCES profiles(id),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -329,8 +372,27 @@ createPool().then(async () => {
       decision_reason TEXT,
       decided_by UUID REFERENCES profiles(id),
       decided_at TIMESTAMPTZ,
+      resource_type TEXT, -- 'leave', 'expense', etc.
+      resource_id UUID, -- ID of the resource (leave_request.id, etc.)
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    
+    -- Add resource linking columns if they don't exist (for existing databases)
+    DO $$ 
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflow_instances' AND column_name = 'resource_type') THEN
+        ALTER TABLE workflow_instances ADD COLUMN resource_type TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflow_instances' AND column_name = 'resource_id') THEN
+        ALTER TABLE workflow_instances ADD COLUMN resource_id UUID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflow_actions' AND column_name = 'resource_type') THEN
+        ALTER TABLE workflow_actions ADD COLUMN resource_type TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflow_actions' AND column_name = 'resource_id') THEN
+        ALTER TABLE workflow_actions ADD COLUMN resource_id UUID;
+      END IF;
+    END $$;
 
     CREATE INDEX IF NOT EXISTS idx_workflow_actions_tenant_pending ON workflow_actions(tenant_id) WHERE status = 'pending';
 
@@ -353,6 +415,8 @@ createPool().then(async () => {
   // Schedule cron jobs
   scheduleHolidayNotifications();
   scheduleNotificationRules();
+  scheduleAnalyticsRefresh();
+  scheduleAssignmentSegmentation();
   await scheduleOffboardingJobs();
   console.log('✅ Cron jobs scheduled');
 

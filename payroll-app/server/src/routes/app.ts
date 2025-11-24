@@ -1028,7 +1028,11 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
             const adjustedSa = sa * adjustmentRatio;
 
             // Calculate deductions based on adjusted gross
-            const pf = (adjustedBasic * Number(settings.pf_rate)) / 100;
+            // PF: 12% of basic, capped at ₹15,000
+            // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+            const pfWageCeiling = 15000;
+            const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+            const pf = (pfBasis * Number(settings.pf_rate)) / 100;
             const esi = adjustedGross <= 21000 ? (adjustedGross * 0.75) / 100 : 0;
             const pt = Number(settings.pt_rate) || 200;
             const annual = adjustedGross * 12;
@@ -2525,7 +2529,11 @@ appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
         const adjustedSa = sa * adjustmentRatio;
 
         // Calculate deductions based on adjusted gross
-        const pf = (adjustedBasic * Number(settings.pf_rate)) / 100;
+        // PF: 12% of basic, capped at ₹15,000
+        // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+        const pfWageCeiling = 15000;
+        const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+        const pf = (pfBasis * Number(settings.pf_rate)) / 100;
         const esi = adjustedGross <= 21000 ? (adjustedGross * 0.75) / 100 : 0;
         const pt = Number(settings.pt_rate) || 200;
         const annual = adjustedGross * 12;
@@ -2874,7 +2882,11 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       const adjustedBonus = monthlyBonus * adjustmentRatio;
 
       // Calculate deductions based on adjusted gross
-      const pfDeduction = (adjustedBasic * Number(settings.pf_rate)) / 100;
+      // PF: 12% of basic, capped at ₹15,000
+      // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+      const pfWageCeiling = 15000;
+      const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+      const pfDeduction = (pfBasis * Number(settings.pf_rate)) / 100;
       const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
       const ptDeduction = Number(settings.pt_rate) || 200;
       
@@ -3329,7 +3341,12 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         const editedGrossSalary = Number(basic_salary) + Number(hra) + Number(special_allowance) + Number(da) + Number(lta) + Number(bonus) + incentiveAmount;
 
         // Recalculate deductions based on edited values
-        const editedPfDeduction = (Number(basic_salary) * Number(settings.pf_rate)) / 100;
+        // PF: 12% of basic, capped at ₹15,000
+        // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+        const pfWageCeiling = 15000;
+        const editedBasic = Number(basic_salary);
+        const editedPfBasis = editedBasic <= pfWageCeiling ? editedBasic : pfWageCeiling;
+        const editedPfDeduction = (editedPfBasis * Number(settings.pf_rate)) / 100;
         const editedEsiDeduction = editedGrossSalary <= 21000 ? (editedGrossSalary * 0.75) / 100 : 0;
         const editedPtDeduction = Number(settings.pt_rate) || 200;
         
@@ -3538,8 +3555,11 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       const adjustedSpecialAllowance = monthlySpecialAllowance * adjustmentRatio;
 
       // Calculate deductions based on adjusted gross
-      // PF: 12% of basic (employee contribution)
-      const pfDeduction = (adjustedBasic * Number(settings.pf_rate)) / 100;
+      // PF: 12% of basic (employee contribution), capped at ₹15,000
+      // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+      const pfWageCeiling = 15000;
+      const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+      const pfDeduction = (pfBasis * Number(settings.pf_rate)) / 100;
       
       // ESI: 0.75% of gross if gross <= 21000 (employee contribution)
       const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
