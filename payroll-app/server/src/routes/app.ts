@@ -2326,6 +2326,7 @@ appRouter.get("/payroll/new-cycle-data", requireAuth, async (req, res) => {
 appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
   const tenantId = (req as any).tenantId as string; // Get from middleware
+  const hrUserId = (req as any).hrUserId as string | null; // Get HR user ID from middleware
   if (!tenantId) {
       return res.status(403).json({ error: "User tenant not found" });
   }
@@ -2336,6 +2337,30 @@ appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
   }
 
   try {
+      // Get the HR user ID (profile ID) to use for created_by
+      // The payroll_cycles.created_by references profiles(id), not users(id)
+      let createdByProfileId: string | null = hrUserId;
+      
+      // If hrUserId is not available, try to fetch it from the users table
+      if (!createdByProfileId) {
+        try {
+          const userResult = await query(
+            `SELECT hr_user_id FROM users WHERE id = $1`,
+            [userId]
+          );
+          createdByProfileId = userResult.rows[0]?.hr_user_id || null;
+        } catch (fetchError: any) {
+          console.warn('[CREATE PAYROLL CYCLE] Could not fetch hr_user_id:', fetchError.message);
+          // If we can't get hr_user_id, we'll set created_by to null (if column allows it)
+          createdByProfileId = null;
+        }
+      }
+      
+      // If still no hr_user_id, log a warning but continue (created_by can be null)
+      if (!createdByProfileId) {
+        console.warn('[CREATE PAYROLL CYCLE] No hr_user_id found for user:', userId, '- setting created_by to null');
+      }
+      
       // Check if payday column exists - use a try-catch to handle any errors
       let hasPayday = false;
       try {
@@ -2408,14 +2433,14 @@ appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
       }
       
       if (hasPayday && payday) {
-        console.log('[CREATE PAYROLL CYCLE] Using INSERT with payday column, payday:', payday);
+        console.log('[CREATE PAYROLL CYCLE] Using INSERT with payday column, payday:', payday, 'created_by:', createdByProfileId);
         insertQuery = `INSERT INTO payroll_cycles
            (tenant_id, created_by, month, year, payday, status, total_employees, total_amount)
            VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7)
            RETURNING *`;
         insertValues = [
           tenantId,
-          userId,
+          createdByProfileId,
           parseInt(month, 10),
           parseInt(year, 10),
           payday,
@@ -2423,14 +2448,14 @@ appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
           totalCompensation || 0
         ];
       } else {
-        console.log('[CREATE PAYROLL CYCLE] Using INSERT without payday column, hasPayday:', hasPayday, 'payday provided:', !!payday);
+        console.log('[CREATE PAYROLL CYCLE] Using INSERT without payday column, hasPayday:', hasPayday, 'payday provided:', !!payday, 'created_by:', createdByProfileId);
         insertQuery = `INSERT INTO payroll_cycles
            (tenant_id, created_by, month, year, status, total_employees, total_amount)
            VALUES ($1, $2, $3, $4, 'draft', $5, $6)
            RETURNING *`;
         insertValues = [
           tenantId,
-          userId,
+          createdByProfileId,
           parseInt(month, 10),
           parseInt(year, 10),
           employeeCount || 0,
