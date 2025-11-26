@@ -8,15 +8,30 @@ const router = express.Router();
 // Supports filters: employee_id, project_id, start_date, end_date, view_type ('employee' or 'organization')
 router.get('/', authenticateToken, async (req, res) => {
   const fetchScheduleEvents = async (tenantId, options) => {
-    const { rangeStart, rangeEnd, isEmployeeView, employee_id, myEmployeeId, isPrivilegedRole } = options;
+    const {
+      rangeStart,
+      rangeEnd,
+      isEmployeeView,
+      employee_id,
+      myEmployeeId,
+      isPrivilegedRole,
+      isManager,
+      managerEmployeeId,
+    } = options;
     let scheduleEmployeeFilter = '';
     const scheduleParams = [tenantId];
     let scheduleParamIndex = 1;
 
     if (isEmployeeView && myEmployeeId) {
+      // Employee view: only own shifts
       scheduleEmployeeFilter = `AND sa.employee_id = $${++scheduleParamIndex}`;
       scheduleParams.push(myEmployeeId);
+    } else if (!isEmployeeView && isManager && managerEmployeeId) {
+      // Manager organization view: own shifts + direct reports' shifts
+      scheduleEmployeeFilter = `AND (sa.employee_id = $${++scheduleParamIndex} OR e.reporting_manager_id = $${scheduleParamIndex})`;
+      scheduleParams.push(managerEmployeeId);
     } else if (isPrivilegedRole && employee_id) {
+      // HR/CEO/Admin/Director filtering by a specific employee
       scheduleEmployeeFilter = `AND sa.employee_id = $${++scheduleParamIndex}`;
       scheduleParams.push(employee_id);
     }
@@ -123,12 +138,15 @@ router.get('/', authenticateToken, async (req, res) => {
     // Check user role
     const roleRes = await query('SELECT role FROM user_roles WHERE user_id = $1', [req.user.id]);
     const userRole = roleRes.rows[0]?.role;
-    const isPrivilegedRole = ['hr', 'ceo'].includes(userRole);
+    // Align privileged roles with other analytics/utilization endpoints so
+    // directors/admins/managers can also view the organization calendar
+    const isPrivilegedRole = ['hr', 'ceo', 'director', 'admin', 'manager'].includes(userRole);
+    const isManager = userRole === 'manager';
     
     // Determine view level: 'employee' shows only current user's events, 'organization' shows all (if HR/CEO)
     const isEmployeeView = view_type === 'employee' || (!isPrivilegedRole && view_type !== 'organization');
     
-    // Get current user's employee ID (needed for employee view)
+    // Get current user's employee ID (needed for employee/manager views)
     const empRes = await query('SELECT id FROM employees WHERE user_id = $1', [req.user.id]);
     const myEmployeeId = empRes.rows.length > 0 ? empRes.rows[0].id : null;
     
@@ -138,8 +156,12 @@ router.get('/', authenticateToken, async (req, res) => {
     let paramIndex = 1;
     
     if (isEmployeeView && myEmployeeId) {
-      // Employee view: only show current user's events
+      // Employee view: only show current user's project assignments
       employeeFilter = `AND a.employee_id = $${++paramIndex}`;
+      params.push(myEmployeeId);
+    } else if (!isEmployeeView && isManager && myEmployeeId) {
+      // Manager organization view: own assignments + direct reports
+      employeeFilter = `AND (a.employee_id = $${++paramIndex} OR e.reporting_manager_id = $${paramIndex})`;
       params.push(myEmployeeId);
     } else if (isPrivilegedRole && employee_id) {
       // Organization view with specific employee filter
@@ -226,6 +248,8 @@ router.get('/', authenticateToken, async (req, res) => {
         employee_id,
         myEmployeeId,
         isPrivilegedRole,
+        isManager,
+        managerEmployeeId: myEmployeeId,
       });
     } catch (error) {
       console.error('Error fetching schedule assignments:', error);
@@ -243,16 +267,22 @@ router.get('/', authenticateToken, async (req, res) => {
         lr.end_date
       FROM leave_requests lr
       LEFT JOIN leave_policies lp ON lp.id = lr.leave_type_id
+      JOIN employees e ON e.id = lr.employee_id
       WHERE lr.tenant_id = $1
+        AND e.tenant_id = $1
         AND lr.status IN ('approved', 'planned')
         AND lr.start_date <= $3::date
         AND lr.end_date >= $2::date
     `;
     const leaveParams = [tenantId, rangeStart, rangeEnd];
     
-    // Filter leaves by employee if in employee view
+    // Filter leaves by employee if in employee/manager view
     if (isEmployeeView && myEmployeeId) {
       leaveQuery += ` AND lr.employee_id = $4`;
+      leaveParams.push(myEmployeeId);
+    } else if (!isEmployeeView && isManager && myEmployeeId) {
+      // Manager org view: own leaves + direct reports' leaves
+      leaveQuery += ` AND (lr.employee_id = $4 OR e.reporting_manager_id = $4)`;
       leaveParams.push(myEmployeeId);
     } else if (isPrivilegedRole && employee_id) {
       leaveQuery += ` AND lr.employee_id = $4`;
@@ -566,6 +596,8 @@ router.get('/', authenticateToken, async (req, res) => {
             employee_id: null,
             myEmployeeId: null,
             isPrivilegedRole: true,
+            isManager: false,
+            managerEmployeeId: null,
           });
           if (fallbackEvents.length > 0) {
             events.push(...fallbackEvents);

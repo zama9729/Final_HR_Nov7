@@ -99,8 +99,10 @@ export default function UnifiedCalendar() {
   const [selectedEmployee, setSelectedEmployee] = useState<string>("all");
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [showFilters, setShowFilters] = useState(false);
-  const orgFullAccessRoles = ['hr', 'ceo'];
-  const orgToggleRoles = ['hr', 'ceo'];
+  // Roles that can see the full organization calendar (not just their own data)
+  const orgFullAccessRoles = ["hr", "ceo", "director", "admin", "manager"];
+  // Roles that can toggle between "My Calendar" and "Organization" views in the UI
+  const orgToggleRoles = ["hr", "ceo", "director", "admin", "manager"];
   const isFullOrgAccess = orgFullAccessRoles.includes(userRole || '');
   const canToggleOrganization = orgToggleRoles.includes(userRole || '');
   const [viewLevel, setViewLevel] = useState<'employee' | 'organization'>('employee');
@@ -158,9 +160,55 @@ export default function UnifiedCalendar() {
     }
   };
 
-  const filteredEvents = useMemo(() => {
+  const roleAdjustedEvents = useMemo(() => {
     if (!calendarData?.events) return [];
-    return calendarData.events.filter((event) => {
+
+    // For organization view, HR/CEO/Admin should see aggregated counts of day/night shifts
+    if (viewLevel === "organization" && ["hr", "ceo", "admin"].includes((userRole || "").toLowerCase())) {
+      const nonShiftEvents: CalendarEvent[] = [];
+      const shiftSummaryMap = new Map<string, { dateKey: string; subtype: string; count: number }>();
+
+      calendarData.events.forEach((event) => {
+        const type = event.resource?.type as EventType;
+        if (type !== "shift") {
+          nonShiftEvents.push(event);
+          return;
+        }
+
+        const shiftTypeRaw = (event.resource?.shift_type || "day").toString().toLowerCase();
+        const subtype = shiftTypeRaw === "night" ? "night" : "day";
+        const dateKey = toDateKey(event.resource?.shift_date || event.start);
+        if (!dateKey) return;
+
+        const mapKey = `${dateKey}|${subtype}`;
+        const existing = shiftSummaryMap.get(mapKey) || { dateKey, subtype, count: 0 };
+        existing.count += 1;
+        shiftSummaryMap.set(mapKey, existing);
+      });
+
+      const summaryEvents: CalendarEvent[] = Array.from(shiftSummaryMap.values()).map((item) => ({
+        id: `shift_summary_${item.dateKey}_${item.subtype}`,
+        title: `${item.subtype === "night" ? "Night" : "Day"} Shifts: ${item.count}`,
+        start: item.dateKey,
+        end: item.dateKey,
+        allDay: true,
+        resource: {
+          type: "shift",
+          shift_type: item.subtype,
+          shift_count: item.count,
+        },
+      }));
+
+      return [...summaryEvents, ...nonShiftEvents];
+    }
+
+    // Other roles or employee view: use raw events
+    return calendarData.events;
+  }, [calendarData?.events, viewLevel, userRole]);
+
+  const filteredEvents = useMemo(() => {
+    if (!roleAdjustedEvents.length) return [];
+    return roleAdjustedEvents.filter((event) => {
       const type = event.resource?.type as EventType;
       if (!type || !eventTypeFilters[type]) return false;
       const dateKey = toDateKey(event.start);
@@ -172,7 +220,7 @@ export default function UnifiedCalendar() {
         return false;
       }
     });
-  }, [calendarData?.events, eventTypeFilters, currentMonth]);
+  }, [roleAdjustedEvents, eventTypeFilters, currentMonth]);
 
   const eventsByDate = useMemo(() => {
     const map: Record<string, CalendarEvent[]> = {};

@@ -19,7 +19,9 @@ import { Loader2, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
-const privilegedRoles = new Set(['hr', 'ceo']);
+// Roles that can view the full organization calendar from the Team Calendar widget.
+// Keep this in sync with the unified calendar page and backend calendar route.
+const privilegedRoles = new Set(['hr', 'ceo', 'director', 'admin', 'manager']);
 
 const EVENT_META: Record<
   string,
@@ -76,7 +78,8 @@ export function CalendarPanel() {
           view_type: viewLevel,
         });
         if (!isMounted) return;
-        const merged: CalendarEvent[] = (response.events || [])
+
+        const mergedRaw: CalendarEvent[] = (response.events || [])
           .map((event: any, idx: number) => {
             const resourceType = event?.resource?.type;
             const normalizedType: CalendarEvent['type'] =
@@ -139,6 +142,36 @@ export function CalendarPanel() {
             } as CalendarEvent;
           })
           .filter((item): item is CalendarEvent => Boolean(item));
+
+        // For HR/CEO/Admin in organization view, aggregate day/night shift counts per day
+        const RoleForAggregation = new Set(['hr', 'ceo', 'admin']);
+        let merged: CalendarEvent[] = mergedRaw;
+        if (viewLevel === 'organization' && RoleForAggregation.has((userRole || '').toLowerCase())) {
+          const nonShiftEvents: CalendarEvent[] = [];
+          const summaryMap = new Map<string, { date: string; subtype: CalendarEvent['shiftSubtype']; count: number }>();
+
+          mergedRaw.forEach((evt) => {
+            if (evt.type !== 'shift') {
+              nonShiftEvents.push(evt);
+              return;
+            }
+            const subtype: CalendarEvent['shiftSubtype'] = evt.shiftSubtype === 'night' ? 'night' : 'day';
+            const key = `${evt.date}|${subtype}`;
+            const existing = summaryMap.get(key) || { date: evt.date, subtype, count: 0 };
+            existing.count += 1;
+            summaryMap.set(key, existing);
+          });
+
+          const summaryEvents: CalendarEvent[] = Array.from(summaryMap.values()).map((item) => ({
+            id: `shift-summary-${item.date}-${item.subtype}`,
+            type: 'shift',
+            title: `${item.subtype === 'night' ? 'Night' : 'Day'} Shifts: ${item.count}`,
+            date: item.date,
+            shiftSubtype: item.subtype,
+          }));
+
+          merged = [...summaryEvents, ...nonShiftEvents];
+        }
 
         setEvents(merged);
       } catch (err: any) {
