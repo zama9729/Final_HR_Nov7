@@ -52,6 +52,7 @@ const Dashboard = () => {
     totalAnnualPayroll: 0
   });
   const [recentCycles, setRecentCycles] = useState<any[]>([]);
+  const [networkError, setNetworkError] = useState<string | null>(null);
 
   useEffect(() => {
     // Use API call to check authentication instead of reading cookies
@@ -138,6 +139,16 @@ const Dashboard = () => {
       } catch (error: any) {
         // If API call fails, check if it's an auth error
         console.error('[Dashboard] Profile fetch failed:', error.message);
+        
+        // Check for network errors
+        if (error.message && (error.message.includes('Network error') || error.message.includes('Failed to fetch'))) {
+          console.error('[Dashboard] Network error detected - backend may not be running');
+          // Show error but don't redirect - let user see the error
+          setNetworkError('Unable to connect to the server. Please ensure the backend is running on http://localhost:4000');
+          setUser({ id: 'unknown' });
+          setLoading(false);
+          return;
+        }
         
         // If it's a 401/403, user needs to authenticate
         if (error.message && (error.message.includes('Unauthorized') || error.message.includes('401') || error.message.includes('403') || error.message.includes('API error'))) {
@@ -237,6 +248,28 @@ const Dashboard = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // Show network error if backend is unavailable
+  if (networkError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="max-w-md w-full mx-4">
+          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-6 text-center">
+            <div className="text-destructive mb-4">
+              <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-semibold text-destructive mb-2">Connection Error</h2>
+            <p className="text-muted-foreground mb-4">{networkError}</p>
+            <Button onClick={() => window.location.reload()} variant="default">
+              Retry
+            </Button>
+          </div>
+        </div>
       </div>
     );
   }

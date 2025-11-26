@@ -221,6 +221,7 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
           cycleYear={selectedCycle.year}
           onProcessed={handleProcessed}
           canModify={isCycleEditable(selectedCycle.status)}
+          mode="edit"
         />
         <PayrollCyclePayslipsDialog
           open={payslipsDialogOpen}

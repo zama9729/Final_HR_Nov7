@@ -56,7 +56,7 @@ const client = {
           const errorData = await response.json().catch(() => ({ error: "API error" }));
           throw new Error(errorData.error || `API error: ${response.statusText}`);
         }
-        const data = response.json();
+        const data = await response.json();
         profileRequestInFlight = null;
         return data;
       }).then((data) => {
@@ -64,6 +64,10 @@ const client = {
         return data;
       }).catch((error) => {
         profileRequestInFlight = null;
+        // Provide more descriptive error messages
+        if (error.message === "Failed to fetch" || error.name === "TypeError") {
+          throw new Error("Network error: Unable to connect to server. Please check if the backend is running.");
+        }
         throw error;
       });
       
@@ -71,19 +75,27 @@ const client = {
     }
     
     // For all other endpoints, make normal request
-    const response = await fetch(resolveEndpoint(endpoint), {
-      method: "GET",
-      credentials: "include", // <-- This sends the auth cookie
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    try {
+      const response = await fetch(resolveEndpoint(endpoint), {
+        method: "GET",
+        credentials: "include", // <-- This sends the auth cookie
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: "API error" }));
-      throw new Error(errorData.error || `API error: ${response.statusText}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: "API error" }));
+        throw new Error(errorData.error || `API error: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error: any) {
+      // Provide more descriptive error messages for network errors
+      if (error.message === "Failed to fetch" || error.name === "TypeError") {
+        throw new Error("Network error: Unable to connect to server. Please check if the backend is running.");
+      }
+      throw error;
     }
-    return response.json();
   },
 
   post: async <T>(endpoint: string, body: unknown): Promise<T> => {
@@ -235,6 +247,9 @@ export const api = {
     
     previewCycle: (cycleId) =>
       client.get(`/api/payroll-cycles/${cycleId}/preview`),
+    
+    saveChanges: (cycleId, payrollItems) =>
+      client.post(`/api/payroll-cycles/${cycleId}/save`, { payrollItems }),
     
     processCycle: (cycleId, payrollItems?) =>
       client.post(`/api/payroll-cycles/${cycleId}/process`, payrollItems ? { payrollItems } : {}),

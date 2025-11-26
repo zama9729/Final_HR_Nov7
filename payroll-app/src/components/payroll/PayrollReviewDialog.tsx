@@ -25,7 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Loader2, Edit2, Check, X } from "lucide-react";
+import { Loader2, Edit2, Check, X, Ban, RotateCcw, Search } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 interface PayrollItem {
@@ -47,6 +47,9 @@ interface PayrollItem {
   tds_deduction: number;
   deductions: number;
   net_salary: number;
+  lop_days?: number;
+  paid_days?: number;
+  total_working_days?: number;
 }
 
 interface PayrollReviewDialogProps {
@@ -57,6 +60,7 @@ interface PayrollReviewDialogProps {
   cycleYear: number;
   onProcessed: () => void;
   canModify?: boolean;
+  mode?: 'edit' | 'process'; // 'edit' for Edit button, 'process' for Process button
 }
 
 export const PayrollReviewDialog = ({
@@ -67,6 +71,7 @@ export const PayrollReviewDialog = ({
   cycleYear,
   onProcessed,
   canModify = true,
+  mode = 'process', // Default to 'process' for backward compatibility
 }: PayrollReviewDialogProps) => {
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -75,6 +80,8 @@ export const PayrollReviewDialog = ({
   const [activeIncentiveIndex, setActiveIncentiveIndex] = useState<number | null>(null);
   const [incentiveDraft, setIncentiveDraft] = useState<string>("");
   const [savingIncentive, setSavingIncentive] = useState(false);
+  const [heldEmployeeIds, setHeldEmployeeIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["payroll-preview", cycleId],
@@ -100,6 +107,8 @@ export const PayrollReviewDialog = ({
     if (!open) {
       setActiveIncentiveIndex(null);
       setConfirmOpen(false);
+      setHeldEmployeeIds(new Set());
+      setSearchQuery("");
     }
   }, [open]);
 
@@ -175,11 +184,55 @@ export const PayrollReviewDialog = ({
     setPayrollItems(updatedItems);
   };
 
+  const handleHoldEmployee = (employeeId: string) => {
+    const newHeld = new Set(heldEmployeeIds);
+    if (newHeld.has(employeeId)) {
+      newHeld.delete(employeeId);
+    } else {
+      newHeld.add(employeeId);
+    }
+    setHeldEmployeeIds(newHeld);
+  };
+
+  const prepareItems = () => {
+    return payrollItems
+      .filter(item => !heldEmployeeIds.has(item.employee_id))
+      .map(item => ({
+        employee_id: item.employee_id,
+        basic_salary: item.basic_salary,
+        hra: item.hra,
+        special_allowance: item.special_allowance,
+        da: item.da,
+        lta: item.lta,
+        bonus: item.bonus,
+        incentive_amount: item.incentive_amount || 0,
+        lop_days: item.lop_days,
+        paid_days: item.paid_days,
+        total_working_days: item.total_working_days,
+      }));
+  };
+
+  const saveChanges = async () => {
+    setProcessing(true);
+    try {
+      const itemsToSave = prepareItems();
+      const result = await api.payroll.saveChanges(cycleId, itemsToSave);
+      toast.success(result.message || "Changes saved successfully");
+      onProcessed();
+      onOpenChange(false);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to save changes");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const processPayroll = async () => {
     setConfirmOpen(false);
     setProcessing(true);
     try {
-      const result = await api.payroll.processCycle(cycleId, payrollItems);
+      const itemsToProcess = prepareItems();
+      const result = await api.payroll.processCycle(cycleId, itemsToProcess);
       toast.success(result.message || "Payroll processed successfully");
       onProcessed();
       onOpenChange(false);
@@ -220,8 +273,24 @@ export const PayrollReviewDialog = ({
     }
   };
 
-  const totalGross = payrollItems.reduce((sum, item) => sum + item.gross_salary, 0);
-  const totalDeductions = payrollItems.reduce((sum, item) => sum + item.deductions, 0);
+  // Filter payroll items based on search query
+  const filteredPayrollItems = payrollItems.filter((item) => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      item.employee_name.toLowerCase().includes(query) ||
+      item.employee_code.toLowerCase().includes(query) ||
+      item.employee_email.toLowerCase().includes(query)
+    );
+  });
+
+  // Filter out held employees for display and calculations
+  const activePayrollItems = filteredPayrollItems.filter(
+    item => !heldEmployeeIds.has(item.employee_id)
+  );
+  
+  const totalGross = activePayrollItems.reduce((sum, item) => sum + item.gross_salary, 0);
+  const totalDeductions = activePayrollItems.reduce((sum, item) => sum + item.deductions, 0);
   const totalNet = totalGross - totalDeductions;
 
   const getMonthName = (month: number) => {
@@ -235,6 +304,11 @@ export const PayrollReviewDialog = ({
           <DialogTitle>Review Payroll - {getMonthName(cycleMonth)} {cycleYear}</DialogTitle>
           <DialogDescription>
             Review and edit employee salaries before processing payroll
+            {heldEmployeeIds.size > 0 && (
+              <span className="block mt-1 text-destructive">
+                {heldEmployeeIds.size} employee{heldEmployeeIds.size !== 1 ? 's' : ''} held (excluded from processing)
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -246,8 +320,29 @@ export const PayrollReviewDialog = ({
           <div className="text-center py-12 text-muted-foreground">
             No employees found for this payroll cycle
           </div>
+        ) : heldEmployeeIds.size === payrollItems.length ? (
+          <div className="text-center py-12 text-muted-foreground">
+            All employees are held. Please unhold at least one employee to process payroll.
+          </div>
         ) : (
           <>
+            {/* Search Bar */}
+            <div className="mb-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by employee name, ID, or email..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              {searchQuery && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Showing {filteredPayrollItems.length} of {payrollItems.length} employees
+                </p>
+              )}
+            </div>
             <div className="border rounded-lg overflow-hidden">
               <Table>
                 <TableHeader>
@@ -264,13 +359,31 @@ export const PayrollReviewDialog = ({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {payrollItems.map((item, index) => (
-                    <TableRow key={item.employee_id}>
-                      {editingIndex === index ? (
+                  {filteredPayrollItems.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                        No employees found matching your search.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredPayrollItems.map((item, index) => {
+                      // Find the original index in payrollItems array for editing
+                      const originalIndex = payrollItems.findIndex(p => p.employee_id === item.employee_id);
+                      const isHeld = heldEmployeeIds.has(item.employee_id);
+                      return (
+                      <TableRow key={item.employee_id} className={isHeld ? "opacity-50 bg-muted/30" : ""}>
+                      {editingIndex === originalIndex ? (
                         <>
                           <TableCell>
                             <div className="space-y-1">
-                              <div className="font-medium">{item.employee_name}</div>
+                              <div className="font-medium flex items-center gap-2">
+                                {item.employee_name}
+                                {heldEmployeeIds.has(item.employee_id) && (
+                                  <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">
+                                    HELD
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-xs text-muted-foreground">{item.employee_code}</div>
                             </div>
                           </TableCell>
@@ -279,7 +392,7 @@ export const PayrollReviewDialog = ({
                               type="number"
                               value={item.basic_salary}
                               onChange={(e) =>
-                                handleFieldChange(index, "basic_salary", Number(e.target.value))
+                                handleFieldChange(originalIndex, "basic_salary", Number(e.target.value))
                               }
                               className="w-24"
                             />
@@ -289,7 +402,7 @@ export const PayrollReviewDialog = ({
                               type="number"
                               value={item.hra}
                               onChange={(e) =>
-                                handleFieldChange(index, "hra", Number(e.target.value))
+                                handleFieldChange(originalIndex, "hra", Number(e.target.value))
                               }
                               className="w-24"
                             />
@@ -300,7 +413,7 @@ export const PayrollReviewDialog = ({
                               value={item.special_allowance}
                               onChange={(e) =>
                                 handleFieldChange(
-                                  index,
+                                  originalIndex,
                                   "special_allowance",
                                   Number(e.target.value)
                                 )
@@ -318,11 +431,11 @@ export const PayrollReviewDialog = ({
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => handleOpenIncentive(index)}
+                                    onClick={() => handleOpenIncentive(originalIndex)}
                                   >
                                     {item.incentive_amount ? "Edit Incentive" : "Add Incentive"}
                                   </Button>
-                                  {activeIncentiveIndex === index && (
+                                  {activeIncentiveIndex === originalIndex && (
                                     <div className="flex items-center gap-2">
                                       <Input
                                         type="number"
@@ -364,7 +477,7 @@ export const PayrollReviewDialog = ({
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleSaveEdit(index)}
+                                onClick={() => handleSaveEdit(originalIndex)}
                               >
                                 <Check className="h-4 w-4" />
                               </Button>
@@ -382,7 +495,14 @@ export const PayrollReviewDialog = ({
                         <>
                           <TableCell>
                             <div className="space-y-1">
-                              <div className="font-medium">{item.employee_name}</div>
+                              <div className="font-medium flex items-center gap-2">
+                                {item.employee_name}
+                                {heldEmployeeIds.has(item.employee_id) && (
+                                  <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">
+                                    HELD
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-xs text-muted-foreground">{item.employee_code}</div>
                             </div>
                           </TableCell>
@@ -401,11 +521,11 @@ export const PayrollReviewDialog = ({
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => handleOpenIncentive(index)}
+                                    onClick={() => handleOpenIncentive(originalIndex)}
                                   >
                                     {item.incentive_amount ? "Edit Incentive" : "Add Incentive"}
                                   </Button>
-                                  {activeIncentiveIndex === index && (
+                                  {activeIncentiveIndex === originalIndex && (
                                     <div className="flex items-center justify-end gap-2">
                                       <Input
                                         type="number"
@@ -444,20 +564,42 @@ export const PayrollReviewDialog = ({
                           </TableCell>
                           <TableCell>
                             {canModify && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleEdit(index)}
-                              >
-                                <Edit2 className="h-4 w-4 mr-1" />
-                                Edit
-                              </Button>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleEdit(originalIndex)}
+                                  disabled={isHeld}
+                                >
+                                  <Edit2 className="h-4 w-4 mr-1" />
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={isHeld ? "default" : "destructive"}
+                                  onClick={() => handleHoldEmployee(item.employee_id)}
+                                  title={isHeld ? "Unhold Salary" : "Hold Salary"}
+                                >
+                                  {isHeld ? (
+                                    <>
+                                      <RotateCcw className="h-4 w-4 mr-1" />
+                                      Unhold
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Ban className="h-4 w-4 mr-1" />
+                                      Hold
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
                             )}
                           </TableCell>
                         </>
                       )}
                     </TableRow>
-                  ))}
+                  )})
+                  )}
                 </TableBody>
               </Table>
             </div>
@@ -489,39 +631,55 @@ export const PayrollReviewDialog = ({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={processing}>
             Cancel
           </Button>
-          <AlertDialog open={confirmOpen} onOpenChange={(open) => !processing && setConfirmOpen(open)}>
-            <AlertDialogTrigger asChild>
-              <Button
-                disabled={!canModify || processing || payrollItems.length === 0}
-              >
-                {processing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  "Process Payroll"
-                )}
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Process payroll?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Are you sure you want to process the payrolls?
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
-                <AlertDialogAction
-                  disabled={processing}
-                  onClick={() => processPayroll()}
+          {mode === 'edit' ? (
+            <Button
+              disabled={!canModify || processing || activePayrollItems.length === 0}
+              onClick={saveChanges}
+            >
+              {processing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save Changes"
+              )}
+            </Button>
+          ) : (
+            <AlertDialog open={confirmOpen} onOpenChange={(open) => !processing && setConfirmOpen(open)}>
+              <AlertDialogTrigger asChild>
+                <Button
+                  disabled={!canModify || processing || activePayrollItems.length === 0}
                 >
-                  Yes, Process
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                  {processing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    "Process Payroll"
+                  )}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Process payroll?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to process the payrolls?
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
+                  <AlertDialogAction
+                    disabled={processing}
+                    onClick={() => processPayroll()}
+                  >
+                    Yes, Process
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
