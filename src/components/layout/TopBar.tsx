@@ -1,4 +1,4 @@
-import { Bell, Search, User, LogOut, Circle } from "lucide-react";
+import { Bell, Search, User, LogOut, Circle, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,12 +21,14 @@ import { Notifications } from "@/components/Notifications";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useTheme } from "@/contexts/ThemeContext";
 
 export function TopBar() {
   const { user, userRole, logout } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [presenceStatus, setPresenceStatus] = useState<string>('online');
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     if (user) {
@@ -100,20 +102,33 @@ export function TopBar() {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-white shadow-sm">
+    <header className="sticky top-0 z-40 border-b bg-white dark:bg-slate-900 shadow-sm dark:border-slate-800">
       <div className="flex h-14 items-center gap-4 px-4 lg:px-6">
         <div className="flex-1 flex items-center gap-4">
           <div className="relative max-w-lg flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
             <Input
               type="search"
               placeholder="Search..."
-              className="pl-10 h-10 bg-gray-50 border-gray-200 text-sm focus-visible:ring-blue-500"
+              className="pl-10 h-10 bg-gray-50 border-gray-200 text-sm focus-visible:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
             />
           </div>
         </div>
 
         <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            className="h-10 w-10 p-0 rounded-full border border-transparent hover:border-blue-200 dark:hover:border-slate-600"
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? (
+              <Sun className="h-5 w-5 text-amber-300" />
+            ) : (
+              <Moon className="h-5 w-5 text-slate-600" />
+            )}
+          </Button>
+
           <div className="relative">
             <Notifications />
           </div>
@@ -121,8 +136,8 @@ export function TopBar() {
           {/* Presence Status Bell */}
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" className="relative h-10 w-10 p-0 hover:bg-gray-50">
-                <Bell className="h-5 w-5 text-gray-600" />
+              <Button variant="ghost" className="relative h-10 w-10 p-0 hover:bg-gray-50 dark:hover:bg-slate-800">
+                <Bell className="h-5 w-5 text-gray-600 dark:text-gray-200" />
                 <Circle 
                   className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 ${getPresenceColor(presenceStatus)}`} 
                   fill="currentColor"
@@ -139,8 +154,8 @@ export function TopBar() {
                     onClick={() => handlePresenceChange(status)}
                     className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
                       presenceStatus === status
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'hover:bg-gray-50 text-gray-700'
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200'
+                        : 'hover:bg-gray-50 text-gray-700 dark:hover:bg-slate-800 dark:text-slate-200'
                     }`}
                   >
                     <Circle 
@@ -160,11 +175,11 @@ export function TopBar() {
           {/* Profile with Role */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="gap-2 h-10 px-2 hover:bg-gray-50">
-                <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
-                  <User className="h-5 w-5 text-gray-600" />
+              <Button variant="ghost" className="gap-2 h-10 px-2 hover:bg-gray-50 dark:hover:bg-slate-800">
+                <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center">
+                  <User className="h-5 w-5 text-gray-600 dark:text-gray-200" />
                 </div>
-                <span className="hidden lg:inline-block text-sm font-medium text-gray-700">
+                <span className="hidden lg:inline-block text-sm font-medium text-gray-700 dark:text-gray-200">
                   {getRoleLabel(userRole)}
                 </span>
               </Button>

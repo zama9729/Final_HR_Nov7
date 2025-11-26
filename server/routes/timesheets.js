@@ -2,6 +2,13 @@ import express from 'express';
 import { query } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { injectHolidayRowsIntoTimesheet, selectEmployeeHolidays } from '../services/holidays.js';
+import {
+  calculateDurationHours,
+  normalizeTimestamp,
+  validateClockAction,
+  parseMonthInput,
+  normalizeCoordinate,
+} from '../services/timesheet-clock.js';
 
 // Helper function to auto-persist holiday entries
 async function persistHolidayEntries(timesheetId, orgId, employee, month, existingEntries) {
@@ -49,6 +56,268 @@ async function persistHolidayEntries(timesheetId, orgId, employee, month, existi
 }
 
 const router = express.Router();
+
+router.post('/clock', authenticateToken, async (req, res) => {
+  const { action, timestamp, note, source = 'manual', latitude, longitude, locationAccuracy } = req.body;
+  const normalizedAction = (action || '').toLowerCase();
+
+  if (!['in', 'out'].includes(normalizedAction)) {
+    return res.status(400).json({ error: 'action must be "in" or "out"' });
+  }
+
+  try {
+    const context = await getEmployeeContext(req.user.id);
+    if (!context) {
+      return res.status(404).json({ error: 'Employee record not found' });
+    }
+
+    const eventTime = normalizeTimestamp(timestamp);
+    if (!eventTime) {
+      return res.status(400).json({ error: 'Invalid timestamp' });
+    }
+
+    const lastEventResult = await query(
+      `SELECT id, event_type, is_open, event_time
+       FROM timesheet_clock_events
+       WHERE employee_id = $1
+       ORDER BY event_time DESC
+       LIMIT 1`,
+      [context.employee_id]
+    );
+    const lastEvent = lastEventResult.rows[0];
+    const validation = validateClockAction(lastEvent, normalizedAction);
+    if (!validation.ok) {
+      return res.status(400).json({ error: validation.message });
+    }
+
+    const lat = normalizeCoordinate(latitude);
+    const lon = normalizeCoordinate(longitude);
+    const accuracy = normalizeCoordinate(locationAccuracy);
+
+    await query('BEGIN');
+    try {
+      const eventInsert = await query(
+        `INSERT INTO timesheet_clock_events (
+          employee_id, tenant_id, event_type, event_time, source,
+          latitude, longitude, location_accuracy, notes, metadata, is_open, created_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, $10, $11)
+        -- metadata optional placeholder
+        RETURNING *`,
+        [
+          context.employee_id,
+          context.tenant_id,
+          normalizedAction,
+          eventTime,
+          source || 'manual',
+          lat,
+          lon,
+          accuracy,
+          note || null,
+          normalizedAction === 'in',
+          req.user.id,
+        ]
+      );
+      const eventRow = eventInsert.rows[0];
+      let entryRow = null;
+
+      if (normalizedAction === 'out') {
+        const openInResult = await query(
+          `SELECT * FROM timesheet_clock_events
+           WHERE employee_id = $1 AND event_type = 'in' AND is_open = true
+           ORDER BY event_time DESC
+           LIMIT 1`,
+          [context.employee_id]
+        );
+
+        const openIn = openInResult.rows[0];
+        if (!openIn) {
+          await query('ROLLBACK');
+          return res.status(400).json({ error: 'No open clock-in found' });
+        }
+
+        const durationHours = calculateDurationHours(openIn.event_time, eventTime);
+        if (durationHours <= 0) {
+          await query('ROLLBACK');
+          return res.status(400).json({ error: 'Clock-out must be after clock-in' });
+        }
+
+        const workDate = new Date(openIn.event_time).toISOString().slice(0, 10);
+
+        await query(
+          `UPDATE timesheet_clock_events
+           SET is_open = false, paired_event_id = $1
+           WHERE id = $2`,
+          [eventRow.id, openIn.id]
+        );
+        await query(
+          `UPDATE timesheet_clock_events
+           SET is_open = false
+           WHERE id = $1`,
+          [eventRow.id]
+        );
+
+        const entryInsert = await query(
+          `INSERT INTO timesheet_entries (
+            timesheet_id,
+            employee_id,
+            tenant_id,
+            work_date,
+            hours,
+            clock_in,
+            clock_out,
+            clock_in_event_id,
+            clock_out_event_id,
+            duration_hours,
+            source,
+            notes
+          ) VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $4, 'clock', $9)
+          RETURNING id, work_date, hours, duration_hours`,
+          [
+            context.employee_id,
+            context.tenant_id,
+            workDate,
+            durationHours,
+            openIn.event_time,
+            eventTime,
+            openIn.id,
+            eventRow.id,
+            note || null,
+          ]
+        );
+
+        entryRow = entryInsert.rows[0];
+      }
+
+      await query('COMMIT');
+      res.json({
+        event: eventRow,
+        entry: entryRow,
+      });
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    console.error('Clock API error:', error);
+    res.status(500).json({ error: error.message || 'Failed to record clock event' });
+  }
+});
+
+router.get('/clock/status', authenticateToken, async (req, res) => {
+  try {
+    const context = await getEmployeeContext(req.user.id);
+    if (!context) {
+      return res.status(404).json({ error: 'Employee record not found' });
+    }
+
+    const eventsResult = await query(
+      `SELECT id, event_type, event_time, is_open
+       FROM timesheet_clock_events
+       WHERE employee_id = $1
+       ORDER BY event_time DESC
+       LIMIT 10`,
+      [context.employee_id]
+    );
+
+    const openSession = eventsResult.rows.find((row) => row.event_type === 'in' && row.is_open) || null;
+
+    res.json({
+      last_event: eventsResult.rows[0] || null,
+      open_session: openSession,
+      recent_events: eventsResult.rows,
+    });
+  } catch (error) {
+    console.error('Clock status error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch clock status' });
+  }
+});
+
+router.get('/tasks', authenticateToken, async (req, res) => {
+  try {
+    const context = await getEmployeeContext(req.user.id);
+    if (!context) {
+      return res.status(404).json({ error: 'Employee record not found' });
+    }
+    const monthParam = req.query.month;
+    const monthDate = parseMonthInput(monthParam) || parseMonthInput(new Date().toISOString().slice(0, 7));
+
+    if (!monthDate) {
+      return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM' });
+    }
+
+    const tasksResult = await query(
+      `SELECT id, task_name, client_name, project_name, description, is_billable, month
+       FROM timesheet_tasks
+       WHERE employee_id = $1 AND month = $2
+       ORDER BY task_name ASC`,
+      [context.employee_id, monthDate]
+    );
+
+    res.json(tasksResult.rows);
+  } catch (error) {
+    console.error('Fetch tasks error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch tasks' });
+  }
+});
+
+router.post('/tasks', authenticateToken, async (req, res) => {
+  try {
+    const { month, taskName, clientName = '', projectName = '', description = '', isBillable = true } = req.body;
+    if (!month || !taskName) {
+      return res.status(400).json({ error: 'month and taskName are required' });
+    }
+
+    const context = await getEmployeeContext(req.user.id);
+    if (!context) {
+      return res.status(404).json({ error: 'Employee record not found' });
+    }
+
+    const monthDate = parseMonthInput(month);
+    if (!monthDate) {
+      return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM' });
+    }
+
+    const result = await query(
+      `INSERT INTO timesheet_tasks (
+        employee_id, tenant_id, month, task_name, client_name, project_name, description, is_billable
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (employee_id, month, task_name, client_name, project_name)
+      DO UPDATE SET
+        description = EXCLUDED.description,
+        is_billable = EXCLUDED.is_billable,
+        updated_at = now()
+      RETURNING *`,
+      [
+        context.employee_id,
+        context.tenant_id,
+        monthDate,
+        taskName,
+        clientName || '',
+        projectName || '',
+        description || '',
+        Boolean(isBillable),
+      ]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Create task error:', error);
+    res.status(500).json({ error: error.message || 'Failed to save task' });
+  }
+});
+
+async function getEmployeeContext(userId) {
+  const result = await query(
+    `SELECT e.id AS employee_id, e.tenant_id AS tenant_id
+     FROM employees e
+     WHERE e.user_id = $1
+     LIMIT 1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
 
 // Get employee project assignments
 router.get('/employee/:employeeId/projects', authenticateToken, async (req, res) => {

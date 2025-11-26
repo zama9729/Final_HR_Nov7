@@ -8,7 +8,8 @@ import { useToast } from '@/hooks/use-toast';
 import EmployeeSkillsEditor from '@/components/EmployeeSkillsEditor';
 import EmployeeCertificationsEditor from '@/components/EmployeeCertificationsEditor';
 import EmployeePastProjectsEditor from '@/components/EmployeePastProjectsEditor';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -31,11 +32,13 @@ import {
   CreditCard,
   Home,
   UserCheck,
-  Activity
+  Activity,
+  Clock,
+  CalendarDays
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Progress as ProgressBar } from '@/components/ui/progress';
-import { format } from 'date-fns';
+import { format, parseISO, isToday, isTomorrow, addDays, differenceInCalendarDays } from 'date-fns';
 
 interface EmployeeData {
   id: string;
@@ -130,10 +133,14 @@ const calculateOnboardingProgress = (onboardingData: any): number => {
 export default function MyProfile() {
   const { userRole } = useAuth();
   const { toast } = useToast();
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState('about');
   const [employeeId, setEmployeeId] = useState<string>('');
   const [employee, setEmployee] = useState<EmployeeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
+  const [upcomingShifts, setUpcomingShifts] = useState<any[]>([]);
+  const [loadingShifts, setLoadingShifts] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -141,23 +148,166 @@ export default function MyProfile() {
     phone: '',
   });
 
+  const tabParam = useMemo(() => {
+    return new URLSearchParams(location.search).get('tab');
+  }, [location.search]);
+
+  const employeeParam = useMemo(() => {
+    return new URLSearchParams(location.search).get('employee');
+  }, [location.search]);
+
   useEffect(() => {
-    fetchMyProfile();
-  }, []);
+    setActiveTab(tabParam || 'about');
+  }, [tabParam]);
+
+  useEffect(() => {
+    if (employeeParam) {
+      fetchEmployeeProfile(employeeParam);
+    } else {
+      fetchMyProfile();
+    }
+  }, [employeeParam]);
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    const params = new URLSearchParams(location.search);
+    params.set('tab', value);
+    window.history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
+  };
+
+  useEffect(() => {
+    if (employeeId) {
+      fetchUpcomingShifts(employeeId);
+    } else {
+      setUpcomingShifts([]);
+    }
+  }, [employeeId]);
+
+  const fetchUpcomingShifts = async (targetEmployeeId: string) => {
+    if (!targetEmployeeId) return;
+    
+    try {
+      setLoadingShifts(true);
+      const today = new Date();
+      const nextMonth = addDays(today, 30);
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/scheduling/employee/${targetEmployeeId}/shifts?start_date=${format(today, 'yyyy-MM-dd')}&end_date=${format(nextMonth, 'yyyy-MM-dd')}`,
+        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setUpcomingShifts(data.shifts || []);
+      }
+    } catch (error) {
+      console.error('Error fetching upcoming shifts:', error);
+    } finally {
+      setLoadingShifts(false);
+    }
+  };
+
+  const formatShiftTime = (time?: string | null) => {
+    if (!time) return '--';
+    const [hours, minutes] = time.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  const getShiftDateLabel = (dateStr: string) => {
+    const date = parseISO(dateStr);
+    if (isToday(date)) return 'Today';
+    if (isTomorrow(date)) return 'Tomorrow';
+    return format(date, 'EEE, MMM d, yyyy');
+  };
+
+  const loadEmployeeProfile = async (id: string) => {
+    const emp = await api.getEmployee(id);
+    setEmployeeId(id);
+    setEmployee(emp);
+    setFormData({
+      firstName: emp?.profiles?.first_name || '',
+      lastName: emp?.profiles?.last_name || '',
+      email: emp?.profiles?.email || '',
+      phone: emp?.profiles?.phone || '',
+    });
+    setIsEditing(false);
+  };
+
+  const fetchEmployeeProfile = async (id: string) => {
+    try {
+      setLoading(true);
+      await loadEmployeeProfile(id);
+    } catch (error: any) {
+      console.error('Error loading employee profile:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load employee profile',
+        variant: 'destructive',
+      });
+      setEmployee(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchMyProfile = async () => {
-      try {
+    try {
       setLoading(true);
-        const me = await api.getEmployeeId();
-        if (me?.id) {
-          setEmployeeId(me.id);
-        const emp = await api.getEmployee(me.id);
-        setEmployee(emp);
+      
+      // Try to get employee ID, but don't fail if it doesn't exist
+      let me = null;
+      try {
+        me = await api.getEmployeeId();
+      } catch (error: any) {
+        // Employee record doesn't exist yet - this is OK for new signups
+        console.log('No employee record found, using profile data:', error.message);
+      }
+      
+      if (me?.id) {
+        await loadEmployeeProfile(me.id);
+        return;
+      }
+
+      // Fallback to base profile if no employee record exists
+      const profile = await api.getProfile();
+      if (profile) {
+        setEmployeeId('');
+        const fallbackEmployee: EmployeeData = {
+          id: profile.id || 'profile',
+          employee_id: profile.employee_code || profile.employee_id || 'N/A',
+          department: profile.department || 'N/A',
+          position: profile.position || profile.job_title || 'N/A',
+          work_location: profile.work_location || profile.location || profile.timezone || 'N/A',
+          join_date: profile.created_at || new Date().toISOString(),
+          status: profile.status || 'active',
+          onboarding_status: profile.onboarding_status || 'not_started',
+          reporting_manager: undefined,
+          reporting_team: [],
+          onboarding_data: {},
+          profiles: {
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            email: profile.email,
+            phone: profile.phone,
+          },
+        };
+        setEmployee(fallbackEmployee);
         setFormData({
-          firstName: emp?.profiles?.first_name || '',
-          lastName: emp?.profiles?.last_name || '',
-          email: emp?.profiles?.email || '',
-          phone: emp?.profiles?.phone || '',
+          firstName: profile.first_name || '',
+          lastName: profile.last_name || '',
+          email: profile.email || '',
+          phone: profile.phone || '',
+        });
+        setIsEditing(false);
+      } else {
+        setEmployee(null);
+        toast({
+          title: 'Profile not found',
+          description: 'Please contact your administrator to set up your profile.',
+          variant: 'destructive',
         });
       }
     } catch (error: any) {
@@ -167,33 +317,37 @@ export default function MyProfile() {
         description: error.message || 'Failed to load profile',
         variant: 'destructive',
       });
+      setEmployee(null);
     } finally {
       setLoading(false);
     }
   };
 
   const handleSave = async () => {
-    if (!employeeId) return;
+    if (!isViewingOwnProfile) return;
     try {
-      // Update profile information
-      await api.updateProfile({
-        firstName: formData.firstName,
-        lastName: formData.lastName,
+      await api.submitProfileChangeRequest({
+        first_name: formData.firstName,
+        last_name: formData.lastName,
         email: formData.email,
         phone: formData.phone,
       });
-      
+
       toast({
-        title: 'Success',
-        description: 'Profile updated successfully',
+        title: 'Request submitted',
+        description: 'Your profile update is pending HR approval.',
       });
-      
+
       setIsEditing(false);
-      fetchMyProfile();
+      if (employeeParam) {
+        fetchEmployeeProfile(employeeParam);
+      } else {
+        fetchMyProfile();
+      }
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to update profile',
+        description: error.message || 'Failed to submit profile change request',
         variant: 'destructive',
       });
     }
@@ -209,9 +363,12 @@ export default function MyProfile() {
     return `${employee?.profiles?.first_name || ''} ${employee?.profiles?.last_name || ''}`.trim() || 'Employee';
   };
 
+  const isViewingOtherProfile = Boolean(employeeParam);
+  const isViewingOwnProfile = !isViewingOtherProfile;
+
   // Employees can edit their own profile (skills, certifications, past projects)
   // HR/CEO can view but not edit
-  const canEditOwnProfile = userRole === 'employee' || userRole === 'manager';
+  const canEditOwnProfile = isViewingOwnProfile && (userRole === 'employee' || userRole === 'manager');
   const canViewOnly = ['hr', 'ceo', 'director', 'admin'].includes(userRole || '');
   const isViewingAsManager = ['manager', 'hr', 'ceo', 'director', 'admin'].includes(userRole || '');
   
@@ -273,6 +430,12 @@ export default function MyProfile() {
                   <div>
                     <h2 className="text-2xl font-bold">{getFullName()}</h2>
                     <p className="text-muted-foreground">{employee.position || 'Employee'}</p>
+                    {employee.verified_at && (
+                      <p className="text-xs text-sky-600 flex items-center gap-1 mt-1">
+                        <UserCheck className="h-3 w-3" />
+                        Verified on {format(new Date(employee.verified_at), 'MMM dd, yyyy')}
+                      </p>
+                    )}
                   </div>
                   {canEditOwnProfile && !canViewOnly && (
                     <Button
@@ -385,7 +548,7 @@ export default function MyProfile() {
         </Card>
 
         {/* Tabs */}
-        <Tabs defaultValue="about" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
           <TabsList>
             <TabsTrigger value="about">
               <Info className="mr-2 h-4 w-4" />
@@ -402,6 +565,10 @@ export default function MyProfile() {
             <TabsTrigger value="projects">
               <Briefcase className="mr-2 h-4 w-4" />
               Past Projects
+            </TabsTrigger>
+            <TabsTrigger value="shifts" disabled={!employeeId}>
+              <CalendarDays className="mr-2 h-4 w-4" />
+              My Shifts
             </TabsTrigger>
           </TabsList>
 
@@ -491,6 +658,30 @@ export default function MyProfile() {
                   )}
                 </CardContent>
               </Card>
+
+              {employee?.probation && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Activity className="h-5 w-5" />
+                      Probation
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Status</span>
+                      <Badge variant="secondary">{employee.probation.status}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Ends</span>
+                      <span className="font-medium">{format(new Date(employee.probation.probation_end), 'MMM dd, yyyy')}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {differenceInCalendarDays(new Date(employee.probation.probation_end), new Date())} days remaining
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Financial Information */}
               {employee?.onboarding_data && (
@@ -643,6 +834,90 @@ export default function MyProfile() {
                 employeeId={employeeId} 
                 canEdit={canEditOwnProfile && !canViewOnly} 
               />
+            )}
+          </TabsContent>
+
+          <TabsContent value="shifts">
+            {employeeId ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CalendarDays className="h-5 w-5" />
+                    My Scheduled Shifts
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {loadingShifts ? (
+                    <div className="text-center py-8 text-muted-foreground">Loading shifts...</div>
+                  ) : upcomingShifts.length > 0 ? (
+                    <div className="space-y-3">
+                      {upcomingShifts.map((shift) => {
+                        const shiftDate = parseISO(shift.shift_date);
+                        const isShiftToday = isToday(shiftDate);
+                        const isShiftTomorrow = isTomorrow(shiftDate);
+                        
+                        return (
+                          <div
+                            key={shift.id}
+                            className={`p-4 rounded-lg border transition-colors ${
+                              isShiftToday 
+                                ? 'bg-blue-50 dark:bg-blue-950 border-blue-200' 
+                                : isShiftTomorrow 
+                                ? 'bg-amber-50 dark:bg-amber-950 border-amber-200' 
+                                : 'bg-muted/30 border-border'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <p className="font-semibold">{shift.template_name}</p>
+                                  <Badge 
+                                    variant={
+                                      shift.shift_type === 'night' ? 'destructive' :
+                                      shift.shift_type === 'evening' ? 'secondary' : 'default'
+                                    }
+                                    className="text-xs"
+                                  >
+                                    {shift.shift_type?.charAt(0).toUpperCase() + shift.shift_type?.slice(1) || 'Day'} Shift
+                                  </Badge>
+                                </div>
+                                <p className="text-sm text-muted-foreground">
+                                  {getShiftDateLabel(shift.shift_date)}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4 mt-3 text-sm">
+                              <div className="flex items-center gap-2">
+                                <Clock className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-medium">
+                                  {formatShiftTime(shift.start_time)} - {formatShiftTime(shift.end_time)}
+                                </span>
+                              </div>
+                              {shift.assigned_by && (
+                                <div className="text-xs text-muted-foreground">
+                                  Assigned by: {shift.assigned_by === 'algorithm' ? 'System' : 'Manager'}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <CalendarDays className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p className="text-sm">No shifts scheduled for the next 30 days</p>
+                      <p className="text-xs mt-1">Contact your manager or HR for shift assignments</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="py-10 text-center text-muted-foreground">
+                  Shifts are available only for employees with active records. Please contact HR if you need access.
+                </CardContent>
+              </Card>
             )}
           </TabsContent>
         </Tabs>

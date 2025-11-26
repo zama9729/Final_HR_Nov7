@@ -54,11 +54,17 @@ import setupRoutes from './routes/setup.js';
 import branchesRoutes from './routes/branches.js';
 import superRoutes from './routes/super.js';
 import auditLogsRoutes from './routes/audit-logs.js';
+import schedulingRoutes from './routes/scheduling.js';
+import rosterRoutes from './routes/roster.js';
+import probationRoutes from './routes/probation.js';
+import documentUploadRoutes from './routes/document-upload.js';
 import { setTenantContext } from './middleware/tenant.js';
-import { scheduleHolidayNotifications, scheduleNotificationRules } from './services/cron.js';
+import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs } from './services/cron.js';
 import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
+import { scheduleAutoLogout } from './services/attendance-auto-logout.js';
 import { createAttendanceTables } from './utils/createAttendanceTables.js';
+import { createSchedulingTables } from './utils/createSchedulingTables.js';
 import { ensureAdminRole } from './utils/runMigration.js';
 import { ensureOnboardingColumns } from './utils/ensureOnboardingColumns.js';
 import { scheduleAnalyticsRefresh } from './services/analytics-refresh.js';
@@ -133,11 +139,14 @@ app.use('/api/leave-policies', authenticateToken, setTenantContext, leavePolicie
 app.use('/api/leave-requests', authenticateToken, leaveRequestsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/shifts', authenticateToken, shiftsRoutes);
+app.use('/api/scheduling', authenticateToken, schedulingRoutes);
+app.use('/api/roster', authenticateToken, setTenantContext, rosterRoutes);
 // Mount core workflow routes with auth and tenant context
 app.use('/api/workflows', authenticateToken, setTenantContext, workflowsRoutes);
 
 // Onboarding routes (no auth required for some endpoints)
 app.use('/api/onboarding', onboardingRoutes);
+app.use('/api/onboarding/docs', documentUploadRoutes);
 app.use('/api/onboarding-tracker', onboardingTrackerRoutes);
 app.use('/api/appraisal-cycles', appraisalCycleRoutes);
 app.use('/api/performance-reviews', performanceReviewRoutes);
@@ -165,6 +174,7 @@ app.use('/api/documents', authenticateToken, documentsRoutes);
 app.use('/api/offboarding', authenticateToken, offboardingRoutes);
 app.use('/api/rehire', authenticateToken, rehireRoutes);
 app.use('/api/audit-logs', authenticateToken, setTenantContext, auditLogsRoutes);
+app.use('/api/probation', authenticateToken, probationRoutes);
 app.use('/api/setup', setupRoutes);
 app.use('/api/branches', branchesRoutes);
 app.use('/api/super', superRoutes);
@@ -290,6 +300,40 @@ createPool().then(async () => {
     console.error('Error checking/creating attendance tables:', error);
     console.warn('⚠️  Please manually run the migration: server/db/migrations/20251103_add_attendance_system.sql');
   }
+
+  // Ensure scheduling tables exist
+  try {
+    // Check if all required tables exist
+    const tableCheck = await dbQuery(`
+      SELECT 
+        (SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'shift_templates')) as has_templates,
+        (SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'scheduling_rule_sets')) as has_rule_sets,
+        (SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'generated_schedules')) as has_schedules;
+    `);
+    
+    const { has_templates, has_rule_sets, has_schedules } = tableCheck.rows[0];
+    
+    if (!has_templates || !has_rule_sets || !has_schedules) {
+      console.log('⚠️  Scheduling tables missing. Creating tables...');
+      await createSchedulingTables();
+      console.log('✅ Scheduling tables created successfully');
+    } else {
+      console.log('✅ Scheduling tables found');
+    }
+  } catch (error) {
+    console.error('Error checking/creating scheduling tables:', error);
+    console.error('Error details:', error.message);
+    // Try to create tables anyway
+    try {
+      console.log('Attempting to create tables despite error...');
+      await createSchedulingTables();
+      console.log('✅ Scheduling tables created after retry');
+    } catch (retryError) {
+      console.error('Failed to create scheduling tables:', retryError);
+      console.warn('⚠️  Please manually run the migration: server/db/migrations/20250121_shift_scheduling_module.sql');
+    }
+  }
+
   // Ensure payments/subscriptions tables exist
   await dbQuery(`
     DO $$ BEGIN
@@ -402,10 +446,13 @@ createPool().then(async () => {
   scheduleAnalyticsRefresh();
   scheduleAssignmentSegmentation();
   await scheduleOffboardingJobs();
+  await scheduleAutoLogout();
+  await scheduleProbationJobs();
   console.log('✅ Cron jobs scheduled');
 
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+    console.log(`🌐 Accessible on your network at: http://192.168.0.121:${PORT}`);
   });
 }).catch((error) => {
   console.error('❌ Failed to initialize database:', error);

@@ -2,6 +2,7 @@ import express from 'express';
 import { query } from '../db/pool.js';
 import { create_approval, apply_approval, next_approver } from '../approval_flow.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { validateLeaveWindow } from '../services/probation.js';
 
 const router = express.Router();
 
@@ -319,6 +320,21 @@ router.post('/', authenticateToken, async (req, res) => {
     const start = new Date(start_date);
     const end = new Date(end_date);
     const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+    const probationCheck = await validateLeaveWindow({
+      tenantId,
+      employeeId,
+      fromDate: start_date,
+      toDate: end_date,
+    });
+
+    if (!probationCheck.allowed) {
+      return res.status(400).json({
+        error: probationCheck.reason || 'Leave not allowed during probation',
+        override_required: probationCheck.override_required,
+        probation_block: true,
+      });
+    }
 
     // Insert leave request
     const insertResult = await query(

@@ -982,173 +982,163 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
 
     // Handle clock out
     if (action === 'OUT') {
-      const inEventResult = await query(
-        `SELECT id, raw_timestamp
-         FROM attendance_events
-         WHERE employee_id = $1
-           AND event_type = 'IN'
-           AND paired_timesheet_entry_id IS NULL
-           AND DATE(raw_timestamp) = DATE($2)
-         ORDER BY raw_timestamp DESC
+      // First, check for an open session in clock_punch_sessions
+      const openSessionResult = await query(
+        `SELECT id, in_event_id, clock_in_at, work_type as session_work_type
+         FROM clock_punch_sessions
+         WHERE tenant_id = $1 AND employee_id = $2 AND clock_out_at IS NULL
+         ORDER BY clock_in_at DESC
          LIMIT 1`,
-        [employeeId, punchTime]
+        [userTenantId, employeeId]
       );
 
-      if (inEventResult.rows.length > 0) {
-        const inEvent = inEventResult.rows[0];
-        const startTime = new Date(inEvent.raw_timestamp);
-        const endTime = punchTime;
-        const workDate = startTime.toISOString().split('T')[0];
-        const totalHours = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
+      if (openSessionResult.rows.length === 0) {
+        return res.status(400).json({ 
+          error: 'No active clock-in session found. Please clock in first before clocking out.' 
+        });
+      }
 
-        const weekStart = getWeekStart(workDate);
-        const weekEnd = getWeekEnd(weekStart);
+      const openSession = openSessionResult.rows[0];
+      const startTime = new Date(openSession.clock_in_at);
+      const endTime = punchTime;
+      const workDate = startTime.toISOString().split('T')[0];
+      const totalHours = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
 
-        let timesheetResult = await query(
-          `SELECT id FROM timesheets 
-           WHERE employee_id = $1 AND week_start_date = $2`,
-          [employeeId, weekStart]
+      // Get the IN event from the session
+      let inEvent;
+      if (openSession.in_event_id) {
+        const inEventResult = await query(
+          `SELECT id, raw_timestamp FROM attendance_events WHERE id = $1`,
+          [openSession.in_event_id]
         );
-
-        let timesheetId;
-        if (timesheetResult.rows.length === 0) {
-          const newTimesheetResult = await query(
-            `INSERT INTO timesheets (employee_id, week_start_date, week_end_date, total_hours, tenant_id)
-             VALUES ($1, $2, $3, $4, $5)
-             RETURNING id`,
-            [employeeId, weekStart, weekEnd, 0, userTenantId]
-          );
-          timesheetId = newTimesheetResult.rows[0].id;
-        } else {
-          timesheetId = timesheetResult.rows[0].id;
+        if (inEventResult.rows.length > 0) {
+          inEvent = inEventResult.rows[0];
         }
+      }
 
-        const entryResult = await query(
-          `INSERT INTO timesheet_entries (
-            timesheet_id, employee_id, work_date, hours, tenant_id, source, 
-            attendance_event_id, start_time_utc, end_time_utc, payroll_status, description
-          )
-          VALUES ($1, $2, $3, $4, $5, 'api', $6, $7, $8, 'pending_for_payroll', 'Punch In/Out')
-          RETURNING id`,
-          [
-            timesheetId,
-            employeeId,
-            workDate,
-            totalHours,
-            userTenantId,
-            event.id,
-            startTime,
-            endTime
-          ]
+      // If no IN event found, try to find one from the same day
+      if (!inEvent) {
+        const inEventResult = await query(
+          `SELECT id, raw_timestamp
+           FROM attendance_events
+           WHERE employee_id = $1
+             AND event_type = 'IN'
+             AND tenant_id = $2
+             AND DATE(raw_timestamp) = DATE($3)
+           ORDER BY raw_timestamp DESC
+           LIMIT 1`,
+          [employeeId, userTenantId, startTime]
         );
+        if (inEventResult.rows.length > 0) {
+          inEvent = inEventResult.rows[0];
+        }
+      }
 
-        pairedTimesheetEntryId = entryResult.rows[0].id;
+      const weekStart = getWeekStart(workDate);
+      const weekEnd = getWeekEnd(weekStart);
 
+      let timesheetResult = await query(
+        `SELECT id FROM timesheets 
+         WHERE employee_id = $1 AND week_start_date = $2`,
+        [employeeId, weekStart]
+      );
+
+      let timesheetId;
+      if (timesheetResult.rows.length === 0) {
+        const newTimesheetResult = await query(
+          `INSERT INTO timesheets (employee_id, week_start_date, week_end_date, total_hours, tenant_id)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id`,
+          [employeeId, weekStart, weekEnd, 0, userTenantId]
+        );
+        timesheetId = newTimesheetResult.rows[0].id;
+      } else {
+        timesheetId = timesheetResult.rows[0].id;
+      }
+
+      const entryResult = await query(
+        `INSERT INTO timesheet_entries (
+          timesheet_id, employee_id, work_date, hours, tenant_id, source, 
+          attendance_event_id, start_time_utc, end_time_utc, payroll_status, description
+        )
+        VALUES ($1, $2, $3, $4, $5, 'api', $6, $7, $8, 'pending_for_payroll', 'Punch In/Out')
+        RETURNING id`,
+        [
+          timesheetId,
+          employeeId,
+          workDate,
+          totalHours,
+          userTenantId,
+          event.id,
+          startTime,
+          endTime
+        ]
+      );
+
+      pairedTimesheetEntryId = entryResult.rows[0].id;
+
+      // Update attendance events if we have an IN event
+      if (inEvent) {
         await query(
           'UPDATE attendance_events SET paired_timesheet_entry_id = $1 WHERE id IN ($2, $3)',
           [pairedTimesheetEntryId, inEvent.id, event.id]
         );
-
+      } else {
+        // Update only the OUT event if no IN event found
         await query(
-          `UPDATE timesheets 
-           SET total_hours = (
-             SELECT COALESCE(SUM(hours), 0) 
-             FROM timesheet_entries 
-             WHERE timesheet_id = $1
-           )
-           WHERE id = $1`,
-          [timesheetId]
+          'UPDATE attendance_events SET paired_timesheet_entry_id = $1 WHERE id = $2',
+          [pairedTimesheetEntryId, event.id]
         );
-
-        const durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
-        
-        // Update clock_punch_sessions
-        const sessionUpdate = await query(
-          `WITH open_session AS (
-            SELECT id FROM clock_punch_sessions
-            WHERE tenant_id = $1 AND employee_id = $2 AND clock_out_at IS NULL
-            ORDER BY clock_in_at DESC
-            LIMIT 1
-          )
-          UPDATE clock_punch_sessions cps
-          SET out_event_id = $3,
-              clock_out_at = $4,
-              duration_minutes = $5,
-              device_out = $6,
-              lat_out = $7,
-              lon_out = $8,
-              address_text_out = $9,
-              capture_method_out = $10,
-              consent_out = $11,
-              consent_ts_out = $12,
-              work_location_branch_id = $13,
-              work_type = $14,
-              timesheet_entry_id = $15,
-              updated_at = now()
-          FROM open_session
-          WHERE cps.id = open_session.id
-          RETURNING cps.id`,
-          [
-            userTenantId,
-            employeeId,
-            event.id,
-            endTime,
-            durationMinutes,
-            device_id || null,
-            resolvedLat,
-            resolvedLon,
-            resolvedAddress,
-            finalCaptureMethod,
-            consent,
-            consentTs,
-            resolvedBranchId,
-            workType,
-            pairedTimesheetEntryId
-          ]
-        );
-
-        if (!sessionUpdate.rows.length) {
-          // Create session if it doesn't exist
-          await query(
-            `INSERT INTO clock_punch_sessions (
-              tenant_id, employee_id, in_event_id, out_event_id,
-              clock_in_at, clock_out_at, duration_minutes,
-              device_in, device_out,
-              lat_in, lon_in, address_text_in, capture_method_in,
-              lat_out, lon_out, address_text_out, capture_method_out,
-              consent_in, consent_ts_in, consent_out, consent_ts_out,
-              work_location_branch_id, work_type, timesheet_entry_id
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
-            [
-              userTenantId,
-              employeeId,
-              inEvent.id,
-              event.id,
-              startTime,
-              endTime,
-              durationMinutes,
-              null,
-              device_id || null,
-              null,
-              null,
-              null,
-              null,
-              resolvedLat,
-              resolvedLon,
-              resolvedAddress,
-              finalCaptureMethod,
-              false,
-              null,
-              consent,
-              consentTs,
-              resolvedBranchId,
-              workType,
-              pairedTimesheetEntryId
-            ]
-          );
-        }
       }
+
+      await query(
+        `UPDATE timesheets 
+         SET total_hours = (
+           SELECT COALESCE(SUM(hours), 0) 
+           FROM timesheet_entries 
+           WHERE timesheet_id = $1
+         )
+         WHERE id = $1`,
+        [timesheetId]
+      );
+
+      const durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
+      
+      // Update the open session
+      await query(
+        `UPDATE clock_punch_sessions
+         SET out_event_id = $1,
+             clock_out_at = $2,
+             duration_minutes = $3,
+             device_out = $4,
+             lat_out = $5,
+             lon_out = $6,
+             address_text_out = $7,
+             capture_method_out = $8,
+             consent_out = $9,
+             consent_ts_out = $10,
+             work_location_branch_id = COALESCE($11, work_location_branch_id),
+             work_type = COALESCE($12, work_type, 'WFH'),
+             timesheet_entry_id = $13,
+             updated_at = now()
+         WHERE id = $14`,
+        [
+          event.id,
+          endTime,
+          durationMinutes,
+          device_id || null,
+          resolvedLat,
+          resolvedLon,
+          resolvedAddress,
+          finalCaptureMethod,
+          consent,
+          consentTs,
+          resolvedBranchId,
+          workType,
+          pairedTimesheetEntryId,
+          openSession.id
+        ]
+      );
     }
 
     // Emit event for analytics (placeholder - can be extended with event emitter)

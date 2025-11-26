@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
-    "test": "node server/tests/permissions.test.js && node server/tests/routes.test.js",
+    "test": "node server/tests/permissions.test.js && node server/tests/routes.test.js && node server/tests/timesheet-clock.test.js && node server/tests/profile-change.test.js && node server/tests/roster-engine.test.js",
     "test:permissions": "node server/tests/permissions.test.js",
     "test:routes": "node server/tests/routes.test.js",
     "seed:policies": "node server/scripts/seed-policy-catalog.js",
@@ -20,6 +20,8 @@
     "list:emails": "node scripts/list-emails.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.937.0",
+    "@aws-sdk/s3-request-presigner": "^3.939.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "csv-parse": "^6.1.0",
@@ -28,6 +30,7 @@
     "express-rate-limit": "^7.1.5",
     "json2csv": "^5.0.7",
     "jsonwebtoken": "^9.0.2",
+    "mime-types": "^3.0.2",
     "multer": "^2.0.2",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.7",

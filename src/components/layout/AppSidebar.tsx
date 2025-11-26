@@ -11,19 +11,19 @@ import {
   Network,
   UserCheck,
   CalendarClock,
+  CalendarDays,
   Award,
   Bot,
   CheckSquare,
-  Upload,
   History,
   DollarSign,
   Search,
-  UserX,
   Inbox,
   LogOut,
   ClipboardList,
   Receipt,
   ChevronDown,
+  Upload,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -80,7 +80,6 @@ const hrGroups: NavGroup[] = [
       { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
       { title: "Offboarding", url: "/offboarding", icon: LogOut },
       { title: "Background Checks", url: "/background-checks", icon: Search },
-      { title: "Terminations & Rehires", url: "/terminations", icon: UserX },
       { title: "Org Chart", url: "/org-chart", icon: Network },
       { title: "Skills", url: "/profile/skills", icon: Award },
       { title: "Workflows", url: "/workflows", icon: Workflow },
@@ -88,6 +87,7 @@ const hrGroups: NavGroup[] = [
       { title: "Policy Management", url: "/policies/management", icon: FileText },
       { title: "New Project", url: "/projects/new", icon: Building2 },
       { title: "Audit Logs", url: "/audit-logs", icon: History, roles: ["ceo", "hr"] },
+      { title: "Profile Change Requests", url: "/hr/profile-requests", icon: FileText, roles: ["hr", "director", "ceo", "admin"] },
     ],
   },
   {
@@ -98,19 +98,12 @@ const hrGroups: NavGroup[] = [
       { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
       { title: "Timesheets", url: "/timesheets", icon: Clock, feature: "timesheets" },
       { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
-      { title: "Shift Management", url: "/shifts", icon: CalendarClock, feature: "timesheets" },
-      { title: "Attendance Upload", url: "/attendance/upload", icon: Upload, feature: "clock" },
-      { title: "Upload History", url: "/attendance/history", icon: History, feature: "clock" },
+      { title: "Shift Management", url: "/scheduling", icon: CalendarClock, roles: ["hr", "ceo", "admin"] },
       { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
       { title: "Holiday Management", url: "/holidays", icon: Calendar },
       { title: "Leave Policies", url: "/policies", icon: FileText },
-    ],
-  },
-  {
-    id: "planning",
-    label: "Planning & Calendar",
-    items: [
-      { title: "Project Calendar", url: "/calendar", icon: CalendarClock },
+      { title: "Attendance Upload", url: "/attendance/upload", icon: Upload, roles: ["hr", "director", "ceo", "admin"] },
+      { title: "Upload History", url: "/attendance/history", icon: History, roles: ["hr", "director", "ceo", "admin"] },
     ],
   },
   {
@@ -144,10 +137,8 @@ const managerGroups: NavGroup[] = [
       { title: "Timesheets", url: "/timesheets", icon: Clock, feature: "timesheets" },
       { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
       { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-      { title: "Attendance Upload", url: "/attendance/upload", icon: Upload, feature: "clock" },
       { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
       { title: "Appraisals", url: "/appraisals", icon: Award },
-      { title: "Project Calendar", url: "/calendar", icon: CalendarClock },
     ],
   },
   {
@@ -177,7 +168,7 @@ const employeeGroups: NavGroup[] = [
       { title: "My Profile", url: "/my/profile", icon: Users },
       { title: "My Timesheets", url: "/timesheets", icon: Clock, feature: "timesheets" },
       { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-      { title: "Attendance Upload", url: "/attendance/upload", icon: Upload, feature: "clock" },
+      { title: "My Shifts", url: "/my/profile?tab=shifts", icon: CalendarClock },
       { title: "Leave Requests", url: "/leaves", icon: Calendar },
       { title: "Request Resignation", url: "/offboarding/new", icon: LogOut },
       { title: "Documents", url: "/documents", icon: Inbox },
@@ -192,7 +183,6 @@ const employeeGroups: NavGroup[] = [
     label: "Organization",
     items: [
       { title: "Org Chart", url: "/org-chart", icon: Network },
-      { title: "Project Calendar", url: "/calendar", icon: CalendarClock },
     ],
   },
 ];
@@ -209,8 +199,6 @@ const accountantGroups: NavGroup[] = [
     id: "attendance",
     label: "Attendance",
     items: [
-      { title: "Attendance Upload", url: "/attendance/upload", icon: Upload, feature: "clock" },
-      { title: "Upload History", url: "/attendance/history", icon: History, feature: "clock" },
       { title: "Timesheets", url: "/timesheets", icon: Clock, feature: "timesheets" },
     ],
   },

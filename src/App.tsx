@@ -19,11 +19,11 @@ import Employees from "./pages/Employees";
 import Appraisals from "./pages/Appraisals";
 import MyAppraisal from "./pages/MyAppraisal";
 import ShiftManagement from "./pages/ShiftManagement";
+import UnifiedCalendar from "./pages/UnifiedCalendar";
+import StaffScheduling from "./pages/StaffScheduling";
 import AIAssistantPage from "./pages/AIAssistantPage";
 import RAGDocumentUpload from "./pages/RAGDocumentUpload";
 import EmployeeImport from "./pages/EmployeeImport";
-import AttendanceUpload from "./pages/AttendanceUpload";
-import AttendanceUploadHistory from "./pages/AttendanceUploadHistory";
 import ClockInOut from "./pages/ClockInOut";
 import Workflows from "./pages/Workflows";
 import WorkflowEditor from "./pages/WorkflowEditor";
@@ -31,11 +31,15 @@ import Timesheets from "./pages/Timesheets";
 import TimesheetApprovals from "./pages/TimesheetApprovals";
 import Analytics from "./pages/Analytics";
 import AttendanceAnalytics from "./pages/AttendanceAnalytics";
+import AttendanceUpload from "./pages/AttendanceUpload";
+import AttendanceUploadHistory from "./pages/AttendanceUploadHistory";
+import HrProfileRequests from "./pages/HrProfileRequests";
 import NotFound from "./pages/NotFound";
 import AddEmployee from "./pages/AddEmployee";
 import LeavePolicies from "./pages/LeavePolicies";
 import LeaveRequests from "./pages/LeaveRequests";
 import Onboarding from "./pages/Onboarding";
+import OnboardingNextStep from "./pages/OnboardingNextStep";
 import ChangePassword from "./pages/ChangePassword";
 import OrgChart from "./pages/OrgChart";
 import SetupPassword from "./pages/SetupPassword";
@@ -48,13 +52,11 @@ import ProjectSuggestions from "./pages/ProjectSuggestions";
 import CEODashboard from "./pages/CEODashboard";
 import EmployeeDetail from "./pages/EmployeeDetail";
 import MyProfile from "./pages/MyProfile";
-import ProjectCalendar from "./pages/ProjectCalendar";
 import HolidayManagement from "./pages/HolidayManagement";
 import EmployeeStats from "./pages/EmployeeStats";
 import Payroll from "./pages/Payroll";
 import PayrollAdjustments from "./pages/PayrollAdjustments";
 import BackgroundChecks from "./pages/BackgroundChecks";
-import Terminations from "./pages/Terminations";
 import DocumentInbox from "./pages/DocumentInbox";
 import OffboardingNew from "./pages/OffboardingNew";
 import OffboardingQueue from "./pages/OffboardingQueue";
@@ -115,7 +117,7 @@ const App = () => (
             <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><CEODashboard /></ProtectedRoute>} />
             <Route path="/projects/new" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectNew /></ProtectedRoute>} />
             <Route path="/projects/:id/suggestions" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectSuggestions /></ProtectedRoute>} />
-            <Route path="/calendar" element={<ProtectedRoute><ProjectCalendar /></ProtectedRoute>} />
+            <Route path="/calendar" element={<ProtectedRoute><UnifiedCalendar /></ProtectedRoute>} />
             {/* Admin page: login required; backend enforces superadmin */}
             <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             
@@ -125,16 +127,20 @@ const App = () => (
             <Route path="/leaves" element={<ProtectedRoute><LeaveRequests /></ProtectedRoute>} />
             <Route path="/org-chart" element={<ProtectedRoute><OrgChart /></ProtectedRoute>} />
             <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
+            <Route path="/onboarding/next-step" element={<ProtectedRoute><OnboardingNextStep /></ProtectedRoute>} />
             <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/appraisals" element={<ProtectedRoute allowedRoles={['manager', 'hr', 'director', 'ceo', 'admin']}><Appraisals /></ProtectedRoute>} />
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
             <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><ShiftManagement /></ProtectedRoute>} />
+            <Route path="/scheduling" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><StaffScheduling /></ProtectedRoute>} />
+            <Route path="/scheduling/calendar" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'manager']}><UnifiedCalendar /></ProtectedRoute>} />
             <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
             <Route path="/rag/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><RAGDocumentUpload /></ProtectedRoute>} />
             <Route path="/attendance/clock" element={<ProtectedRoute><ClockInOut /></ProtectedRoute>} />
-            <Route path="/attendance/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><AttendanceUpload /></ProtectedRoute>} />
-            <Route path="/attendance/history" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><AttendanceUploadHistory /></ProtectedRoute>} />
+            <Route path="/hr/profile-requests" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><HrProfileRequests /></ProtectedRoute>} />
+            <Route path="/attendance/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><AttendanceUpload /></ProtectedRoute>} />
+            <Route path="/attendance/history" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><AttendanceUploadHistory /></ProtectedRoute>} />
             <Route path="/analytics/attendance" element={<ProtectedRoute allowedRoles={['ceo', 'hr', 'director', 'admin']}><AttendanceAnalytics /></ProtectedRoute>} />
             <Route path="/payroll" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin']}><Payroll /></ProtectedRoute>} />
             <Route path="/tax/declaration" element={<ProtectedRoute><TaxDeclaration /></ProtectedRoute>} />
@@ -142,7 +148,6 @@ const App = () => (
             <Route path="/reports/form16" element={<ProtectedRoute><Form16 /></ProtectedRoute>} />
             <Route path="/payroll/adjustments" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin']}><PayrollAdjustments /></ProtectedRoute>} />
             <Route path="/background-checks" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><BackgroundChecks /></ProtectedRoute>} />
-            <Route path="/terminations" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><Terminations /></ProtectedRoute>} />
             <Route path="/documents" element={<ProtectedRoute><DocumentInbox /></ProtectedRoute>} />
             <Route path="/offboarding/new" element={<ProtectedRoute><OffboardingNew /></ProtectedRoute>} />
             <Route path="/offboarding/policies" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><OffboardingPolicies /></ProtectedRoute>} />

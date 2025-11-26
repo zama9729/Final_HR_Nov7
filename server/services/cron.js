@@ -4,6 +4,18 @@ function tzNow(tz) {
   return new Date(new Date().toLocaleString('en-US', { timeZone: tz || 'UTC' }));
 }
 
+async function notifyUser(tenantId, userId, title, message) {
+  try {
+    await query(
+      `INSERT INTO notifications (tenant_id, user_id, title, message, type, created_at)
+       VALUES ($1,$2,$3,$4,'probation', now())`,
+      [tenantId, userId, title, message]
+    );
+  } catch (error) {
+    console.error('Failed to create probation notification', error);
+  }
+}
+
 export async function scheduleHolidayNotifications() {
   if (String(process.env.CRON_ENABLED || 'true') !== 'true') return;
   let cron;
@@ -246,6 +258,90 @@ export async function scheduleNotificationRules() {
   });
 }
 
-export default { scheduleHolidayNotifications, scheduleNotificationRules };
+export async function scheduleProbationJobs() {
+  if (String(process.env.CRON_ENABLED || 'true') !== 'true') return;
+  let cron;
+  try {
+    ({ default: cron } = await import('node-cron'));
+  } catch (e) {
+    console.error('node-cron not installed, skipping probation scheduler');
+    return;
+  }
+
+  cron.schedule('0 8 * * *', async () => {
+    try {
+      const reminders = await query(
+        `
+        SELECT p.*, e.reporting_manager_id, e.tenant_id, e.user_id as employee_user
+        FROM probations p
+        JOIN employees e ON e.id = p.employee_id
+        WHERE p.status = ANY($1::text[])
+          AND DATE_PART('day', p.probation_end::date - CURRENT_DATE) IN (7,2)
+        `,
+        [['in_probation', 'extended']]
+      );
+
+      for (const probation of reminders.rows) {
+        if (probation.reporting_manager_id) {
+          const manager = await query(
+            'SELECT user_id FROM employees WHERE id = $1',
+            [probation.reporting_manager_id]
+          );
+          if (manager.rows[0]) {
+            await notifyUser(
+              probation.tenant_id,
+              manager.rows[0].user_id,
+              'Probation ending soon',
+              `Probation for employee ${probation.employee_id} ends on ${probation.probation_end}`
+            );
+          }
+        }
+        if (probation.employee_user) {
+          await notifyUser(
+            probation.tenant_id,
+            probation.employee_user,
+            'Probation reminder',
+            `Your probation ends on ${probation.probation_end}`
+          );
+        }
+      }
+
+      const autoConfirm = await query(
+        `
+        SELECT * FROM probations
+        WHERE auto_confirm_at_end = true
+          AND status = ANY($1::text[])
+          AND probation_end::date <= CURRENT_DATE
+        `,
+        [['in_probation', 'extended']]
+      );
+
+      for (const probation of autoConfirm.rows) {
+        await query(
+          `UPDATE probations
+           SET status = 'completed',
+               completed_at = now()
+           WHERE id = $1`,
+          [probation.id]
+        );
+        await query(
+          `UPDATE employees
+           SET probation_status = 'completed'
+           WHERE id = $1`,
+          [probation.employee_id]
+        );
+        await query(
+          `INSERT INTO probation_events (probation_id, tenant_id, actor_id, event_type, payload)
+           VALUES ($1,$2,$3,'probation.auto_confirmed',$4)`,
+          [probation.id, probation.tenant_id, null, JSON.stringify({ auto: true })]
+        );
+      }
+    } catch (error) {
+      console.error('Probation cron error', error);
+    }
+  });
+}
+
+export default { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs };
 
 

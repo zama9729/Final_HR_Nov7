@@ -21,6 +21,11 @@ type CalendarEvent = {
     employee_name: string;
     allocation_percent: number;
     role?: string;
+    shift_date?: string;
+    start_time?: string;
+    end_time?: string;
+    template_name?: string;
+    shift_type?: string;
   };
 };
 
@@ -36,6 +41,35 @@ export default function ProjectCalendar() {
   const [loading, setLoading] = useState(true);
 
   const isHROrCEO = ['hr', 'ceo', 'director'].includes(userRole || '');
+
+  const formatShiftDate = (dateStr?: string) => {
+    if (!dateStr) return 'Date TBD';
+    const date = new Date(`${dateStr}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return dateStr;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const formatShiftTime = (timeStr?: string | null) => {
+    if (!timeStr) return '--';
+    const [hours = '0', minutes = '00'] = timeStr.split(':');
+    let hourNum = parseInt(hours, 10);
+    if (Number.isNaN(hourNum)) return timeStr;
+    const ampm = hourNum >= 12 ? 'pm' : 'am';
+    hourNum = hourNum % 12 || 12;
+    return `${hourNum}:${minutes.padStart(2, '0')} ${ampm}`;
+  };
+
+  const crossesMidnight = (start?: string | null, end?: string | null) => {
+    if (!start || !end) return false;
+    return start > end;
+  };
+
+  const formatShiftTimeRange = (start?: string | null, end?: string | null) => {
+    const startLabel = formatShiftTime(start);
+    const endLabel = formatShiftTime(end);
+    if (!start || !end) return `${startLabel} - ${endLabel}`;
+    return crossesMidnight(start, end) ? `${startLabel} - ${endLabel} (+1 day)` : `${startLabel} - ${endLabel}`;
+  };
 
   const loadCalendar = async () => {
     try {
@@ -238,18 +272,58 @@ export default function ProjectCalendar() {
                             {day}
                           </div>
                           <div className="space-y-0.5">
-                            {dayEvents.slice(0, 2).map(event => (
+                            {dayEvents.slice(0, 2).map(event => {
+                              const shiftLabel = event.resource.shift_type
+                                ? `${event.resource.shift_type.charAt(0).toUpperCase()}${event.resource.shift_type.slice(1)}`
+                                : null;
+                              const badgeClasses = shiftLabel === 'Night'
+                                ? 'bg-slate-900 text-white dark:bg-slate-700 dark:text-white'
+                                : shiftLabel === 'Evening'
+                                ? 'bg-amber-600/20 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200'
+                                : 'bg-blue-900/20 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100';
+                              const shiftContainerClass = event.resource.type === 'shift'
+                                ? 'bg-blue-900/10 dark:bg-blue-900/30 border border-blue-900/40 text-blue-950 dark:text-blue-100'
+                                : 'bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100';
+                              const shiftTimeRange = formatShiftTimeRange(event.resource.start_time, event.resource.end_time);
+
+                              return (
                               <div
                                 key={event.id}
-                                className="text-xs p-1 rounded truncate bg-blue-100 dark:bg-blue-900 cursor-pointer hover:opacity-80"
-                                title={`${event.resource.project_name} - ${event.resource.employee_name} (${event.resource.allocation_percent}%)`}
+                                className={`text-xs p-1 rounded truncate cursor-pointer hover:opacity-80 ${shiftContainerClass}`}
+                                title={
+                                  event.resource.type === 'shift'
+                                    ? `${event.resource.template_name} - ${event.resource.employee_name} (${event.resource.start_time} - ${event.resource.end_time})`
+                                    : `${event.resource.project_name} - ${event.resource.employee_name} (${event.resource.allocation_percent}%)`
+                                }
                               >
-                                <div className="font-medium truncate">{event.resource.project_name}</div>
-                                <div className="text-muted-foreground truncate">
-                                  {event.resource.employee_name} ({event.resource.allocation_percent}%)
-                                </div>
+                                {event.resource.type === 'shift' ? (
+                                  <>
+                                    <div className="flex items-center justify-between gap-1">
+                                      <div className="font-medium truncate">{event.resource.template_name}</div>
+                                      {shiftLabel && (
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${badgeClasses}`}>
+                                          {shiftLabel} Shift
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-muted-foreground truncate">
+                                      {event.resource.employee_name}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground">
+                                      {shiftTimeRange}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="font-medium truncate">{event.resource.project_name}</div>
+                                    <div className="text-muted-foreground truncate">
+                                      {event.resource.employee_name} ({event.resource.allocation_percent}%)
+                                    </div>
+                                  </>
+                                )}
                               </div>
-                            ))}
+                            );
+                            })}
                             {dayEvents.length > 2 && (
                               <div className="text-xs text-muted-foreground">+{dayEvents.length - 2} more</div>
                             )}
@@ -273,10 +347,14 @@ export default function ProjectCalendar() {
         <Card>
           <CardHeader><CardTitle>Legend</CardTitle></CardHeader>
           <CardContent>
-            <div className="flex gap-4 text-sm">
+            <div className="flex flex-wrap gap-4 text-sm">
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded bg-blue-100 dark:bg-blue-900"></div>
                 <span>Project Assignment</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded bg-purple-100 dark:bg-purple-900"></div>
+                <span>Shift Schedule</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded bg-green-100 dark:bg-green-900"></div>
@@ -293,19 +371,54 @@ export default function ProjectCalendar() {
         {/* Events List */}
         {events.length > 0 && (
           <Card>
-            <CardHeader><CardTitle>All Assignments ({events.length})</CardTitle></CardHeader>
+            <CardHeader><CardTitle>All Events ({events.length})</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {events.map(event => (
-                  <div key={event.id} className="p-2 border rounded text-sm">
-                    <div className="font-medium">{event.resource.project_name}</div>
-                    <div className="text-muted-foreground">
-                      {event.resource.employee_name} • {event.resource.allocation_percent}% allocation
-                      {event.resource.role && ` • ${event.resource.role}`}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {new Date(event.start).toLocaleDateString()} - {event.end ? new Date(event.end).toLocaleDateString() : 'Ongoing'}
-                    </div>
+                  <div 
+                    key={event.id} 
+                    className={`p-2 border rounded text-sm ${
+                      event.resource.type === 'shift' 
+                        ? 'bg-purple-50 dark:bg-purple-950 border-purple-200' 
+                        : 'bg-blue-50 dark:bg-blue-950 border-blue-200'
+                    }`}
+                  >
+                    {event.resource.type === 'shift' ? (
+                      <>
+                        <div className="font-medium flex items-center gap-2 flex-wrap">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-purple-200 dark:bg-purple-800">Shift</span>
+                          <span>{event.resource.template_name}</span>
+                          {event.resource.shift_type && (
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${
+                              event.resource.shift_type === 'night'
+                                ? 'bg-slate-900 text-white dark:bg-slate-700 dark:text-white'
+                                : event.resource.shift_type === 'evening'
+                                ? 'bg-amber-200 text-amber-800 dark:bg-amber-800 dark:text-amber-100'
+                                : 'bg-purple-200 text-purple-800 dark:bg-purple-800 dark:text-purple-100'
+                            }`}>
+                              {event.resource.shift_type.charAt(0).toUpperCase() + event.resource.shift_type.slice(1)} Shift
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {event.resource.employee_name}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatShiftDate(event.resource.shift_date)} • {formatShiftTimeRange(event.resource.start_time, event.resource.end_time)}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="font-medium">{event.resource.project_name}</div>
+                        <div className="text-muted-foreground">
+                          {event.resource.employee_name} • {event.resource.allocation_percent}% allocation
+                          {event.resource.role && ` • ${event.resource.role}`}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(event.start).toLocaleDateString()} - {event.end ? new Date(event.end).toLocaleDateString() : 'Ongoing'}
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

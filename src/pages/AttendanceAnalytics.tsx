@@ -6,11 +6,39 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CalendarIcon, TrendingUp, Users, Clock, MapPin, Download } from "lucide-react";
-import { format } from "date-fns";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { 
+  Loader2, 
+  CalendarIcon, 
+  TrendingUp, 
+  Users, 
+  Clock, 
+  MapPin, 
+  Download, 
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  Timer
+} from "lucide-react";
+import { format, parseISO } from "date-fns";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  AreaChart,
+} from "recharts";
 
 interface OverviewData {
   total_employees: number;
@@ -31,6 +59,22 @@ interface HistogramData {
   wfh: number;
 }
 
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-card border border-border rounded-lg shadow-lg p-3">
+        <p className="font-semibold mb-2">{format(parseISO(label), "MMM dd, yyyy")}</p>
+        {payload.map((entry: any, index: number) => (
+          <p key={index} className="text-sm" style={{ color: entry.color }}>
+            {entry.name}: <span className="font-medium">{entry.value}</span>
+          </p>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
+
 export default function AttendanceAnalytics() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -44,7 +88,7 @@ export default function AttendanceAnalytics() {
 
   useEffect(() => {
     fetchData();
-  }, [dateRange, selectedPeriod]);
+  }, [dateRange]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -58,8 +102,16 @@ export default function AttendanceAnalytics() {
       ]);
 
       setOverview(overviewData);
-      setHistogram(histogramData.histogram || []);
+      // Ensure histogram data is properly formatted
+      const formattedHistogram = (histogramData.histogram || []).map((item: any) => ({
+        ...item,
+        date: item.date || format(parseISO(item.date), "yyyy-MM-dd"),
+      }));
+      setHistogram(formattedHistogram);
+      
+      console.log("Histogram data:", formattedHistogram); // Debug log
     } catch (error: any) {
+      console.error("Error fetching analytics:", error);
       toast({
         title: "Error",
         description: error?.message || "Failed to load analytics",
@@ -114,6 +166,17 @@ export default function AttendanceAnalytics() {
     a.click();
     window.URL.revokeObjectURL(url);
   };
+
+  // Calculate statistics
+  const stats = histogram.length > 0 ? {
+    avgPresent: Math.round(histogram.reduce((sum, h) => sum + h.present, 0) / histogram.length),
+    avgAbsent: Math.round(histogram.reduce((sum, h) => sum + h.absent, 0) / histogram.length),
+    avgLate: Math.round(histogram.reduce((sum, h) => sum + h.late, 0) / histogram.length),
+    totalWFO: histogram.reduce((sum, h) => sum + h.wfo, 0),
+    totalWFH: histogram.reduce((sum, h) => sum + h.wfh, 0),
+    maxPresent: Math.max(...histogram.map(h => h.present)),
+    minPresent: Math.min(...histogram.map(h => h.present)),
+  } : null;
 
   return (
     <AppLayout>
@@ -183,18 +246,21 @@ export default function AttendanceAnalytics() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{overview?.total_employees || 0}</div>
-                </CardContent>
-              </Card>
+                <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{overview?.total_employees || 0}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Active workforce
+                </p>
+              </CardContent>
+            </Card>
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Today Present</CardTitle>
-                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{overview?.today_present || 0}</div>
@@ -207,10 +273,13 @@ export default function AttendanceAnalytics() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">On-Time %</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                  <Timer className="h-4 w-4 text-blue-600" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{overview?.on_time_percent || 0}%</div>
+                  <p className="text-xs text-muted-foreground">
+                    Employees arriving on time
+                  </p>
                 </CardContent>
               </Card>
 
@@ -220,117 +289,243 @@ export default function AttendanceAnalytics() {
                   <MapPin className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="default">{overview?.wfo_percent || 0}% WFO</Badge>
-                    <Badge variant="outline">{overview?.wfh_percent || 0}% WFH</Badge>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="default" className="bg-blue-600">
+                      {overview?.wfo_percent || 0}% WFO
+                    </Badge>
+                    <Badge variant="outline">
+                      {overview?.wfh_percent || 0}% WFH
+                    </Badge>
                   </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Work location distribution
+                  </p>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Histogram Chart */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Attendance Timeline</CardTitle>
-                <CardDescription>
-                  Daily present/absent/late counts for the selected period
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {histogram.length > 0 ? (
-                  <div className="space-y-4">
-                    <div className="h-[300px] overflow-x-auto">
-                      <div className="flex items-end gap-2 h-full min-w-full">
-                        {(() => {
-                          const totals = histogram.map(
-                            (h) => h.present + h.absent + h.late
-                          );
-                          const maxValue = Math.max(...totals, 1); // prevent divide-by-zero
+            {/* Statistics Cards */}
+            {stats && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Avg Daily Present</CardTitle>
+                    <TrendingUp className="h-4 w-4 text-green-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.avgPresent}</div>
+                    <p className="text-xs text-muted-foreground">
+                      Range: {stats.minPresent} - {stats.maxPresent}
+                    </p>
+                  </CardContent>
+                </Card>
 
-                          return histogram.map((item, idx) => {
-                            const presentHeight = (item.present / maxValue) * 100;
-                            const absentHeight = (item.absent / maxValue) * 100;
-                            const lateHeight = (item.late / maxValue) * 100;
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Avg Daily Absent</CardTitle>
+                    <XCircle className="h-4 w-4 text-red-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.avgAbsent}</div>
+                    <p className="text-xs text-muted-foreground">
+                      Average absentees per day
+                    </p>
+                  </CardContent>
+                </Card>
 
-                            const totalCount = item.present + item.absent + item.late;
-                            const attendanceSummary =
-                              totalCount === 0
-                                ? "No records"
-                                : `${totalCount} total events`;
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Avg Daily Late</CardTitle>
+                    <AlertCircle className="h-4 w-4 text-yellow-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.avgLate}</div>
+                    <p className="text-xs text-muted-foreground">
+                      Average late arrivals
+                    </p>
+                  </CardContent>
+                </Card>
 
-                            return (
-                              <div
-                                key={idx}
-                                className="flex-1 flex flex-col items-center gap-1 group relative"
-                              >
-                                <div className="flex flex-col-reverse gap-0.5 w-full h-full">
-                                  <div
-                                    className="bg-primary rounded-t transition-all"
-                                    style={{ height: `${presentHeight}%` }}
-                                    title={`Present: ${item.present}`}
-                                  />
-                                  <div
-                                    className="bg-destructive rounded-t transition-all"
-                                    style={{ height: `${absentHeight}%` }}
-                                    title={`Absent: ${item.absent}`}
-                                  />
-                                  <div
-                                    className="bg-yellow-500 rounded-t transition-all"
-                                    style={{ height: `${lateHeight}%` }}
-                                    title={`Late: ${item.late}`}
-                                  />
-                                </div>
-                                <span className="text-xs text-muted-foreground transform -rotate-45 origin-top-left whitespace-nowrap">
-                                  {format(new Date(item.date), "MMM dd")}
-                                </span>
-                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block bg-popover border rounded p-2 shadow-lg z-10 min-w-[160px]">
-                                  <div className="text-xs space-y-1">
-                                    <div className="font-semibold">
-                                      {format(new Date(item.date), "MMM dd, yyyy")}
-                                    </div>
-                                    <div className="text-muted-foreground">
-                                      {attendanceSummary}
-                                    </div>
-                                    <div>Present: {item.present}</div>
-                                    <div>Absent: {item.absent}</div>
-                                    <div>Late: {item.late}</div>
-                                    <div className="pt-1 border-t text-muted-foreground">
-                                      WFO: {item.wfo} · WFH: {item.wfh}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          });
-                        })()}
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Total WFO/WFH</CardTitle>
+                    <MapPin className="h-4 w-4 text-purple-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.totalWFO + stats.totalWFH}</div>
+                    <p className="text-xs text-muted-foreground">
+                      WFO: {stats.totalWFO} · WFH: {stats.totalWFH}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Charts Section */}
+            <Tabs defaultValue="timeline" className="space-y-4">
+              <TabsList>
+                <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                <TabsTrigger value="trends">Trends</TabsTrigger>
+                <TabsTrigger value="location">Work Location</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="timeline" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Attendance Timeline</CardTitle>
+                    <CardDescription>
+                      Daily present/absent/late counts for the selected period
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {histogram.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={400}>
+                        <ComposedChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fontSize: 12 }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
+                            tickFormatter={(value) => format(parseISO(value), "MMM dd")}
+                          />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend />
+                          <Bar dataKey="present" fill="#10b981" name="Present" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="absent" fill="#ef4444" name="Absent" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="late" fill="#f59e0b" name="Late" radius={[4, 4, 0, 0]} />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="text-center py-16 text-muted-foreground">
+                        <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p className="text-lg font-medium">No data available</p>
+                        <p className="text-sm mt-2">No attendance records found for the selected period</p>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-primary rounded" />
-                        <span>Present</span>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="trends" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Attendance Trends</CardTitle>
+                    <CardDescription>
+                      Trend analysis of present, absent, and late employees over time
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {histogram.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={400}>
+                        <AreaChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
+                          <defs>
+                            <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
+                              <stop offset="95%" stopColor="#10b981" stopOpacity={0.1} />
+                            </linearGradient>
+                            <linearGradient id="colorAbsent" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
+                              <stop offset="95%" stopColor="#ef4444" stopOpacity={0.1} />
+                            </linearGradient>
+                            <linearGradient id="colorLate" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8} />
+                              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.1} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fontSize: 12 }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
+                            tickFormatter={(value) => format(parseISO(value), "MMM dd")}
+                          />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend />
+                          <Area
+                            type="monotone"
+                            dataKey="present"
+                            stroke="#10b981"
+                            fillOpacity={1}
+                            fill="url(#colorPresent)"
+                            name="Present"
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="absent"
+                            stroke="#ef4444"
+                            fillOpacity={1}
+                            fill="url(#colorAbsent)"
+                            name="Absent"
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="late"
+                            stroke="#f59e0b"
+                            fillOpacity={1}
+                            fill="url(#colorLate)"
+                            name="Late"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="text-center py-16 text-muted-foreground">
+                        <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p className="text-lg font-medium">No data available</p>
+                        <p className="text-sm mt-2">No attendance records found for the selected period</p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-destructive rounded" />
-                        <span>Absent</span>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="location" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Work Location Distribution</CardTitle>
+                    <CardDescription>
+                      WFO (Work From Office) vs WFH (Work From Home) breakdown
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {histogram.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={400}>
+                        <ComposedChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fontSize: 12 }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
+                            tickFormatter={(value) => format(parseISO(value), "MMM dd")}
+                          />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend />
+                          <Bar dataKey="wfo" fill="#3b82f6" name="WFO" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="wfh" fill="#8b5cf6" name="WFH" radius={[4, 4, 0, 0]} />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="text-center py-16 text-muted-foreground">
+                        <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p className="text-lg font-medium">No data available</p>
+                        <p className="text-sm mt-2">No attendance records found for the selected period</p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-yellow-500 rounded" />
-                        <span>Late</span>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    No data available for the selected period
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           </>
         )}
       </div>
     </AppLayout>
   );
 }
-
