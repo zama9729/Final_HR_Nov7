@@ -1314,6 +1314,12 @@ class ApiClient {
     });
   }
 
+  async deleteOrgPolicy(id: string) {
+    return this.request(`/api/policies/org/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   async getEmployeePolicies(userId: string, date?: string) {
     const url = date
       ? `/api/policies/employee/${userId}?date=${date}`
@@ -1331,6 +1337,16 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  // Rich policy-management (document-style) methods
+  async getManagedPolicies(params?: { status?: string; type?: string }) {
+    const search = new URLSearchParams();
+    if (params?.status) search.append('status', params.status);
+    if (params?.type) search.append('type', params.type);
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const res = await this.request(`/api/policy-management/policies${suffix}`);
+    return res?.policies ?? [];
   }
 
   // Promotion methods

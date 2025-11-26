@@ -579,34 +579,8 @@ router.get('/', authenticateToken, async (req, res) => {
       });
     }
 
-    if (events.length === 0) {
-      try {
-        const fallbackTenant = await query(
-          `SELECT tenant_id 
-           FROM generated_schedules 
-           ORDER BY created_at DESC 
-           LIMIT 1`
-        );
-        const fallbackTenantId = fallbackTenant.rows[0]?.tenant_id;
-        if (fallbackTenantId && fallbackTenantId !== tenantId) {
-          const fallbackEvents = await fetchScheduleEvents(fallbackTenantId, {
-            rangeStart,
-            rangeEnd,
-            isEmployeeView: false,
-            employee_id: null,
-            myEmployeeId: null,
-            isPrivilegedRole: true,
-            isManager: false,
-            managerEmployeeId: null,
-          });
-          if (fallbackEvents.length > 0) {
-            events.push(...fallbackEvents);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading fallback schedule events:', error);
-      }
-    }
+    // Removed fallback mechanism that was loading data from other organizations
+    // This ensures proper organization isolation and RLS compliance
 
     console.log('[Calendar] tenant', tenantId, 'view', view_type, 'range', rangeStart, rangeEnd, 'events', events.length);
     res.json({

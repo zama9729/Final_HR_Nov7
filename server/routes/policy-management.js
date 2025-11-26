@@ -5,9 +5,54 @@ import { setTenantContext } from '../middleware/tenant.js';
 
 const router = express.Router();
 
+// Ensure policies + policy_versions tables exist (in case migrations haven't run)
+let ensurePolicyInfraPromise = null;
+const ensurePolicyInfra = async () => {
+  if (ensurePolicyInfraPromise) return ensurePolicyInfraPromise;
+  ensurePolicyInfraPromise = (async () => {
+    try {
+      await query(`
+        CREATE TABLE IF NOT EXISTS policies (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          branch_id UUID REFERENCES org_branches(id) ON DELETE CASCADE,
+          key TEXT NOT NULL,
+          title TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('doc', 'numeric', 'boolean', 'json')) DEFAULT 'doc',
+          value_json JSONB DEFAULT '{}'::jsonb,
+          template_text TEXT,
+          status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'archived')) DEFAULT 'draft',
+          effective_from DATE,
+          version INT NOT NULL DEFAULT 1,
+          created_by UUID REFERENCES profiles(id),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          published_at TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE(org_id, branch_id, key, version)
+        );
+
+        CREATE TABLE IF NOT EXISTS policy_versions (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          policy_id UUID NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+          version_int INT NOT NULL,
+          change_note TEXT,
+          author UUID REFERENCES profiles(id),
+          content_snapshot_json JSONB NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE(policy_id, version_int)
+        );
+      `);
+    } catch (err) {
+      console.error('Error ensuring policy tables:', err);
+    }
+  })();
+  return ensurePolicyInfraPromise;
+};
+
 // GET /api/policy-management/policies
 router.get('/policies', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
   try {
+    await ensurePolicyInfra();
     const { branch_id, status, type } = req.query;
     const orgId = req.orgId;
 
@@ -35,13 +80,10 @@ router.get('/policies', authenticateToken, setTenantContext, requireRole('hr', '
     const result = await queryWithOrg(
       `SELECT 
          p.*,
-         pr.first_name || ' ' || pr.last_name as created_by_name,
-         COUNT(pv.id) as version_count
+         pr.first_name || ' ' || pr.last_name as created_by_name
        FROM policies p
        LEFT JOIN profiles pr ON pr.id = p.created_by
-       LEFT JOIN policy_versions pv ON pv.policy_id = p.id
        WHERE ${filters.join(' AND ')}
-       GROUP BY p.id, pr.first_name, pr.last_name
        ORDER BY p.created_at DESC`,
       params,
       orgId
@@ -57,6 +99,7 @@ router.get('/policies', authenticateToken, setTenantContext, requireRole('hr', '
 // GET /api/policy-management/policies/:id
 router.get('/policies/:id', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
   try {
+    await ensurePolicyInfra();
     const { id } = req.params;
     const orgId = req.orgId;
 
@@ -101,6 +144,7 @@ router.get('/policies/:id', authenticateToken, setTenantContext, requireRole('hr
 // POST /api/policy-management/policies
 router.post('/policies', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
   try {
+    await ensurePolicyInfra();
     const {
       branch_id,
       key,
@@ -163,6 +207,7 @@ router.post('/policies', authenticateToken, setTenantContext, requireRole('hr', 
 // PATCH /api/policy-management/policies/:id
 router.patch('/policies/:id', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
   try {
+    await ensurePolicyInfra();
     const { id } = req.params;
     const orgId = req.orgId;
     const {
@@ -267,6 +312,7 @@ router.patch('/policies/:id', authenticateToken, setTenantContext, requireRole('
 // DELETE /api/policy-management/policies/:id
 router.delete('/policies/:id', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
   try {
+    await ensurePolicyInfra();
     const { id } = req.params;
     const orgId = req.orgId;
 
@@ -290,6 +336,7 @@ router.delete('/policies/:id', authenticateToken, setTenantContext, requireRole(
 // POST /api/policy-management/policies/:id/publish
 router.post('/policies/:id/publish', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
   try {
+    await ensurePolicyInfra();
     const { id } = req.params;
     const { change_note } = req.body;
     const orgId = req.orgId;
@@ -342,6 +389,7 @@ router.post('/policies/:id/publish', authenticateToken, setTenantContext, requir
 // GET /api/policy-management/policies/:id/download?version=:v
 router.get('/policies/:id/download', authenticateToken, setTenantContext, async (req, res) => {
   try {
+    await ensurePolicyInfra();
     // Dynamic import of PDFKit to handle ESM
     const pdfkitModule = await import('pdfkit');
     const PDFDocument = pdfkitModule.default || pdfkitModule;

@@ -803,11 +803,11 @@ export default function StaffScheduling() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold flex items-center gap-3">
+            <h1 className="text-3xl font-bold flex items-center gap-3 text-foreground dark:text-slate-100">
               <Calendar className="h-7 w-7 text-primary" />
               Shift Management
             </h1>
-            <p className="text-muted-foreground mt-1">
+            <p className="text-muted-foreground dark:text-slate-400 mt-1">
               Rule-based staff scheduling with configurable constraints
             </p>
           </div>
@@ -1106,15 +1106,15 @@ export default function StaffScheduling() {
                   <CardHeader>
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <CardTitle>
+                        <CardTitle className="text-foreground dark:text-slate-100">
                           {format(parseISO(selectedSchedule.week_start_date), "MMM dd")} -{" "}
                           {format(parseISO(selectedSchedule.week_end_date), "MMM dd, yyyy")}
                         </CardTitle>
-                        <CardDescription>
+                        <CardDescription className="text-muted-foreground dark:text-slate-400">
                           {isMultiWeekSchedule ? "Monthly shift schedule" : "Weekly shift schedule"}
                         </CardDescription>
                         {isMultiWeekSchedule && previewRangeLabel && (
-                          <p className="text-sm text-muted-foreground mt-2">
+                          <p className="text-sm text-muted-foreground dark:text-slate-400 mt-2">
                             Viewing {previewRangeLabel}
                           </p>
                         )}
@@ -1141,7 +1141,7 @@ export default function StaffScheduling() {
                             >
                               <ChevronLeft className="h-4 w-4" />
                             </Button>
-                            <span className="text-sm text-muted-foreground min-w-[140px] text-center">
+                            <span className="text-sm text-muted-foreground dark:text-slate-400 min-w-[140px] text-center">
                               {previewRangeLabel || "—"}
                             </span>
                             <Button
@@ -1169,19 +1169,19 @@ export default function StaffScheduling() {
                     ) : null}
 
                     {/* Week Calendar View - Improved Format */}
-                    <div className="border rounded-lg overflow-hidden bg-white">
-                      <div className="grid grid-cols-8 border-b bg-muted/50 sticky top-0 z-10">
-                        <div className="p-3 font-semibold text-sm border-r">Employee</div>
+                    <div className="border rounded-lg overflow-hidden bg-background dark:bg-slate-900">
+                      <div className="grid grid-cols-8 border-b bg-muted/50 dark:bg-slate-800/50 sticky top-0 z-10">
+                        <div className="p-3 font-semibold text-sm border-r text-foreground dark:text-slate-100">Employee</div>
                         {previewDays.map((day) => (
-                          <div key={day.toISOString()} className="p-2 text-center border-l font-semibold text-xs">
+                          <div key={day.toISOString()} className="p-2 text-center border-l font-semibold text-xs text-foreground dark:text-slate-100">
                             <div className="font-medium">{format(day, "EEE")}</div>
-                            <div className="text-muted-foreground mt-0.5">
+                            <div className="text-muted-foreground dark:text-slate-400 mt-0.5">
                               {format(day, "MMM dd")}
                             </div>
                           </div>
                         ))}
                       </div>
-                      <div className="divide-y divide-border">
+                      <div className="divide-y divide-border dark:divide-slate-700">
                         {roster.length > 0 ? (
                           roster.map((employee, empIdx) => {
                             const employeeKey = employee.id || (employee as any).employee_id;
@@ -1197,11 +1197,11 @@ export default function StaffScheduling() {
                             return (
                               <div 
                                 key={employeeKey} 
-                                className={`grid grid-cols-8 hover:bg-muted/30 transition-colors ${
-                                  empIdx % 2 === 0 ? 'bg-white' : 'bg-muted/20'
+                                className={`grid grid-cols-8 hover:bg-muted/30 dark:hover:bg-slate-800/50 transition-colors ${
+                                  empIdx % 2 === 0 ? 'bg-background dark:bg-slate-900' : 'bg-muted/20 dark:bg-slate-800/30'
                                 }`}
                               >
-                                <div className="p-3 border-r font-medium text-sm flex items-center">
+                                <div className="p-3 border-r font-medium text-sm flex items-center text-foreground dark:text-slate-100">
                                   {empName}
                                 </div>
                                 {previewDays.map((day) => {
@@ -1216,7 +1216,7 @@ export default function StaffScheduling() {
                                     <div
                                       key={day.toISOString()}
                                       className={`p-2 border-l min-h-[80px] flex items-center justify-center ${
-                                        isToday ? 'bg-blue-50/50' : ''
+                                        isToday ? 'bg-blue-50/50 dark:bg-blue-950/30' : ''
                                       }`}
                                     >
                                       {assignment ? (
@@ -1233,7 +1233,7 @@ export default function StaffScheduling() {
                                           >
                                             {assignment.template_name}
                                           </Badge>
-                                          <div className="text-[11px] text-muted-foreground text-center leading-tight">
+                                          <div className="text-[11px] text-muted-foreground dark:text-slate-400 text-center leading-tight">
                                             {assignment.start_time && assignment.end_time ? (
                                               <>
                                                 {formatShiftTime(assignment.start_time)}
@@ -1243,12 +1243,12 @@ export default function StaffScheduling() {
                                                 {formatShiftTime(assignment.end_time)}
                                               </>
                                             ) : (
-                                              <span className="text-muted-foreground">—</span>
+                                              <span className="text-muted-foreground dark:text-slate-500">—</span>
                                             )}
                                           </div>
                                         </div>
                                       ) : (
-                                        <span className="text-muted-foreground text-lg">—</span>
+                                        <span className="text-muted-foreground dark:text-slate-600 text-lg">—</span>
                                       )}
                                     </div>
                                   );
@@ -1257,7 +1257,7 @@ export default function StaffScheduling() {
                             );
                           })
                         ) : (
-                          <div className="p-8 text-center text-muted-foreground">
+                          <div className="p-8 text-center text-muted-foreground dark:text-slate-400">
                             No employees available for this schedule
                           </div>
                         )}

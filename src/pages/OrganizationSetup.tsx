@@ -359,7 +359,7 @@ export default function OrganizationSetup() {
   }
 
   const renderLinkOut = (label: string, link: string) => (
-    <Button variant="outline" onClick={() => window.open(link, "_blank")} className="w-full sm:w-auto">
+    <Button variant="outline" onClick={() => navigate(link)} className="w-full sm:w-auto">
       {label}
     </Button>
   );
@@ -662,35 +662,60 @@ export default function OrganizationSetup() {
               </Button>
               {renderLinkOut("Open Policies", "/policies/management")}
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {(policyTemplates || []).map((template) => {
-                const published = orgPolicies.find(
-                  (policy) => policy.template_id === template.id && policy.status === "active"
-                );
-                return (
-                  <Card key={template.id}>
-                    <CardHeader>
-                      <CardTitle className="text-base flex items-center justify-between">
-                        <span>{template.name}</span>
-                        {published ? <Badge variant="secondary">Published</Badge> : null}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div className="flex gap-1 flex-wrap">
-                        {(template.tags || []).map((tag: string) => (
-                          <Badge key={tag} variant="outline">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => handleSelectTemplate(template)}>
-                        Configure
-                      </Button>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
+            {policyLoading ? (
+              <div className="text-center py-8 text-muted-foreground">Loading policy templates...</div>
+            ) : policyTemplates.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No policy templates found. Try adjusting your search or check back later.
+              </div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {policyTemplates.map((template) => {
+                  const published = orgPolicies.find(
+                    (policy) => policy.template_id === template.id && policy.status === "active"
+                  );
+                  return (
+                    <Card 
+                      key={template.id} 
+                      className={cn(
+                        "cursor-pointer transition-all hover:shadow-md",
+                        selectedTemplate?.id === template.id && "ring-2 ring-primary"
+                      )}
+                      onClick={() => handleSelectTemplate(template)}
+                    >
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center justify-between">
+                          <span>{template.name}</span>
+                          {published ? <Badge variant="secondary">Published</Badge> : null}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        {template.description && (
+                          <p className="text-sm text-muted-foreground">{template.description}</p>
+                        )}
+                        <div className="flex gap-1 flex-wrap">
+                          {(template.tags || []).map((tag: string) => (
+                            <Badge key={tag} variant="outline">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectTemplate(template);
+                          }}
+                        >
+                          {selectedTemplate?.id === template.id ? "Selected" : "Configure"}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
             {selectedTemplate && (
               <Card className="p-4 space-y-4">
                 <div className="flex items-start justify-between gap-4 flex-wrap">

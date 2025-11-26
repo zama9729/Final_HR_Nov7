@@ -1,5 +1,6 @@
 import express from 'express';
 import { query, queryWithOrg } from '../db/pool.js';
+import { audit } from '../utils/auditLog.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
 
@@ -30,16 +31,15 @@ router.get('/org', authenticateToken, setTenantContext, async (req, res) => {
     // Try to get policies from org_policies table (policy_catalog based schema)
     let legacyPolicies = [];
     try {
-      // Check if the old schema table exists by checking for policy_key column
-      const tableCheck = await queryWithOrg(
-        `SELECT column_name FROM information_schema.columns 
-         WHERE table_name = 'org_policies' AND column_name = 'policy_key'`,
-        [],
-        orgId
+      // Prefer the simple legacy key/value table if it exists
+      const tableCheck = await query(
+        `SELECT table_name 
+         FROM information_schema.tables 
+         WHERE table_schema = 'public' 
+           AND table_name = 'org_policies_legacy'`
       );
-      
+
       if (tableCheck.rows.length > 0) {
-        // Old schema exists
         const legacyResult = await queryWithOrg(
           `SELECT 
             op.id,
@@ -52,7 +52,7 @@ router.get('/org', authenticateToken, setTenantContext, async (req, res) => {
             op.value,
             op.effective_from,
             op.effective_to
-          FROM org_policies op
+          FROM org_policies_legacy op
           JOIN policy_catalog pc ON pc.key = op.policy_key
           WHERE op.org_id = $1
           ORDER BY pc.category, pc.display_name`,
@@ -73,7 +73,7 @@ router.get('/org', authenticateToken, setTenantContext, async (req, res) => {
         }));
       }
     } catch (err) {
-      // Old schema doesn't exist or has different structure, continue
+      // Legacy schema doesn't exist or has different structure, continue
       console.log('Legacy schema not found, using new schema');
     }
 
@@ -198,20 +198,20 @@ router.post('/org', authenticateToken, setTenantContext, requireRole('hr', 'ceo'
       );
     }
 
-    // Log audit
-    await queryWithOrg(
-      `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
+    // Log audit (use central audit_logs schema keyed by tenant_id)
+    await audit({
+      actorId: req.user.id,
+      action: existing.rows.length > 0 ? 'policy_edit' : 'policy_create',
+      entityType: 'org_policy',
+      entityId: result.rows[0].id,
+      details: {
         orgId,
-        req.user.id,
-        existing.rows.length > 0 ? 'update' : 'create',
-        'org_policy',
-        result.rows[0].id,
-        JSON.stringify({ policy_key, effective_from, effective_to })
-      ],
-      orgId
-    );
+        policy_key,
+        effective_from,
+        effective_to,
+      },
+      scope: 'org',
+    });
 
     res.json(result.rows[0]);
   } catch (error) {
@@ -220,9 +220,82 @@ router.post('/org', authenticateToken, setTenantContext, requireRole('hr', 'ceo'
   }
 });
 
+// Delete org policy (HR/CEO/Admin)
+router.delete('/org/:id', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
+  try {
+    const orgId = req.orgId || req.user?.org_id;
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization not found' });
+    }
+
+    const { id } = req.params;
+
+    const result = await queryWithOrg(
+      'DELETE FROM org_policies_legacy WHERE id = $1 AND org_id = $2 RETURNING id',
+      [id, orgId],
+      orgId
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Policy not found' });
+    }
+
+    await audit({
+      actorId: req.user.id,
+      action: 'policy_delete',
+      entityType: 'org_policy',
+      entityId: id,
+      details: { orgId },
+      scope: 'org',
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting org policy:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete org policy' });
+  }
+});
+
 // Get resolved policies for employee (employee override > org policy)
+// Ensure resolve_policy_value function exists (fallback no-op)
+let ensureResolvePolicyFnPromise = null;
+const ensureResolvePolicyFn = async () => {
+  if (ensureResolvePolicyFnPromise) return ensureResolvePolicyFnPromise;
+  ensureResolvePolicyFnPromise = (async () => {
+    try {
+      await query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_proc WHERE proname = 'resolve_policy_value'
+          ) THEN
+            CREATE OR REPLACE FUNCTION resolve_policy_value(
+              p_user_id UUID,
+              p_policy_key TEXT,
+              p_effective DATE
+            )
+            RETURNS JSONB
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+              -- Fallback implementation: no resolved value.
+              RETURN NULL;
+            END;
+            $$;
+          END IF;
+        END
+        $$;
+      `);
+    } catch (err) {
+      console.error('Error ensuring resolve_policy_value function:', err);
+    }
+  })();
+  return ensureResolvePolicyFnPromise;
+};
+
 router.get('/employee/:userId', authenticateToken, setTenantContext, async (req, res) => {
   try {
+    await ensureResolvePolicyFn();
     const { userId } = req.params;
     const orgId = req.orgId || req.user?.org_id;
     
@@ -349,20 +422,21 @@ router.post('/employee/:userId', authenticateToken, setTenantContext, requireRol
       );
     }
 
-    // Log audit
-    await queryWithOrg(
-      `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
+    // Log audit (use centralized audit logger)
+    await audit({
+      actorId: req.user.id,
+      action: existing.rows.length > 0 ? 'policy_edit' : 'policy_create',
+      entityType: 'employee_policy',
+      entityId: result.rows[0].id,
+      details: {
         orgId,
-        req.user.id,
-        existing.rows.length > 0 ? 'update' : 'create',
-        'employee_policy',
-        result.rows[0].id,
-        JSON.stringify({ user_id: userId, policy_key, effective_from, effective_to })
-      ],
-      orgId
-    );
+        user_id: userId,
+        policy_key,
+        effective_from,
+        effective_to,
+      },
+      scope: 'employee',
+    });
 
     res.json(result.rows[0]);
   } catch (error) {

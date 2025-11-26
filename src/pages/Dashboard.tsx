@@ -6,8 +6,9 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar } from "lucide-react";
-import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow } from "date-fns";
+import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity } from "lucide-react";
+import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay } from "date-fns";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
 
@@ -41,6 +42,8 @@ export default function Dashboard() {
   const [presenceStatus, setPresenceStatus] = useState<string>('online');
   const [upcomingShifts, setUpcomingShifts] = useState<UpcomingShift[]>([]);
   const [loadingShifts, setLoadingShifts] = useState(false);
+  const [attendanceTrends, setAttendanceTrends] = useState<Array<{ date: string; hours: number }>>([]);
+  const [loadingTrends, setLoadingTrends] = useState(false);
 
   useEffect(() => {
     checkOnboardingStatus();
@@ -51,8 +54,10 @@ export default function Dashboard() {
   useEffect(() => {
     if (userRole) {
       fetchUpcomingShifts();
+      fetchAttendanceTrends();
     } else {
       setUpcomingShifts([]);
+      setAttendanceTrends([]);
     }
   }, [userRole]);
 
@@ -286,6 +291,75 @@ export default function Dashboard() {
     }
   };
 
+  const fetchAttendanceTrends = async () => {
+    if (!user) {
+      setAttendanceTrends([]);
+      return;
+    }
+
+    try {
+      setLoadingTrends(true);
+      const employeeId = await api.getEmployeeId();
+      if (!employeeId?.id) {
+        setAttendanceTrends([]);
+        return;
+      }
+
+      // Get last 30 days of attendance data
+      const today = startOfDay(new Date());
+      const thirtyDaysAgo = subDays(today, 30);
+      
+      // Fetch timesheet data for the last 30 days
+      const weekStart = format(thirtyDaysAgo, 'yyyy-MM-dd');
+      const weekEnd = format(today, 'yyyy-MM-dd');
+      
+      // Group by week for better visualization
+      const trends: Array<{ date: string; hours: number }> = [];
+      const weeks: Record<string, number> = {};
+      
+      // Fetch data week by week
+      for (let i = 0; i < 4; i++) {
+        const weekStartDate = subDays(today, (i + 1) * 7);
+        const weekEndDate = subDays(today, i * 7);
+        const weekKey = format(weekStartDate, 'MMM d');
+        
+        try {
+          const timesheet = await api.getTimesheet(
+            format(weekStartDate, 'yyyy-MM-dd'),
+            format(weekEndDate, 'yyyy-MM-dd')
+          );
+          
+          let totalHours = 0;
+          if (timesheet.total_hours !== undefined && timesheet.total_hours !== null) {
+            totalHours = parseFloat(timesheet.total_hours) || 0;
+          } else if (timesheet.entries && Array.isArray(timesheet.entries)) {
+            totalHours = timesheet.entries
+              .filter((entry: any) => !entry.is_holiday)
+              .reduce((total: number, entry: any) => {
+                return total + (parseFloat(entry.hours || 0));
+              }, 0);
+          }
+          
+          weeks[weekKey] = Math.round(totalHours);
+        } catch (error) {
+          console.error(`Error fetching timesheet for week ${weekKey}:`, error);
+          weeks[weekKey] = 0;
+        }
+      }
+      
+      // Convert to array format for chart (already sorted by week order)
+      const sortedWeeks = Object.entries(weeks)
+        .map(([date, hours]) => ({ date, hours }));
+      
+      setAttendanceTrends(sortedWeeks);
+    } catch (error) {
+      console.error('Error fetching attendance trends:', error);
+      setAttendanceTrends([]);
+    } finally {
+      setLoadingTrends(false);
+    }
+  };
+
 
   if (isLoading) {
     return (
@@ -348,7 +422,7 @@ export default function Dashboard() {
               <Button 
                 onClick={handleApplyLeave}
                 variant="outline"
-                className="w-full border-blue-200 text-blue-600 hover:bg-blue-50"
+                className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950 font-semibold"
               >
                 Apply
               </Button>
@@ -412,7 +486,7 @@ export default function Dashboard() {
                 <Button
                   onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar')}
                   variant="outline"
-                  className="w-full border-blue-200 text-blue-600 hover:bg-blue-50"
+                  className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950 font-semibold"
                 >
                   {isEmployee ? 'View My Shifts' : 'View Calendar'}
                 </Button>
@@ -453,22 +527,58 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* AI Assistant */}
+          {/* Attendance Trends */}
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-semibold">AI Assistant</CardTitle>
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Activity className="h-5 w-5 text-blue-600" />
+                Attendance Trends
+              </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col items-center justify-center py-8">
-              <Bot className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-sm text-muted-foreground mb-4 text-center">
-                Need help? Ask AI to assist you.
-              </p>
-              <Button 
-                onClick={() => navigate('/ai-assistant')}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                Ask AI
-              </Button>
+            <CardContent>
+              {loadingTrends ? (
+                <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    Loading trends...
+                  </div>
+                </div>
+              ) : attendanceTrends.length === 0 ? (
+                <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                  <p className="text-sm">No attendance data available</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={attendanceTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+                    <XAxis 
+                      hide={true}
+                    />
+                    <YAxis 
+                      hide={true}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'white', 
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '6px',
+                        fontSize: '12px'
+                      }}
+                      formatter={(value: any) => [`${value} hours`, 'Hours']}
+                      labelFormatter={() => ''}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="hours" 
+                      stroke="#3b82f6" 
+                      strokeWidth={3}
+                      dot={false}
+                      activeDot={{ r: 6, fill: "#3b82f6" }}
+                      name="Hours"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
         </div>

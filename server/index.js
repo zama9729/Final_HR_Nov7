@@ -36,6 +36,7 @@ import checkInOutRoutes from './routes/check-in-out.js';
 import opalMiniAppsRoutes from './routes/opal-mini-apps.js';
 import attendanceRoutes from './routes/attendance.js';
 import attendanceSettingsRoutes from './routes/attendance-settings.js';
+import biometricRoutes from './routes/biometric.js';
 import payrollRoutes from './routes/payroll.js';
 import backgroundChecksRoutes from './routes/background-checks.js';
 import terminationsRoutes from './routes/terminations.js';
@@ -166,6 +167,7 @@ app.use('/api/check-in-out', checkInOutRoutes);
 app.use('/api/v1/attendance', attendanceRoutes);
 app.use('/api/attendance', attendanceRoutes); // Also mount at /api/attendance for compatibility
 app.use('/api/attendance-settings', attendanceSettingsRoutes);
+app.use('/api/biometric', biometricRoutes);
 app.use('/api/opal-mini-apps', authenticateToken, setTenantContext, opalMiniAppsRoutes);
 app.use('/api/payroll', authenticateToken, payrollRoutes);
 app.use('/api/background-checks', authenticateToken, backgroundChecksRoutes);
@@ -450,10 +452,35 @@ createPool().then(async () => {
   await scheduleProbationJobs();
   console.log('✅ Cron jobs scheduled');
 
+  // SSL/HTTPS Configuration
+  const SSL_ENABLED = process.env.SSL_ENABLED === 'true' || process.env.HTTPS_ENABLED === 'true';
+  
+  if (SSL_ENABLED) {
+    try {
+      const { createHTTPSServer } = await import('./utils/ssl-config.js');
+      const httpsServer = createHTTPSServer(app, PORT);
+      
+      if (!httpsServer) {
+        // Fallback to HTTP if SSL setup fails
+        console.warn('[SSL] Falling back to HTTP server');
+        app.listen(PORT, '0.0.0.0', () => {
+          console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+          console.log(`🌐 Accessible on your network at: http://192.168.0.121:${PORT}`);
+        });
+      }
+    } catch (error) {
+      console.warn('[SSL] SSL configuration error, using HTTP:', error.message);
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+        console.log(`🌐 Accessible on your network at: http://192.168.0.121:${PORT}`);
+      });
+    }
+  } else {
     app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
-    console.log(`🌐 Accessible on your network at: http://192.168.0.121:${PORT}`);
-  });
+      console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+      console.log(`🌐 Accessible on your network at: http://192.168.0.121:${PORT}`);
+    });
+  }
 }).catch((error) => {
   console.error('❌ Failed to initialize database:', error);
   process.exit(1);

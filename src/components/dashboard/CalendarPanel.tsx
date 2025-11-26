@@ -254,7 +254,7 @@ export function CalendarPanel() {
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <div className="text-sm font-semibold text-slate-800">{format(currentMonth, 'MMMM yyyy')}</div>
+            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{format(currentMonth, 'MMMM yyyy')}</div>
             <Button
               variant="ghost"
               size="icon"

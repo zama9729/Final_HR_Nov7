@@ -33,6 +33,12 @@ supabase/config.toml
 .keys/
 *.pem
 
+# SSL Certificates (keep directory structure)
+nginx/ssl/*.pem
+nginx/ssl/*.key
+nginx/ssl/*.crt
+!nginx/ssl/.gitkeep
+
 # Temporary backup and cloned repos
 payroll-app-backup/
 payroll-repo-temp/

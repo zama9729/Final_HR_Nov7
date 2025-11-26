@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Upload, Loader2 } from "lucide-react";
+import { Building2, Upload, Loader2, Lock, ExternalLink, CheckCircle2, XCircle } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
@@ -41,6 +41,11 @@ export default function Settings() {
     label: "",
   });
   const [geofenceSaving, setGeofenceSaving] = useState(false);
+  const [sslConfig, setSslConfig] = useState({
+    enabled: false,
+    status: 'unknown' as 'enabled' | 'disabled' | 'unknown',
+  });
+  const [sslLoading, setSslLoading] = useState(false);
   const selectedBranch = useMemo(
     () => branches.find((branch) => branch.id === selectedBranchId),
     [branches, selectedBranchId]
@@ -91,11 +96,32 @@ export default function Settings() {
     refreshAttendanceSettings();
     if (editable) {
       loadBranchHierarchy();
+      fetchSslConfig();
     } else {
       setBranches([]);
       setSelectedBranchId("");
     }
   }, [user, userRole, refreshAttendanceSettings]);
+
+  const fetchSslConfig = async () => {
+    try {
+      setSslLoading(true);
+      const isHttps = window.location.protocol === 'https:';
+      setSslConfig({
+        enabled: isHttps,
+        status: isHttps ? 'enabled' : 'disabled',
+      });
+    } catch (error) {
+      console.error('Error fetching SSL config:', error);
+      const isHttps = window.location.protocol === 'https:';
+      setSslConfig({
+        enabled: isHttps,
+        status: isHttps ? 'enabled' : 'disabled',
+      });
+    } finally {
+      setSslLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (attendanceSettings) {
@@ -633,6 +659,129 @@ export default function Settings() {
               )}
             </CardContent>
           </Card>
+
+          {canEdit && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Lock className="h-5 w-5" />
+                  SSL/HTTPS Configuration
+                </CardTitle>
+                <CardDescription>
+                  Configure SSL/HTTPS for secure connections. See documentation for setup instructions.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-4 border rounded-lg">
+                    <div className="flex items-center gap-3">
+                      {sslConfig.status === 'enabled' ? (
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-gray-400" />
+                      )}
+                      <div>
+                        <p className="font-medium">SSL/HTTPS Status</p>
+                        <p className="text-sm text-muted-foreground">
+                          {sslConfig.status === 'enabled' 
+                            ? 'SSL is enabled and active' 
+                            : 'SSL is disabled or not configured'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-mono text-muted-foreground">
+                        {window.location.protocol}//{window.location.host}
+                      </p>
+                    </div>
+                  </div>
+
+                  {sslConfig.status === 'enabled' && (
+                    <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                      <p className="text-sm text-green-800 dark:text-green-200">
+                        ✓ Your connection is secure. SSL/HTTPS is properly configured.
+                      </p>
+                    </div>
+                  )}
+
+                  {sslConfig.status === 'disabled' && (
+                    <div className="p-4 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                      <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-2">
+                        ⚠ SSL/HTTPS is not enabled. Your connection is not encrypted.
+                      </p>
+                      <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                        For production environments, enable SSL/HTTPS to protect sensitive data.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <Label className="text-sm font-semibold mb-2 block">Configuration Files</Label>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900 rounded">
+                          <span className="text-muted-foreground">Nginx Config:</span>
+                          <code className="text-xs">nginx/nginx.conf</code>
+                        </div>
+                        <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900 rounded">
+                          <span className="text-muted-foreground">SSL Certificates:</span>
+                          <code className="text-xs">nginx/ssl/</code>
+                        </div>
+                        <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900 rounded">
+                          <span className="text-muted-foreground">Docker Compose:</span>
+                          <code className="text-xs">docker-compose.ssl.yml</code>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => window.open('/docs/SSL_HTTPS_SETUP.md', '_blank')}
+                        className="flex items-center gap-2"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        View Setup Guide
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => window.open('/docs/SSL_QUICK_START.md', '_blank')}
+                        className="flex items-center gap-2"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        Quick Start
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={fetchSslConfig}
+                        disabled={sslLoading}
+                        className="flex items-center gap-2"
+                      >
+                        {sslLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                        Refresh Status
+                      </Button>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg">
+                      <p className="text-xs font-semibold mb-2">Quick Setup Commands:</p>
+                      <div className="space-y-1 text-xs font-mono">
+                        <div className="p-2 bg-white dark:bg-slate-800 rounded">
+                          <span className="text-muted-foreground"># Generate certificates:</span>
+                          <br />
+                          <span className="text-blue-600 dark:text-blue-400">.\nginx\ssl-setup.ps1</span>
+                        </div>
+                        <div className="p-2 bg-white dark:bg-slate-800 rounded">
+                          <span className="text-muted-foreground"># Start with SSL:</span>
+                          <br />
+                          <span className="text-blue-600 dark:text-blue-400">docker-compose -f docker-compose.yml -f docker-compose.ssl.yml up -d</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
