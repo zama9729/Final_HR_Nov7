@@ -142,6 +142,22 @@ const client = {
     }
     return response.json();
   },
+
+  delete: async <T>(endpoint: string): Promise<T> => {
+    const response = await fetch(resolveEndpoint(endpoint), {
+      method: "DELETE",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: "API error" }));
+      throw new Error(errorData.error || `API error: ${response.statusText}`);
+    }
+    return response.json();
+  },
 };
 
 // --- API METHODS ---
@@ -155,6 +171,7 @@ export const api = {
   get: client.get,
   post: client.post,
   patch: client.patch,
+  delete: client.delete,
   upload: client.upload,
 
   uploadTaxProof: (
@@ -253,6 +270,9 @@ export const api = {
     
     processCycle: (cycleId, payrollItems?) =>
       client.post(`/api/payroll-cycles/${cycleId}/process`, payrollItems ? { payrollItems } : {}),
+    
+    deleteCycle: (cycleId) =>
+      client.delete(`/api/payroll-cycles/${cycleId}`),
     
     setIncentive: (cycleId: string, employeeId: string, amount: number) =>
       client.post(`/api/payroll-cycles/${cycleId}/incentives`, {

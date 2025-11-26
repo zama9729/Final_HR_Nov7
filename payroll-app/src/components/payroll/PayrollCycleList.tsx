@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Play, Receipt, Edit2 } from "lucide-react";
+import { Loader2, Play, Receipt, Edit2, Trash2 } from "lucide-react";
 import { PayrollReviewDialog } from "./PayrollReviewDialog";
 import { PayrollCyclePayslipsDialog } from "./PayrollCyclePayslipsDialog";
 import {
@@ -41,9 +41,15 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
   const [selectedCycle, setSelectedCycle] = useState<PayrollCycle | null>(null);
   const [confirmProcessOpen, setConfirmProcessOpen] = useState(false);
   const [cycleToProcess, setCycleToProcess] = useState<PayrollCycle | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [cycleToDelete, setCycleToDelete] = useState<PayrollCycle | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const isCycleEditable = (status: string) =>
     !["processing", "completed", "paid", "failed"].includes(status);
+
+  const isCycleDeletable = (status: string) =>
+    ["draft", "pending_approval"].includes(status);
 
   const handleProcess = (cycle: PayrollCycle) => {
     setCycleToProcess(cycle);
@@ -80,6 +86,28 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
       toast.error(error.message || "Failed to process payroll");
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleDelete = (cycle: PayrollCycle) => {
+    if (!isCycleDeletable(cycle.status)) return;
+    setCycleToDelete(cycle);
+    setConfirmDeleteOpen(true);
+  };
+
+  const deleteCycle = async () => {
+    if (!cycleToDelete) return;
+    setDeleting(true);
+    try {
+      const result = await api.payroll.deleteCycle(cycleToDelete.id);
+      toast.success(result.message || "Payroll cycle deleted successfully");
+      setConfirmDeleteOpen(false);
+      setCycleToDelete(null);
+      handleProcessed();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete payroll cycle");
+    } finally {
+      setDeleting(false);
     }
   };
   const getStatusColor = (status: string) => {
@@ -193,6 +221,16 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
                       Edit
                     </Button>
                   )}
+                  {isCycleDeletable(cycle.status) && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleDelete(cycle)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete
+                    </Button>
+                  )}
                   {(cycle.status === 'completed' || cycle.status === 'approved' || cycle.status === 'processing') && (
                     <Button
                       size="sm"
@@ -245,6 +283,28 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
           <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
           <AlertDialogAction onClick={processCycle} disabled={processing}>
             {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Yes"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={confirmDeleteOpen} onOpenChange={(open) => !deleting && setConfirmDeleteOpen(open)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete payroll cycle?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to delete this payroll cycle? This action cannot be undone. All associated payroll items and incentives will also be deleted.
+            {cycleToDelete && (
+              <span className="block mt-2 font-medium">
+                Cycle: {getMonthName(cycleToDelete.month)} {cycleToDelete.year}
+              </span>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={deleteCycle} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

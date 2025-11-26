@@ -3231,6 +3231,60 @@ appRouter.post("/payroll-cycles/:cycleId/approve", requireAuth, async (req, res)
   }
 });
 
+// Delete payroll cycle (only for draft and pending_approval statuses)
+appRouter.delete("/payroll-cycles/:cycleId", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const tenantId = (req as any).tenantId as string;
+  const { cycleId } = req.params;
+
+  if (!tenantId) {
+    return res.status(403).json({ error: "User tenant not found" });
+  }
+
+  try {
+    // Get payroll cycle
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Only allow deletion for draft and pending_approval statuses
+    // Prevent deletion of processing, completed, paid, or failed cycles
+    if (!['draft', 'pending_approval'].includes(cycle.status)) {
+      return res.status(400).json({ 
+        error: `Cannot delete payroll cycle. Current status is '${cycle.status}'. Only 'draft' or 'pending_approval' payroll cycles can be deleted.` 
+      });
+    }
+
+    // Delete the payroll cycle (CASCADE will automatically delete related payroll_items and payroll_incentives)
+    await query(
+      "DELETE FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    console.log(`✅ Payroll cycle deleted: ${cycleId} (${cycle.month}/${cycle.year}) by user ${userId}`);
+
+    return res.status(200).json({ 
+      message: "Payroll cycle deleted successfully",
+      deletedCycle: {
+        id: cycle.id,
+        month: cycle.month,
+        year: cycle.year,
+        status: cycle.status
+      }
+    });
+  } catch (e: any) {
+    console.error("Error deleting payroll cycle:", e);
+    return res.status(500).json({ error: e.message || "Failed to delete payroll cycle" });
+  }
+});
+
 // Reject/Return payroll (pending_approval -> draft)
 appRouter.post("/payroll-cycles/:cycleId/reject", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
