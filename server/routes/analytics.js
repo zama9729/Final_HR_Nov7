@@ -112,8 +112,19 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
     // Overall stats
     const overallResult = await queryWithOrg(
       `SELECT 
+         (SELECT COUNT(*) FROM employees WHERE tenant_id = $1 AND status = 'active') as total_employees,
+         (SELECT COUNT(DISTINCT e.id) FROM employees e 
+          WHERE e.tenant_id = $1 AND e.status = 'active'
+          AND (e.id IN (SELECT reporting_manager_id FROM employees WHERE reporting_manager_id IS NOT NULL)
+               OR e.user_id IN (SELECT user_id FROM user_roles WHERE role = 'manager'))) as manager_count,
+         (SELECT COUNT(DISTINCT lr.employee_id) FROM leave_requests lr
+          WHERE lr.tenant_id = $1 
+          AND lr.status = 'approved'
+          AND CURRENT_DATE BETWEEN lr.start_date AND lr.end_date) as employees_on_leave,
          (SELECT COUNT(*) FROM projects WHERE org_id = $1 AND status = 'open') as active_projects,
+         (SELECT COUNT(*) FROM projects WHERE org_id = $1 AND status = 'open') as project_count,
          (SELECT COUNT(*) FROM leave_requests WHERE tenant_id = $1 AND status = 'pending') as pending_leaves,
+         (SELECT COUNT(*) FROM teams WHERE org_id = $1) as total_teams,
          (SELECT COUNT(*) FROM assignments a 
           JOIN projects p ON p.id = a.project_id 
           WHERE p.org_id = $1 AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)) as active_assignments`,

@@ -144,7 +144,7 @@ export function TopBar() {
     <header className="sticky top-0 z-40 h-16 border-b border-white/40 dark:border-slate-900/60 bg-gradient-to-r from-white/70 via-white/45 to-white/30 dark:from-slate-950/70 dark:via-slate-900/55 dark:to-slate-900/40 backdrop-blur-[22px] supports-[backdrop-filter]:bg-white/10 shadow-[0_24px_80px_rgba(15,23,42,0.28)]">
       <div className="flex h-16 items-center justify-between px-4 lg:px-6 gap-4">
         <div className="flex items-center gap-3">
-          <SidebarTrigger className="-ml-2 text-blue-500 drop-shadow-[0_0_12px_rgba(56,189,248,0.65)] dark:text-sky-300 dark:drop-shadow-[0_0_14px_rgba(14,165,233,0.75)] hover:text-cyan-400 transition-all" />
+          <SidebarTrigger className="-ml-2 text-blue-500 drop-shadow-[0_0_12px_rgba(56,189,248,0.65)] dark:text-sky-300 dark:drop-shadow-[0_0_14px_rgba(14,165,233,0.75)] hover:text-blue-600 hover:bg-blue-50 dark:hover:text-sky-200 dark:hover:bg-slate-900/50 border border-transparent hover:border-blue-200/70 dark:hover:border-sky-600/60 rounded-full transition-all" />
           <div className="flex items-center gap-3 px-1">
             <div className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center">
               {organization?.logo_url ? (
@@ -181,7 +181,7 @@ export function TopBar() {
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
-            className="h-10 w-10 p-0 rounded-full border border-transparent hover:border-blue-200 dark:hover:border-slate-600 transition-all"
+            className="h-10 w-10 p-0 rounded-full border border-transparent hover:border-blue-300 dark:hover:border-slate-600 hover:bg-blue-50 dark:hover:bg-slate-800/60 hover:text-blue-600 transition-all"
             onClick={toggleTheme}
             aria-label="Toggle theme"
           >
@@ -192,14 +192,14 @@ export function TopBar() {
             )}
           </Button>
 
-          <div className="relative rounded-full border border-white/30 dark:border-slate-700/70 shadow-[0_0_20px_rgba(59,130,246,0.35)]">
+          <div className="relative rounded-full border border-white/30 dark:border-slate-700/70 shadow-[0_0_20px_rgba(59,130,246,0.35)] transition-colors hover:border-blue-400">
             <Notifications />
           </div>
 
           {/* Presence Status Bell */}
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" className="relative h-10 w-10 p-0 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center justify-center">
+              <Button variant="ghost" className="relative h-10 w-10 p-0 hover:bg-blue-50 dark:hover:bg-slate-800/60 hover:text-blue-600 flex items-center justify-center transition-colors">
                 <span className={`h-3 w-3 rounded-full border border-white/50 dark:border-white/20 ${getPresenceDotGlow(presenceStatus)}`} />
               </Button>
             </PopoverTrigger>
@@ -213,7 +213,7 @@ export function TopBar() {
                     onClick={() => handlePresenceChange(status)}
                     className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${presenceStatus === status
                         ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200'
-                        : 'hover:bg-gray-50 text-gray-700 dark:hover:bg-slate-800 dark:text-slate-200'
+                        : 'hover:bg-blue-50 text-gray-700 dark:hover:bg-slate-800 dark:text-slate-200'
                       }`}
                   >
                     <span className={`h-2.5 w-2.5 rounded-full border border-white/40 dark:border-white/20 ${getPresenceDotGlow(status)}`} />
@@ -230,7 +230,7 @@ export function TopBar() {
           {/* Profile with Role */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="gap-2 h-10 px-2 hover:bg-gray-50 dark:hover:bg-slate-800">
+              <Button variant="ghost" className="gap-2 h-10 px-2 hover:bg-blue-50 dark:hover:bg-slate-800/60 hover:text-blue-600 transition-colors">
                 <div className="h-8 w-8 rounded-full bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-200 flex items-center justify-center shadow-[0_0_18px_rgba(59,130,246,0.45)]">
                   <User className="h-5 w-5 text-blue-500 dark:text-sky-300 drop-shadow-[0_0_12px_rgba(59,130,246,0.65)]" />
                 </div>
@@ -242,11 +242,17 @@ export function TopBar() {
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuLabel className="text-sm font-semibold">My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigate('/my/profile')} className="text-sm">
+              <DropdownMenuItem
+                onClick={() => navigate('/my/profile')}
+                className="text-sm text-slate-700 dark:text-slate-100 transition-colors data-[highlighted]:bg-blue-100 data-[highlighted]:text-blue-900 dark:data-[highlighted]:bg-sky-500/30 dark:data-[highlighted]:text-white"
+              >
                 <User className="mr-2 h-4 w-4" />
                 Profile
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleLogout} className="text-sm">
+              <DropdownMenuItem
+                onClick={handleLogout}
+                className="text-sm text-slate-700 dark:text-slate-100 transition-colors data-[highlighted]:bg-blue-100 data-[highlighted]:text-blue-900 dark:data-[highlighted]:bg-sky-500/30 dark:data-[highlighted]:text-white"
+              >
                 <LogOut className="mr-2 h-4 w-4" />
                 Log out
               </DropdownMenuItem>

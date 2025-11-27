@@ -76,7 +76,11 @@ export function Notifications() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:text-sky-300 dark:hover:text-sky-200 dark:hover:bg-slate-800/60 transition-colors"
+        >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <Badge

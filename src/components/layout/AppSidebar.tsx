@@ -408,7 +408,7 @@ export function AppSidebar() {
     const badgeCount = item.showBadge ? getBadgeCount(item.url) : 0;
 
     const baseHover =
-      "border border-transparent transition-all duration-200 hover:border-blue-400/50 hover:bg-blue-500/10 hover:text-blue-600 focus-visible:ring-2 focus-visible:ring-blue-400/40";
+      "border border-transparent transition-all duration-200 hover:border-blue-400/50 hover:bg-blue-100/70 dark:hover:bg-sky-500/20 hover:text-blue-700 dark:hover:text-sky-200 focus-visible:ring-2 focus-visible:ring-blue-400/40";
     const activeStyles = "bg-blue-600 text-white border border-blue-500 shadow-[0_10px_25px_rgba(37,99,235,0.35)]";
 
     if (item.sso) {
@@ -515,7 +515,7 @@ export function AppSidebar() {
                 >
                   <button
                     onClick={() => toggleGroup(group.id)}
-                    className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200"
+                    className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200 rounded-xl transition-colors hover:text-blue-700 dark:hover:text-sky-200 hover:bg-blue-50/60 dark:hover:bg-slate-900/40"
                   >
                     <span>{group.label}</span>
                     <ChevronDown
@@ -543,7 +543,7 @@ export function AppSidebar() {
                     className={({ isActive }) =>
                       `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all border ${isActive
                         ? "bg-blue-600 text-white border-blue-500 shadow-[0_10px_28px_rgba(37,99,235,0.35)]"
-                        : "text-slate-600 dark:text-slate-200 border-transparent hover:border-blue-400/40 hover:bg-blue-500/10 hover:text-blue-500"
+                        : "text-slate-600 dark:text-slate-200 border-transparent hover:border-blue-400/40 hover:bg-blue-100/70 dark:hover:bg-sky-500/20 hover:text-blue-700 dark:hover:text-sky-200"
                       }`
                     }
                   >
@@ -563,7 +563,7 @@ export function AppSidebar() {
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all border ${isActive
                       ? "bg-blue-600 text-white border-blue-500 shadow-[0_10px_28px_rgba(37,99,235,0.35)]"
-                      : "text-slate-600 dark:text-slate-200 border-transparent hover:border-blue-400/40 hover:bg-blue-500/10 hover:text-blue-500"
+                      : "text-slate-600 dark:text-slate-200 border-transparent hover:border-blue-400/40 hover:bg-blue-100/70 dark:hover:bg-sky-500/20 hover:text-blue-700 dark:hover:text-sky-200"
                     }`
                   }
                 >

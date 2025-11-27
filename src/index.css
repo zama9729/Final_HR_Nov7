@@ -115,3 +115,52 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Ensure Leaflet map styles are not overridden by Tailwind */
+.leaflet-container {
+  height: 100% !important;
+  width: 100% !important;
+  z-index: 0 !important;
+  background-color: transparent !important;
+  background: transparent !important;
+}
+
+.leaflet-pane {
+  z-index: 1 !important;
+}
+
+.leaflet-tile-pane {
+  z-index: 2 !important;
+}
+
+.leaflet-overlay-pane {
+  z-index: 3 !important;
+}
+
+.leaflet-shadow-pane {
+  z-index: 4 !important;
+}
+
+.leaflet-marker-pane {
+  z-index: 5 !important;
+}
+
+.leaflet-tooltip-pane {
+  z-index: 6 !important;
+}
+
+.leaflet-popup-pane {
+  z-index: 7 !important;
+}
+
+.leaflet-map-pane canvas {
+  z-index: 2 !important;
+}
+
+.leaflet-map-pane svg {
+  z-index: 3 !important;
+}
+
+.leaflet-control {
+  z-index: 8 !important;
+}

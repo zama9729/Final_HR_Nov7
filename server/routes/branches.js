@@ -15,10 +15,29 @@ router.use(authenticateToken, requireRole('admin', 'hr', 'ceo'), setTenantContex
 router.get('/', async (req, res) => {
   try {
     const { rows: branches } = await queryWithOrg(
-      `SELECT id, org_id, name, code, timezone, holiday_calendar_id, pay_group_id, address, is_active, metadata, created_at, updated_at
-       FROM org_branches
-       WHERE org_id = $1
-       ORDER BY created_at`,
+      `SELECT 
+         b.id, 
+         b.org_id, 
+         b.name, 
+         b.code, 
+         b.timezone, 
+         b.holiday_calendar_id, 
+         b.pay_group_id, 
+         b.address, 
+         b.is_active, 
+         b.metadata, 
+         b.created_at, 
+         b.updated_at,
+         (SELECT COUNT(DISTINCT e.id) 
+          FROM employees e
+          JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
+          WHERE ea.branch_id = b.id AND e.status = 'active' AND e.tenant_id = $1) as employee_count,
+         (SELECT COUNT(DISTINCT t.id)
+          FROM teams t
+          WHERE t.branch_id = b.id AND t.org_id = $1) as team_count
+       FROM org_branches b
+       WHERE b.org_id = $1
+       ORDER BY b.created_at`,
       [req.orgId],
       req.orgId
     );

@@ -663,8 +663,7 @@ export default function Dashboard() {
                 )}
                 <Button
                   onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar')}
-                  variant="outline"
-                  className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950 font-semibold"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)]"
                 >
                   {isEmployee ? 'View My Shifts' : 'View Calendar'}
                 </Button>
