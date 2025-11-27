@@ -2,15 +2,17 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity } from "lucide-react";
-import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay } from "date-fns";
+import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2, ListTodo, PlayCircle } from "lucide-react";
+import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay, isSameDay } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
+import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
+import { useClockResultToast } from "@/components/attendance/ClockResultToast";
 
 interface DashboardStats {
   timesheetHours: number;
@@ -28,10 +30,36 @@ interface UpcomingShift {
   shift_type: string;
 }
 
+interface ClockSession {
+  id: string;
+  clock_in_at: string;
+  clock_out_at: string | null;
+  duration_minutes: number | null;
+  work_type?: string | null;
+}
+
+interface ClockStatusResponse {
+  capture_method?: string;
+  is_clock_mode?: boolean;
+  is_clocked_in: boolean;
+  open_session: ClockSession | null;
+  last_event?: { event_type: string; raw_timestamp: string } | null;
+}
+
+interface QuickTask {
+  id: string;
+  title: string;
+  description?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  url?: string;
+}
+
 export default function Dashboard() {
   const { user, userRole } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { showSuccess, showError } = useClockResultToast();
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
     timesheetHours: 0,
@@ -44,11 +72,37 @@ export default function Dashboard() {
   const [loadingShifts, setLoadingShifts] = useState(false);
   const [attendanceTrends, setAttendanceTrends] = useState<Array<{ date: string; hours: number }>>([]);
   const [loadingTrends, setLoadingTrends] = useState(false);
+  const [clockStatus, setClockStatus] = useState<ClockStatusResponse | null>(null);
+  const [clockStatusLoading, setClockStatusLoading] = useState(false);
+  const [clockActionLoading, setClockActionLoading] = useState(false);
+  const [pendingClockAction, setPendingClockAction] = useState<'IN' | 'OUT' | null>(null);
+  const [showClockConsent, setShowClockConsent] = useState(false);
+  const [workDuration, setWorkDuration] = useState('0h 00m');
+  const [pendingCounts, setPendingCounts] = useState({
+    timesheets: 0,
+    leaves: 0,
+    taxDeclarations: 0,
+  });
+  const [pendingCountsLoading, setPendingCountsLoading] = useState(false);
+  const presenceIndicators: Record<string, string> = {
+    online: "bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.7)]",
+    away: "bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.7)]",
+    break: "bg-red-400 shadow-[0_0_12px_rgba(248,113,113,0.7)]",
+    out_of_office: "bg-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.7)]",
+    default: "bg-slate-400 shadow-[0_0_10px_rgba(148,163,184,0.6)]",
+  };
+  const isManagerView = ['manager', 'hr', 'director', 'ceo', 'admin'].includes((userRole || '').toLowerCase());
+  const presenceLabel = useMemo(
+    () => presenceStatus.replace('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+    [presenceStatus]
+  );
 
   useEffect(() => {
     checkOnboardingStatus();
     fetchDashboardStats();
     fetchPresenceStatus();
+    fetchClockStatus();
+    fetchPendingCounts();
   }, [user]);
 
   useEffect(() => {
@@ -60,6 +114,25 @@ export default function Dashboard() {
       setAttendanceTrends([]);
     }
   }, [userRole]);
+
+  useEffect(() => {
+    if (!clockStatus?.is_clocked_in || !clockStatus.open_session?.clock_in_at) {
+      setWorkDuration('0h 00m');
+      return;
+    }
+
+    const computeDuration = () => {
+      const start = new Date(clockStatus.open_session!.clock_in_at).getTime();
+      const diffMs = Date.now() - start;
+      const hours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+      const minutes = Math.max(0, Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60)));
+      setWorkDuration(`${hours}h ${minutes.toString().padStart(2, '0')}m`);
+    };
+
+    computeDuration();
+    const interval = window.setInterval(computeDuration, 60000);
+    return () => window.clearInterval(interval);
+  }, [clockStatus?.is_clocked_in, clockStatus?.open_session?.clock_in_at]);
 
   const fetchDashboardStats = async () => {
     if (!user) return;
@@ -167,6 +240,46 @@ export default function Dashboard() {
     }
   };
 
+  const fetchClockStatus = async () => {
+    if (!user) {
+      setClockStatus(null);
+      return;
+    }
+
+    try {
+      setClockStatusLoading(true);
+      const status = await api.getClockStatus();
+      setClockStatus(status);
+    } catch (error) {
+      console.error('Error fetching clock status:', error);
+      setClockStatus(null);
+    } finally {
+      setClockStatusLoading(false);
+    }
+  };
+
+  const fetchPendingCounts = async () => {
+    if (!user) {
+      setPendingCounts({ timesheets: 0, leaves: 0, taxDeclarations: 0 });
+      return;
+    }
+
+    try {
+      setPendingCountsLoading(true);
+      const counts = await api.getPendingCounts();
+      setPendingCounts({
+        timesheets: counts?.timesheets || 0,
+        leaves: counts?.leaves || 0,
+        taxDeclarations: counts?.taxDeclarations || 0,
+      });
+    } catch (error) {
+      console.error('Error fetching pending counts:', error);
+      setPendingCounts({ timesheets: 0, leaves: 0, taxDeclarations: 0 });
+    } finally {
+      setPendingCountsLoading(false);
+    }
+  };
+
   const checkOnboardingStatus = async () => {
     if (!user || userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') {
       setIsLoading(false);
@@ -204,7 +317,6 @@ export default function Dashboard() {
   };
 
   const isEmployee = userRole === 'employee';
-  const showTimesheetCard = !isEmployee;
 
   const handleSubmitTimesheet = () => {
     navigate('/timesheets');
@@ -223,6 +335,9 @@ export default function Dashboard() {
     const hour12 = hour % 12 || 12;
     return `${hour12}:${minutes} ${ampm}`;
   };
+
+  const formatClockTime = (value?: string | null) =>
+    value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
 
   const getShiftDateLabel = (dateStr: string) => {
     const date = parseISO(dateStr);
@@ -249,6 +364,12 @@ export default function Dashboard() {
           icon: <SunMedium className="h-5 w-5 text-amber-500 dark:text-amber-300" />,
         }
     : null;
+
+  const approvalsData = [
+    { id: 'timesheets', label: 'Timesheets', value: pendingCounts.timesheets, action: () => navigate('/timesheet-approvals') },
+    { id: 'leaves', label: 'Leave requests', value: pendingCounts.leaves, action: () => navigate('/leaves') },
+    { id: 'tax', label: 'Tax declarations', value: pendingCounts.taxDeclarations, action: () => navigate('/tax/declarations/review') },
+  ];
 
   const fetchUpcomingShifts = async () => {
     if (!user) {
@@ -360,6 +481,113 @@ export default function Dashboard() {
     }
   };
 
+  const isClockFeatureEnabled = clockStatus?.is_clock_mode ?? true;
+
+  const handleClockButtonClick = () => {
+    if (!isClockFeatureEnabled) {
+      toast({
+        title: "Clock unavailable",
+        description: "Your organization uses timesheets instead of clock-in/out.",
+      });
+      return;
+    }
+    const action = clockStatus?.is_clocked_in ? 'OUT' : 'IN';
+    setPendingClockAction(action);
+    setShowClockConsent(true);
+  };
+
+  const handleClockModalClose = () => {
+    setShowClockConsent(false);
+    setPendingClockAction(null);
+  };
+
+  const handleClockConsentConfirm = async (data: {
+    lat?: number;
+    lon?: number;
+    address_text: string;
+    capture_method: 'geo' | 'manual' | 'kiosk' | 'unknown';
+    consent: boolean;
+  }) => {
+    if (!pendingClockAction) return;
+
+    setClockActionLoading(true);
+    try {
+      const result = await api.clock({
+        action: pendingClockAction,
+        ts: new Date().toISOString(),
+        lat: data.lat,
+        lon: data.lon,
+        address_text: data.address_text,
+        capture_method: data.capture_method,
+        consent: data.consent,
+      });
+
+      showSuccess({
+        action: pendingClockAction,
+        workType: (result?.work_type as 'WFO' | 'WFH') || 'WFH',
+        address: data.address_text,
+        timestamp: new Date().toISOString(),
+      });
+
+      await fetchClockStatus();
+    } catch (error: any) {
+      showError(error?.message || "Unable to record attendance");
+    } finally {
+      setClockActionLoading(false);
+      handleClockModalClose();
+    }
+  };
+
+  const todayTasks = useMemo<QuickTask[]>(() => {
+    const tasks: QuickTask[] = [];
+    const now = new Date();
+
+    if (!clockStatusLoading) {
+      if (clockStatus?.is_clocked_in) {
+        tasks.push({
+          id: 'clocked-in',
+          title: 'You are currently clocked in',
+          description: clockStatus.open_session?.clock_in_at
+            ? `Since ${formatClockTime(clockStatus.open_session.clock_in_at)}`
+            : undefined,
+          actionLabel: 'View log',
+          onAction: () => navigate('/attendance/clock'),
+        });
+      } else {
+        tasks.push({
+          id: 'clock-in',
+          title: 'Clock in to start your day',
+          description: 'Track today’s working hours',
+          actionLabel: 'Clock In',
+          onAction: handleClockButtonClick,
+        });
+      }
+    }
+
+    if (nextShift && isSameDay(parseISO(nextShift.shift_date), now)) {
+      tasks.push({
+        id: `shift-${nextShift.id}`,
+        title: `Shift starts at ${formatShiftTime(nextShift.start_time)}`,
+        description: nextShift.template_name,
+        actionLabel: isEmployee ? 'My shifts' : 'Schedule',
+        onAction: () => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar'),
+      });
+    }
+
+    if (stats.projects.length > 0) {
+      const project = stats.projects[0];
+      tasks.push({
+        id: `project-${project.id}`,
+        title: `Focus: ${project.name}`,
+        description: project.category || 'Project assignment',
+        actionLabel: 'Open project',
+        onAction: () => navigate(`/projects/${project.id}`),
+      });
+    }
+
+    return tasks.slice(0, 3);
+  }, [clockStatus, clockStatusLoading, nextShift, stats.projects, navigate, isEmployee, handleClockButtonClick]);
+
 
   if (isLoading) {
     return (
@@ -392,25 +620,148 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Main Stats Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {/* Timesheet Card */}
-          {showTimesheetCard && (
-            <Card className="shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Timesheet</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-4xl font-bold mb-4">{stats.timesheetHours}</div>
-                <Button 
-                  onClick={handleSubmitTimesheet}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+        {/* Today Summary & Quick Actions */}
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="shadow-lg border border-white/60 dark:border-slate-800/70 bg-white/80 dark:bg-slate-900/70 backdrop-blur-lg">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-semibold">Today Summary / Quick Actions</CardTitle>
+              <p className="text-sm text-muted-foreground">Stay on top of your day</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Presence</p>
+                  <div className="flex items-center gap-2 text-base font-semibold">
+                    <span className={`h-2.5 w-2.5 rounded-full ${presenceIndicators[presenceStatus] || presenceIndicators.default}`} />
+                    {presenceLabel}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Work Hours</p>
+                  <p className="text-xl font-semibold">{clockStatus?.is_clocked_in ? workDuration : '—'}</p>
+                  <p className="text-xs text-muted-foreground">{clockStatus?.is_clocked_in ? 'in progress' : 'off the clock'}</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-blue-200/60 dark:border-blue-500/30 bg-blue-50/80 dark:bg-blue-500/10 p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                    {clockStatus?.is_clocked_in ? 'Clocked in since' : 'You are off the clock'}
+                  </p>
+                  <p className="text-lg font-semibold text-slate-900 dark:text-white">
+                    {clockStatus?.is_clocked_in
+                      ? formatClockTime(clockStatus.open_session?.clock_in_at)
+                      : clockStatusLoading ? 'Checking…' : 'Not started'}
+                  </p>
+                </div>
+                <Button
+                  onClick={handleClockButtonClick}
+                  disabled={clockActionLoading || clockStatusLoading || !isClockFeatureEnabled}
+                  className="min-w-[110px] bg-blue-600 hover:bg-blue-700 text-white"
                 >
-                  Submit
+                  {clockActionLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Working…
+                    </>
+                  ) : (
+                    (clockStatus?.is_clocked_in ? 'Clock Out' : 'Clock In')
+                  )}
                 </Button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Next shift</p>
+                  <p className="text-sm font-semibold">
+                    {nextShift
+                      ? `${getShiftDateLabel(nextShift.shift_date)}, ${formatShiftTime(nextShift.start_time)}`
+                      : 'No shifts scheduled'}
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar')}>
+                  View schedule
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between pb-1">
+              <div>
+                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                  <ListTodo className="h-5 w-5 text-blue-600" />
+                  Pending tasks for today
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">Personal reminders</p>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {todayTasks.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  You&apos;re all caught up for today ✨
+                </div>
+              ) : (
+                todayTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-muted/30 dark:bg-slate-900/60 flex items-center justify-between gap-3"
+                  >
+                    <div>
+                      <p className="font-medium">{task.title}</p>
+                      {task.description && (
+                        <p className="text-xs text-muted-foreground">{task.description}</p>
+                      )}
+                    </div>
+                    {task.onAction && (
+                      <Button size="sm" variant="outline" onClick={task.onAction}>
+                        {task.actionLabel || 'Open'}
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          {isManagerView && (
+            <Card className="shadow-sm">
+              <CardHeader className="pb-1">
+                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                  <PlayCircle className="h-5 w-5 text-amber-500" />
+                  Pending approvals by you
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">Manager actions</p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {pendingCountsLoading ? (
+                  <div className="py-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading approvals…
+                  </div>
+                ) : (
+                  approvalsData.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 p-3">
+                      <div>
+                        <p className="text-sm font-semibold">{item.label}</p>
+                        <p className="text-xs text-muted-foreground">Awaiting your action</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-3xl font-bold text-slate-900 dark:text-white">{item.value}</span>
+                        <Button size="sm" variant="outline" onClick={item.action}>
+                          Review
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </CardContent>
             </Card>
           )}
+        </div>
+
+        {/* Main Stats Grid */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 
           {/* Leave Balance Card */}
           <Card className="shadow-sm hover:shadow-md transition-shadow">
@@ -588,6 +939,12 @@ export default function Dashboard() {
           <CalendarPanel />
         </div>
       </div>
+      <AddressConsentModal
+        open={showClockConsent}
+        onClose={handleClockModalClose}
+        onConfirm={handleClockConsentConfirm}
+        action={pendingClockAction || 'IN'}
+      />
     </AppLayout>
   );
 }

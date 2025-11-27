@@ -168,7 +168,17 @@ export async function getPresignedPutUrl({ objectKey, contentType, expiresIn = 3
     ContentType: contentType,
   });
 
-  return await getSignedUrl(s3Client, command, { expiresIn });
+  const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn });
+  
+  // Replace internal Docker hostname with localhost for browser access
+  // This handles cases where MINIO_ENDPOINT is set to "http://minio:9000" (internal)
+  // but the browser needs "http://localhost:9000"
+  const minioPublicUrl = process.env.MINIO_PUBLIC_URL || process.env.MINIO_ENDPOINT?.replace('minio:', 'localhost:') || 'http://localhost:9000';
+  if (presignedUrl.includes('minio:')) {
+    return presignedUrl.replace(/https?:\/\/minio:\d+/, minioPublicUrl);
+  }
+  
+  return presignedUrl;
 }
 
 /**

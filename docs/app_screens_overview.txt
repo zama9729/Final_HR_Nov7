@@ -1,0 +1,235 @@
+App Screens Overview
+====================
+This document lists every major screen exposed by the HR suite webapp (derived from `src/pages`). Use it as a map for onboarding, QA and design reviews. Routes reflect the canonical links referenced in the sidebar plus their backing page components.
+
+
+Overview & Insights
+-------------------
+1. Dashboard (`/dashboard`, `src/pages/Dashboard.tsx`)
+   - Personalized landing view with presence status, quick actions (clock in/out), today’s reminders and manager approvals.
+   - Shows leave balance, next holiday, project shortcuts, attendance trends and the unified calendar widget.
+
+2. CEO Dashboard (`/ceo/dashboard`, `src/pages/CEODashboard.tsx`)
+   - Executive-level overview with company health metrics, hiring funnels and attrition heatmaps.
+
+3. Admin Dashboard (`/admin`, `src/pages/AdminDashboard.tsx`)
+   - High-level widgets for admins: onboarding progress, compliance alerts, payroll integration state and pending tickets.
+
+4. Super Admin Dashboard (`/super/dashboard`, `src/pages/SuperAdminDashboard.tsx`)
+   - Owner/operator analytics plus tenant provisioning controls and license health.
+
+5. Analytics (`/analytics`, `src/pages/Analytics.tsx`)
+   - General BI hub combining people, payroll and operations charts.
+
+6. Attendance Analytics (`/analytics/attendance`, `src/pages/AttendanceAnalytics.tsx`)
+   - Drill-down dashboards for punctuality, overtime, geography heatmaps and outlier detection.
+
+7. Employee Stats (`/employee-stats`, `src/pages/EmployeeStats.tsx`)
+   - Workforce demographics, diversity gauges, tenure breakdowns and growth trends.
+
+8. Audit Logs (`/audit-logs`, `src/pages/AuditLogs.tsx`)
+   - Tamper-proof log viewer with filters by actor, resource and timeframe.
+
+
+Self-Service / Employee Tools
+-----------------------------
+9. My Profile (`/my/profile`, `src/pages/MyProfile.tsx`)
+   - Employee profile with tabs for personal info, compensation, documents and shift info.
+
+10. Profile Skills (`/my/profile?tab=skills`, `src/pages/ProfileSkills.tsx`)
+    - Skills matrix editor, certification uploads and competency endorsements.
+
+11. My Appraisal (`/my-appraisal`, `src/pages/MyAppraisal.tsx`)
+    - Individual performance forms, goals tracking and historical evaluations.
+
+12. Clock In / Out (`/attendance/clock`, `src/pages/ClockInOut.tsx`)
+    - Full-screen attendance console with geo-consent, punch history and sessions table.
+
+13. Documents Inbox (`/documents`, `src/pages/DocumentInbox.tsx`)
+    - Secure vault for payslips, onboarding files and HR-issued documents.
+
+14. Form 16 (`/reports/form16`, `src/pages/Form16.tsx`)
+    - Tax form viewer / downloader with multi-year filter.
+
+15. Tax Declaration (`/tax/declaration`, `src/pages/TaxDeclaration.tsx`)
+    - Employee self-declaration flow for exemptions and investment proofs.
+
+16. A.I. Assistant Workspace (`/ai-assistant`, `src/pages/AIAssistantPage.tsx`)
+    - Conversational assistant to query policies, workflows or RAG-backed answers.
+
+
+People Operations
+-----------------
+17. Employees Directory (`/employees`, `src/pages/Employees.tsx`)
+    - Table, filters and bulk actions for all employees; links to profiles.
+
+18. Employee Detail (`/employees/:id`, `src/pages/EmployeeDetail.tsx`)
+    - Drill-down record: bio, employment history, notes and HR actions.
+
+19. Add Employee (`/employees/new`, `src/pages/AddEmployee.tsx`)
+    - Wizard for manual hiring plus optional invite emails.
+
+20. Employee Import (`/employees/import`, `src/pages/EmployeeImport.tsx`)
+    - CSV/Excel uploader with mapping preview, validation results and retry.
+
+21. Onboarding Tracker (`/onboarding-tracker`, `src/pages/OnboardingTracker.tsx`)
+    - Kanban-style view of candidates by stage, SLA warnings and bulk nudges.
+
+22. Onboarding Workspace (`/onboarding`, `src/pages/Onboarding.tsx` & `OnboardingEnhanced.tsx`)
+    - Candidate self-service portal for documents, forms and progress.
+
+23. Onboarding Next Step (`/onboarding/next`, `src/pages/OnboardingNextStep.tsx`)
+    - Micro-guided card showing remaining requirements before completion.
+
+24. Onboarding Tracker (Classic) (`/onboarding-tracker/legacy`, `src/pages/OnboardingTracker.tsx`)
+    - Legacy layout retained for reference or fallback.
+
+25. Offboarding Queue (`/offboarding`, `src/pages/OffboardingQueue.tsx`)
+    - Pipeline of resignations/terminations awaiting actions.
+
+26. Offboarding Detail (`/offboarding/:id`, `src/pages/OffboardingDetail.tsx`)
+    - Checklist of clearance items, asset recovery and exit interview data.
+
+27. Request Resignation (`/offboarding/new`, `src/pages/OffboardingNew.tsx`)
+    - Employee-initiated resignation flow with notice period enforcement.
+
+28. Offboarding Policies (`/offboarding/policies`, `src/pages/OffboardingPolicies.tsx`)
+    - Policy repository controlling templates, approvals and severance.
+
+29. Promotion Cycles (`/promotion-cycles`, `src/pages/PromotionCycles.tsx`)
+    - Configure promotion rounds, track nominations and finalize decisions.
+
+30. Appraisals (`/appraisals`, `src/pages/Appraisals.tsx`)
+    - HR workspace for review cycles, calibration boards and final ratings.
+
+31. Hr Profile Requests (`/hr/requests`, `src/pages/HrProfileRequests.tsx`)
+    - Manage profile change approvals submitted by employees.
+
+32. Background Checks (`/background-checks`, `src/pages/BackgroundChecks.tsx`)
+    - Track vendor reports, statuses and escalate discrepancies.
+
+33. Project Scheduling (`/projects/calendar`, `src/pages/ProjectCalendar.tsx`)
+    - Calendar view for project allocations and capacity planning.
+
+34. Create Project (`/projects/new`, `src/pages/ProjectNew.tsx`)
+    - Form to spin up new initiatives, assign leads and budgets.
+
+35. Project Suggestions (`/projects/suggestions`, `src/pages/ProjectSuggestions.tsx`)
+    - AI assisted recommendations for staffing or new project ideas.
+
+36. Org Chart (`/org-chart`, `src/pages/OrgChart.tsx`)
+    - Interactive hierarchy with search, department overlays and quick actions.
+
+
+Attendance & Leave
+------------------
+37. Timesheets (`/timesheets`, `src/pages/Timesheets.tsx`)
+    - Weekly entry grid, approvals overview and CSV export.
+
+38. Timesheet Approvals (`/timesheet-approvals`, `src/pages/TimesheetApprovals.tsx`)
+    - Manager/HR queue focusing on pending timesheets with filters.
+
+39. Attendance Upload (`/attendance/upload`, `src/pages/AttendanceUpload.tsx`)
+    - Bulk punch importer with status timeline, retry + cancel controls.
+
+40. Attendance Upload History (`/attendance/history`, `src/pages/AttendanceUploadHistory.tsx`)
+    - Historical log of uploaded batches, error files and processors.
+
+41. Shift Management (`/scheduling`, `src/pages/ShiftManagement.tsx`)
+    - Build templates, assign rosters and publish to teams.
+
+42. Staff Scheduling (`/scheduling/calendar`, `src/pages/StaffScheduling.tsx`)
+    - Drag-and-drop shift calendar view (alternative to ShiftManagement).
+
+43. Shift Calendar (`/scheduling/shifts`, `src/pages/ShiftCalendar.tsx`)
+    - Visual timeline per employee/team for shift coverage.
+
+44. Unified Calendar (`/calendar`, `src/pages/UnifiedCalendar.tsx`)
+    - Combined view for holidays, shifts, leave events and org-wide markers.
+
+45. Project Calendar (Attendance) (`/projects/calendar`, `src/pages/ProjectCalendar.tsx`)
+    - Overlaps with project screen but filtered for attendance commitments.
+
+46. Leave Requests (`/leaves`, `src/pages/LeaveRequests.tsx`)
+    - Supervisor queue + self-service submission details.
+
+47. Leave Policies (`/policies`, `src/pages/LeavePolicies.tsx`)
+    - Create/edit leave types, holiday mappings and carry-forward logic.
+
+48. Holiday Management (`/holidays`, `src/pages/HolidayManagement.tsx`)
+    - Maintain master holiday list, branch overrides and publishing.
+
+
+Compliance & Payroll
+--------------------
+49. Payroll (`/payroll`, `src/pages/Payroll.tsx`)
+    - Embeds payroll suite (SSO) plus quick stats and sync status.
+
+50. Payroll Adjustments (`/payroll/adjustments`, `src/pages/PayrollAdjustments.tsx`)
+    - One-off earnings/deductions entry screen with audit log.
+
+51. Tax Declaration Review (`/tax/declarations/review`, `src/pages/TaxDeclarationReview.tsx`)
+    - HR review queue for employee submissions, approvals and remarks.
+
+52. Policies Management (`/policies/management`, `src/pages/PoliciesManagement.tsx`)
+    - Manage digital policy library, versioning and acknowledgements.
+
+53. Policy Editor (`/policies/editor/:id`, `src/pages/PolicyEditor.tsx`)
+    - Rich-text editor for policy documents with attachments.
+
+54. Workflow Editor (`/workflows/editor`, `src/pages/WorkflowEditor.tsx`)
+    - Build low-code approval flows, triggers and automation steps.
+
+55. Workflows Library (`/workflows`, `src/pages/Workflows.tsx`)
+    - List of all workflows with activation toggles and monitoring.
+
+56. RAG Document Upload (`/rag/documents`, `src/pages/RAGDocumentUpload.tsx`)
+    - Feed knowledge base for AI assistant with metadata tagging.
+
+
+System / Settings / Auth
+------------------------
+57. Settings (`/settings`, `src/pages/Settings.tsx`)
+    - Organization branding, theme defaults, notification settings.
+
+58. Organization Setup Wizard (`/setup`, `src/pages/OrganizationSetup.tsx`)
+    - Guided onboarding for new tenants: branches, roles, payroll link.
+
+59. Change Password (`/settings/change-password`, `src/pages/ChangePassword.tsx`)
+    - Self-service password reset (logged-in users).
+
+60. Setup Password (`/auth/setup-password`, `src/pages/SetupPassword.tsx`)
+    - First-time password creation (magic link flow).
+
+61. Authentication screens (`/auth/*`, `src/pages/auth/*.tsx`)
+    - Login, signup, forgot/reset, and first-time login experiences.
+
+62. Not Found (`*`, `src/pages/NotFound.tsx`)
+    - Friendly 404 page with navigation back to dashboard.
+
+
+Miscellaneous / Specialized
+---------------------------
+63. Offboarding / Terminations (`/terminations`, `src/pages/Terminations.tsx`)
+    - Dedicated module for involuntary exits, risk tracking and package info.
+
+64. Project Suggestions (`/projects/suggestions`, `src/pages/ProjectSuggestions.tsx`)
+    - AI-generated ideas plus quick accept/assign actions.
+
+65. Project Calendar (`/projects/calendar`, `src/pages/ProjectCalendar.tsx`)
+    - (duplicate file path on purpose) – ensures cross-linking between attendance + project teams.
+
+66. Payroll SSO Bridge (`/payroll` + `payroll-app` shell)
+    - External React/Vite app for payroll deep-dive; accessible via main UI but runs inside `payroll-app/src/pages/Dashboard.tsx`.
+
+67. Attendance Clock Standalone (`/attendance/clock`, `src/pages/ClockInOut.tsx`)
+    - Already covered but note: can run kiosk mode on tablets for floor devices.
+
+
+How to Use This Document
+------------------------
+- Each entry references the page component (`src/pages/...`) so engineers can jump into code quickly.
+- Paths listed mirror the sidebar navigation (`AppSidebar.tsx`). If you can’t reach a screen, confirm the current user role/feature flags.
+- Additional micro-screens (dialogs, wizards) live under `src/components/**` and are not listed individually; inspect related page files for embedded components.
+
+

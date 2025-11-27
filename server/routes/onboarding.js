@@ -86,6 +86,23 @@ const ensureDocumentInfra = async () => {
   `);
 };
 
+const ensureOnboardingBankColumns = async () => {
+  await query(`
+    CREATE TABLE IF NOT EXISTS onboarding_data (
+      employee_id UUID PRIMARY KEY REFERENCES employees(id) ON DELETE CASCADE
+    )
+  `);
+
+  await query(`
+    ALTER TABLE onboarding_data
+      ADD COLUMN IF NOT EXISTS bank_details_status TEXT DEFAULT 'pending',
+      ADD COLUMN IF NOT EXISTS bank_account_number TEXT,
+      ADD COLUMN IF NOT EXISTS bank_name TEXT,
+      ADD COLUMN IF NOT EXISTS bank_branch TEXT,
+      ADD COLUMN IF NOT EXISTS ifsc_code TEXT
+  `);
+};
+
 const getTenantIdForUser = async (userId) => {
   const result = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
   return result.rows[0]?.tenant_id || null;
@@ -349,10 +366,11 @@ const listDocumentsForCandidate = async ({ req, candidateId, filters }) => {
     'SELECT id, user_id, tenant_id FROM employees WHERE id = $1',
     [candidateId]
   );
+  const targetEmployee = employeeResult.rows[0];
 
   if (employeeResult.rows.length === 0) {
     const docTenant = await query(
-      `SELECT tenant_id FROM onboarding_documents WHERE candidate_id = $1 LIMIT 1`,
+      `SELECT tenant_id FROM onboarding_documents WHERE (candidate_id = $1 OR employee_id = $1) LIMIT 1`,
       [candidateId]
     );
     if (docTenant.rows.length === 0) {
@@ -376,8 +394,17 @@ const listDocumentsForCandidate = async ({ req, candidateId, filters }) => {
     [req.user.id]
   );
   const isSelf = myEmployee.rows[0]?.id === candidateId;
+  const isOwnerByEmployeeRecord = targetEmployee?.user_id === req.user.id;
+  
+  // Also check if user uploaded the documents (for onboarding flow)
+  const userUploadedDocs = await query(
+    `SELECT COUNT(*) as count FROM onboarding_documents 
+     WHERE (employee_id = $1 OR candidate_id = $1) AND uploaded_by = $2`,
+    [candidateId, req.user.id]
+  );
+  const hasUploadedDocs = parseInt(userUploadedDocs.rows[0]?.count || '0') > 0;
 
-  if (!isHr && !isSelf) {
+  if (!isHr && !isSelf && !hasUploadedDocs && !isOwnerByEmployeeRecord) {
     const err = new Error('Insufficient permissions');
     err.status = 403;
     throw err;
@@ -686,6 +713,8 @@ router.post('/submit', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Employee ID required' });
     }
 
+    await ensureOnboardingBankColumns();
+
     // Get tenant_id from user's profile
     const profileResult = await query(
       'SELECT tenant_id FROM profiles WHERE id = $1',
@@ -877,6 +906,8 @@ router.post('/bank-details/skip', authenticateToken, async (req, res) => {
     if (empResult.rows[0].tenant_id !== tenantId) {
       return res.status(403).json({ error: 'Unauthorized' });
     }
+
+    await ensureOnboardingBankColumns();
 
     await query(
       `INSERT INTO onboarding_data (employee_id, bank_details_status, bank_account_number, bank_name, bank_branch, ifsc_code)
@@ -1180,13 +1211,20 @@ router.get('/documents/:documentId/download', authenticateToken, async (req, res
     const roles = await getUserRoles(req.user.id);
     const isHr = isHrRole(roles);
 
-    if (!isHr && document.employee_user_id !== req.user.id) {
+    // Allow access if: HR, employee owner, or user who uploaded the document
+    const isOwner = document.employee_user_id === req.user.id;
+    const isUploader = document.uploaded_by === req.user.id;
+
+    if (!isHr && !isOwner && !isUploader) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
     let streamResult;
     try {
-      const key = document.storage_key || document.file_path;
+      const key = document.storage_key || document.object_key || document.file_path;
+      if (!key) {
+        return res.status(404).json({ error: 'Document storage key not found' });
+      }
       streamResult = await getDocumentStream(key);
     } catch (error) {
       console.error('Failed to load document from storage', error);

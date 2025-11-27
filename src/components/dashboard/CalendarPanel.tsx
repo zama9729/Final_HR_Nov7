@@ -302,9 +302,6 @@ export function CalendarPanel() {
                   )}
                 </div>
                 <div className="mt-2 flex flex-col gap-1">
-                  {dayEvents.length === 0 && (
-                    <span className="text-xs font-medium text-slate-300 dark:text-slate-500">Week Off</span>
-                  )}
                   {dayEvents.slice(0, 3).map((event) => {
                     const styles =
                       event.type === 'shift' && event.shiftSubtype === 'night'

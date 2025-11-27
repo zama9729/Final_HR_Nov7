@@ -174,6 +174,7 @@ export function OnboardingDocsUploader({
           size: file.size,
           checksum,
           docType,
+          employeeId, // Pass employeeId for onboarding flow
           consent: needsConsent ? Boolean(consentMap[docType]) : true,
           notes: "",
         }),

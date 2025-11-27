@@ -48,23 +48,36 @@ export function requireRole(...allowedRoles) {
     }
 
     // Platform admin allowlist via env (comma-separated emails)
-    const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+    const adminEmails = (process.env.ADMIN_EMAILS || '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
     if (adminEmails.includes((req.user.email || '').toLowerCase())) {
       return next();
     }
 
-    // Get user role from database
+    // Fetch highest priority role (mirrors /profiles/me ordering)
     const { rows } = await query(
-      'SELECT role FROM user_roles WHERE user_id = $1 LIMIT 1',
+      `SELECT role FROM user_roles WHERE user_id = $1
+       ORDER BY CASE role
+         WHEN 'admin' THEN 0
+         WHEN 'ceo' THEN 1
+         WHEN 'director' THEN 2
+         WHEN 'hr' THEN 3
+         WHEN 'manager' THEN 4
+         WHEN 'employee' THEN 5
+         ELSE 6
+       END
+       LIMIT 1`,
       [req.user.id]
     );
 
     const userRole = rows[0]?.role;
-    
+
     // Normalize role names (case-insensitive comparison)
     const normalizedUserRole = userRole?.toLowerCase();
-    const normalizedAllowedRoles = allowedRoles.map(r => r.toLowerCase());
-    
+    const normalizedAllowedRoles = allowedRoles.map((r) => r.toLowerCase());
+
     if (!userRole || !normalizedAllowedRoles.includes(normalizedUserRole)) {
       return res.status(403).json({ error: 'Insufficient permissions', errors: [] });
     }
