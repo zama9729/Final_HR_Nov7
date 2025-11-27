@@ -5,6 +5,7 @@ import PDFDocument from "pdfkit";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import XLSX from "xlsx";
 import reimbursementsRouter from "./reimbursements.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
@@ -26,6 +27,14 @@ const proofUpload = multer({
   storage: proofStorage,
   limits: {
     fileSize: Number(process.env.PAYROLL_PROOF_MAX_SIZE || 5 * 1024 * 1024), // default 5MB
+  },
+});
+
+// Multer for bulk salary import
+const salaryImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max
   },
 });
 
@@ -2166,6 +2175,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
       da,
       lta,
       bonus,
+      cca,
+      conveyance,
+      medical_allowance,
       pf_contribution,
       esi_contribution
     } = req.body;
@@ -2181,10 +2193,10 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
     const result = await query(
       `INSERT INTO compensation_structures (
         tenant_id, employee_id, effective_from, ctc, basic_salary, 
-        hra, special_allowance, da, lta, bonus, pf_contribution, esi_contribution,
-        created_by
+        hra, special_allowance, da, lta, bonus, cca, conveyance, medical_allowance,
+        pf_contribution, esi_contribution, created_by
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
       )
       ON CONFLICT (employee_id, effective_from)
       DO UPDATE SET
@@ -2195,6 +2207,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         da = EXCLUDED.da,
         lta = EXCLUDED.lta,
         bonus = EXCLUDED.bonus,
+        cca = EXCLUDED.cca,
+        conveyance = EXCLUDED.conveyance,
+        medical_allowance = EXCLUDED.medical_allowance,
         pf_contribution = EXCLUDED.pf_contribution,
         esi_contribution = EXCLUDED.esi_contribution,
         created_by = COALESCE(compensation_structures.created_by, EXCLUDED.created_by),
@@ -2211,6 +2226,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         da || 0,
         lta || 0,
         bonus || 0,
+        cca || 0,
+        conveyance || 0,
+        medical_allowance || 0,
         pf_contribution || 0,
         esi_contribution || 0,
         hrUserId || null // created_by (HR profile ID); allow null if not mapped
@@ -2222,6 +2240,279 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
   } catch (e: any) {
     console.error("Error adding compensation:", e);
     res.status(500).json({ error: e.message || "Failed to add compensation" });
+  }
+});
+
+// Bulk Salary Structure Import Endpoint
+appRouter.post("/imports/bulk-salary-structure", requireAuth, salaryImportUpload.single("file"), async (req, res) => {
+  try {
+    const userId = (req as any).userId as string;
+    const tenantId = (req as any).tenantId as string;
+    
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Check permissions (HR/admin only)
+    const userResult = await query(
+      `SELECT payroll_role FROM users WHERE id = $1 AND org_id = $2`,
+      [userId, tenantId]
+    );
+    
+    if (!userResult.rows[0] || userResult.rows[0].payroll_role !== 'payroll_admin') {
+      return res.status(403).json({ 
+        error: 'Insufficient permissions',
+        message: 'Only HR can import salary structures'
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const file = req.file;
+    const fileExt = path.extname(file.originalname).toLowerCase().slice(1);
+    
+    let rows: any[] = [];
+
+    // Parse file based on extension
+    if (fileExt === 'csv') {
+      // Parse CSV
+      const csvContent = file.buffer.toString('utf8');
+      const lines = csvContent.split('\n').filter(line => line.trim());
+      if (lines.length < 2) {
+        return res.status(400).json({ error: "CSV file must have at least a header row and one data row" });
+      }
+      
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const employeeIdIndex = headers.findIndex(h => h === 'employee id' || h === 'employee_id');
+      
+      if (employeeIdIndex === -1) {
+        return res.status(400).json({ error: "CSV must contain 'Employee ID' column" });
+      }
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        const row: any = {};
+        headers.forEach((header, idx) => {
+          row[header] = values[idx] || '';
+        });
+        rows.push(row);
+      }
+    } else if (['xlsx', 'xls'].includes(fileExt)) {
+      // Parse Excel
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet, { defval: null, raw: false });
+      
+      if (data.length === 0) {
+        return res.status(400).json({ error: "Excel file is empty" });
+      }
+
+      // Normalize headers (convert to lowercase, replace spaces with underscores)
+      const firstRow = data[0] as any;
+      const headers = Object.keys(firstRow).map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+      
+      const employeeIdHeader = headers.find(h => h === 'employee_id' || h === 'employeeid');
+      if (!employeeIdHeader) {
+        return res.status(400).json({ error: "Excel must contain 'Employee ID' column" });
+      }
+
+      // Transform data with normalized headers
+      rows = data.map((row: any) => {
+        const normalized: any = {};
+        Object.keys(row).forEach((key, idx) => {
+          normalized[headers[idx]] = row[key];
+        });
+        return normalized;
+      });
+    } else {
+      return res.status(400).json({ error: "Unsupported file format. Please upload CSV or Excel (.xlsx, .xls)" });
+    }
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: "No data rows found in file" });
+    }
+
+    // Get all column headers (excluding Employee ID)
+    const firstRow = rows[0];
+    const componentHeaders = Object.keys(firstRow).filter(
+      key => key.toLowerCase() !== 'employee_id' && key.toLowerCase() !== 'employee id'
+    );
+
+    // Map component names to their database column names
+    const componentMap: Record<string, string> = {
+      'basic': 'basic_salary',
+      'basic_salary': 'basic_salary',
+      'hra': 'hra',
+      'house_rent_allowance': 'hra',
+      'special_allowance': 'special_allowance',
+      'da': 'da',
+      'dearness_allowance': 'da',
+      'lta': 'lta',
+      'leave_travel_allowance': 'lta',
+      'bonus': 'bonus',
+      'cca': 'cca',
+      'city_compensatory_allowance': 'cca',
+      'conveyance': 'conveyance',
+      'conveyance_allowance': 'conveyance',
+      'medical_allowance': 'medical_allowance',
+      'medical': 'medical_allowance',
+      'pf': 'pf_contribution',
+      'pf_contribution': 'pf_contribution',
+      'esi': 'esi_contribution',
+      'esi_contribution': 'esi_contribution',
+    };
+
+    // Normalize component header names
+    const normalizeComponentName = (name: string): string => {
+      return name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    };
+
+    const report = {
+      processed: 0,
+      updated: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    // Process each row
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const employeeId = (row['employee_id'] || row['employee id'] || '').toString().trim();
+      
+      if (!employeeId) {
+        report.failed++;
+        report.errors.push(`Row ${i + 2}: Missing Employee ID`);
+        continue;
+      }
+
+      try {
+        // Find employee by employee_id
+        const employeeResult = await query(
+          `SELECT id FROM employees WHERE employee_code = $1 AND tenant_id = $2`,
+          [employeeId, tenantId]
+        );
+
+        if (employeeResult.rows.length === 0) {
+          report.failed++;
+          report.errors.push(`Row ${i + 2}: Employee ID "${employeeId}" not found`);
+          continue;
+        }
+
+        const employeeDbId = employeeResult.rows[0].id;
+
+        // Get current date for effective_from (or use a default)
+        const effectiveFrom = new Date().toISOString().split('T')[0];
+
+        // Build update object with all components
+        const updateData: any = {
+          effective_from: effectiveFrom,
+        };
+
+        // Process each component column
+        for (const header of componentHeaders) {
+          const normalizedHeader = normalizeComponentName(header);
+          const dbColumn = componentMap[normalizedHeader];
+          
+          if (dbColumn) {
+            const value = parseFloat(row[header] || '0');
+            if (!isNaN(value) && value >= 0) {
+              updateData[dbColumn] = value;
+            }
+          }
+        }
+
+        // Calculate CTC if not provided (sum of all components * 12)
+        if (!updateData.ctc) {
+          const monthlyTotal = 
+            (updateData.basic_salary || 0) +
+            (updateData.hra || 0) +
+            (updateData.special_allowance || 0) +
+            (updateData.da || 0) +
+            (updateData.lta || 0) +
+            (updateData.bonus || 0) +
+            (updateData.cca || 0) +
+            (updateData.conveyance || 0) +
+            (updateData.medical_allowance || 0);
+          updateData.ctc = monthlyTotal * 12;
+        }
+
+        // Ensure required fields
+        if (!updateData.basic_salary) {
+          updateData.basic_salary = 0;
+        }
+
+        // Delete existing compensation for this employee and effective date, then insert new
+        await query('BEGIN');
+        
+        try {
+          // Delete existing structure
+          await query(
+            `DELETE FROM compensation_structures 
+             WHERE employee_id = $1 AND tenant_id = $2 AND effective_from = $3`,
+            [employeeDbId, tenantId, effectiveFrom]
+          );
+
+          // Insert new structure
+          await query(
+            `INSERT INTO compensation_structures (
+              tenant_id, employee_id, effective_from, ctc, basic_salary,
+              hra, special_allowance, da, lta, bonus, cca, conveyance, medical_allowance,
+              pf_contribution, esi_contribution, created_by
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+            )`,
+            [
+              tenantId,
+              employeeDbId,
+              effectiveFrom,
+              updateData.ctc || 0,
+              updateData.basic_salary || 0,
+              updateData.hra || 0,
+              updateData.special_allowance || 0,
+              updateData.da || 0,
+              updateData.lta || 0,
+              updateData.bonus || 0,
+              updateData.cca || 0,
+              updateData.conveyance || 0,
+              updateData.medical_allowance || 0,
+              updateData.pf_contribution || 0,
+              updateData.esi_contribution || 0,
+              userId
+            ]
+          );
+
+          await query('COMMIT');
+          report.updated++;
+          report.processed++;
+        } catch (dbError: any) {
+          await query('ROLLBACK');
+          throw dbError;
+        }
+      } catch (error: any) {
+        report.failed++;
+        report.errors.push(`Row ${i + 2}: ${error.message || 'Unknown error'}`);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Bulk import completed. Updated ${report.updated} employee(s).`,
+      report: {
+        total: rows.length,
+        updated: report.updated,
+        failed: report.failed,
+        errors: report.errors.slice(0, 50), // Limit errors to first 50
+      },
+    });
+  } catch (error: any) {
+    console.error("Error in bulk salary import:", error);
+    res.status(500).json({ 
+      error: error.message || "Failed to import salary structures",
+      details: error.stack 
+    });
   }
 });
 

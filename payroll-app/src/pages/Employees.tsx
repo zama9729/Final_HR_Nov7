@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, PlusCircle, Search } from "lucide-react";
+import { ArrowLeft, PlusCircle, Search, Upload } from "lucide-react";
 import { Input } from "@/components/ui/input";
 // Updated import paths to be relative
 import { AddEmployeeDialog } from "../components/employees/AddEmployeeDialog";
@@ -16,6 +16,7 @@ const Employees = () => {
   const location = useLocation(); // Get the current location
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [companyName, setCompanyName] = useState<string>("Loading...");
   const [isLoading, setIsLoading] = useState(true);
 
@@ -120,6 +121,11 @@ const Employees = () => {
               <h1 className="text-3xl font-bold text-foreground">Employees - {companyName}</h1>
               <p className="text-muted-foreground">Manage your workforce</p>
             </div>
+            <div className="flex gap-2"> {/* Wrap buttons in a flex container */}
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+                <Upload className="mr-2 h-4 w-4" />
+                Import Salaries
+                </Button>
             <Button onClick={() => setIsDialogOpen(true)}>
               <PlusCircle className="mr-2 h-4 w-4" />
               Add Employee
@@ -149,6 +155,14 @@ const Employees = () => {
       <AddEmployeeDialog
         open={isDialogOpen}
         onOpenChange={setIsDialogOpen}
+      />
+      <SalaryImportDialog 
+        open={isImportDialogOpen} 
+        onOpenChange={setIsImportDialogOpen}
+        onSuccess={() => {
+          // Optional: Refresh employee list if salaries affect the list view
+          // queryClient.invalidateQueries(["employees"]);
+        }}
       />
     </div>
   );

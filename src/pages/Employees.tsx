@@ -34,6 +34,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { ShiftAssignmentDialog } from "@/components/shifts/ShiftAssignmentDialog";
+import { BulkSalaryImportDialog } from "@/components/employees/BulkSalaryImportDialog";
 
 interface Employee {
   id: string;
@@ -60,6 +61,7 @@ export default function Employees() {
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [employeeToAction, setEmployeeToAction] = useState<Employee | null>(null);
+  const [salaryImportOpen, setSalaryImportOpen] = useState(false);
 
   useEffect(() => {
     fetchEmployees();
@@ -234,6 +236,10 @@ export default function Employees() {
                   <Upload className="mr-2 h-4 w-4" />
                   Import CSV
                 </Link>
+              </Button>
+              <Button variant="outline" onClick={() => setSalaryImportOpen(true)}>
+                <Upload className="mr-2 h-4 w-4" />
+                Import Salaries
               </Button>
               <Button asChild>
                 <Link to="/employees/new">
@@ -413,6 +419,16 @@ export default function Employees() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Bulk Salary Import Dialog */}
+        <BulkSalaryImportDialog
+          open={salaryImportOpen}
+          onOpenChange={setSalaryImportOpen}
+          onSuccess={() => {
+            // Optionally refresh employee data
+            fetchEmployees();
+          }}
+        />
       </div>
     </AppLayout>
   );
