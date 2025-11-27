@@ -56,7 +56,7 @@ const client = {
           const errorData = await response.json().catch(() => ({ error: "API error" }));
           throw new Error(errorData.error || `API error: ${response.statusText}`);
         }
-        const data = response.json();
+        const data = await response.json();
         profileRequestInFlight = null;
         return data;
       }).then((data) => {
@@ -64,6 +64,10 @@ const client = {
         return data;
       }).catch((error) => {
         profileRequestInFlight = null;
+        // Provide more descriptive error messages
+        if (error.message === "Failed to fetch" || error.name === "TypeError") {
+          throw new Error("Network error: Unable to connect to server. Please check if the backend is running.");
+        }
         throw error;
       });
       
@@ -71,19 +75,27 @@ const client = {
     }
     
     // For all other endpoints, make normal request
-    const response = await fetch(resolveEndpoint(endpoint), {
-      method: "GET",
-      credentials: "include", // <-- This sends the auth cookie
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    try {
+      const response = await fetch(resolveEndpoint(endpoint), {
+        method: "GET",
+        credentials: "include", // <-- This sends the auth cookie
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: "API error" }));
-      throw new Error(errorData.error || `API error: ${response.statusText}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: "API error" }));
+        throw new Error(errorData.error || `API error: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error: any) {
+      // Provide more descriptive error messages for network errors
+      if (error.message === "Failed to fetch" || error.name === "TypeError") {
+        throw new Error("Network error: Unable to connect to server. Please check if the backend is running.");
+      }
+      throw error;
     }
-    return response.json();
   },
 
   post: async <T>(endpoint: string, body: unknown): Promise<T> => {
@@ -130,6 +142,22 @@ const client = {
     }
     return response.json();
   },
+
+  delete: async <T>(endpoint: string): Promise<T> => {
+    const response = await fetch(resolveEndpoint(endpoint), {
+      method: "DELETE",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: "API error" }));
+      throw new Error(errorData.error || `API error: ${response.statusText}`);
+    }
+    return response.json();
+  },
 };
 
 // --- API METHODS ---
@@ -143,6 +171,7 @@ export const api = {
   get: client.get,
   post: client.post,
   patch: client.patch,
+  delete: client.delete,
   upload: client.upload,
 
   uploadTaxProof: (
@@ -236,8 +265,14 @@ export const api = {
     previewCycle: (cycleId) =>
       client.get(`/api/payroll-cycles/${cycleId}/preview`),
     
+    saveChanges: (cycleId, payrollItems) =>
+      client.post(`/api/payroll-cycles/${cycleId}/save`, { payrollItems }),
+    
     processCycle: (cycleId, payrollItems?) =>
       client.post(`/api/payroll-cycles/${cycleId}/process`, payrollItems ? { payrollItems } : {}),
+    
+    deleteCycle: (cycleId) =>
+      client.delete(`/api/payroll-cycles/${cycleId}`),
     
     setIncentive: (cycleId: string, employeeId: string, amount: number) =>
       client.post(`/api/payroll-cycles/${cycleId}/incentives`, {
@@ -338,6 +373,85 @@ export const api = {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+    },
+    
+    // Statutory Reports - These call the Payroll API which proxies to HR API
+    downloadPFECR: async (month: number, year: number) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/reports/statutory/pf-ecr?month=${month}&year=${year}`, {
+        method: "GET",
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to download PF ECR" }));
+        throw new Error(error.error || error.message || "Failed to download PF ECR");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = `PF-ECR-${String(month).padStart(2, '0')}-${year}.txt`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    },
+    
+    downloadESIReturn: async (month: number, year: number) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/reports/statutory/esi-return?month=${month}&year=${year}`, {
+        method: "GET",
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to download ESI Return" }));
+        throw new Error(error.error || error.message || "Failed to download ESI Return");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = `ESI-Return-${String(month).padStart(2, '0')}-${year}.csv`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    },
+    
+    getTDSSummary: async (month: number, year: number) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/reports/statutory/tds-summary?month=${month}&year=${year}`, {
+        method: "GET",
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to fetch TDS summary" }));
+        throw new Error(error.error || error.message || "Failed to fetch TDS summary");
+      }
+      
+      return response.json();
     },
   },
 
