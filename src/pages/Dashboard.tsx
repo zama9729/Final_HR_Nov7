@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2, ListTodo, PlayCircle } from "lucide-react";
+import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2 } from "lucide-react";
 import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay, isSameDay } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Badge } from "@/components/ui/badge";
@@ -46,15 +46,6 @@ interface ClockStatusResponse {
   last_event?: { event_type: string; raw_timestamp: string } | null;
 }
 
-interface QuickTask {
-  id: string;
-  title: string;
-  description?: string;
-  actionLabel?: string;
-  onAction?: () => void;
-  url?: string;
-}
-
 export default function Dashboard() {
   const { user, userRole } = useAuth();
   const navigate = useNavigate();
@@ -78,12 +69,6 @@ export default function Dashboard() {
   const [pendingClockAction, setPendingClockAction] = useState<'IN' | 'OUT' | null>(null);
   const [showClockConsent, setShowClockConsent] = useState(false);
   const [workDuration, setWorkDuration] = useState('0h 00m');
-  const [pendingCounts, setPendingCounts] = useState({
-    timesheets: 0,
-    leaves: 0,
-    taxDeclarations: 0,
-  });
-  const [pendingCountsLoading, setPendingCountsLoading] = useState(false);
   const presenceIndicators: Record<string, string> = {
     online: "bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.7)]",
     away: "bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.7)]",
@@ -91,7 +76,6 @@ export default function Dashboard() {
     out_of_office: "bg-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.7)]",
     default: "bg-slate-400 shadow-[0_0_10px_rgba(148,163,184,0.6)]",
   };
-  const isManagerView = ['manager', 'hr', 'director', 'ceo', 'admin'].includes((userRole || '').toLowerCase());
   const presenceLabel = useMemo(
     () => presenceStatus.replace('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
     [presenceStatus]
@@ -102,7 +86,6 @@ export default function Dashboard() {
     fetchDashboardStats();
     fetchPresenceStatus();
     fetchClockStatus();
-    fetchPendingCounts();
   }, [user]);
 
   useEffect(() => {
@@ -258,28 +241,6 @@ export default function Dashboard() {
     }
   };
 
-  const fetchPendingCounts = async () => {
-    if (!user) {
-      setPendingCounts({ timesheets: 0, leaves: 0, taxDeclarations: 0 });
-      return;
-    }
-
-    try {
-      setPendingCountsLoading(true);
-      const counts = await api.getPendingCounts();
-      setPendingCounts({
-        timesheets: counts?.timesheets || 0,
-        leaves: counts?.leaves || 0,
-        taxDeclarations: counts?.taxDeclarations || 0,
-      });
-    } catch (error) {
-      console.error('Error fetching pending counts:', error);
-      setPendingCounts({ timesheets: 0, leaves: 0, taxDeclarations: 0 });
-    } finally {
-      setPendingCountsLoading(false);
-    }
-  };
-
   const checkOnboardingStatus = async () => {
     if (!user || userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') {
       setIsLoading(false);
@@ -364,12 +325,6 @@ export default function Dashboard() {
           icon: <SunMedium className="h-5 w-5 text-amber-500 dark:text-amber-300" />,
         }
     : null;
-
-  const approvalsData = [
-    { id: 'timesheets', label: 'Timesheets', value: pendingCounts.timesheets, action: () => navigate('/timesheet-approvals') },
-    { id: 'leaves', label: 'Leave requests', value: pendingCounts.leaves, action: () => navigate('/leaves') },
-    { id: 'tax', label: 'Tax declarations', value: pendingCounts.taxDeclarations, action: () => navigate('/tax/declarations/review') },
-  ];
 
   const fetchUpcomingShifts = async () => {
     if (!user) {
@@ -538,57 +493,6 @@ export default function Dashboard() {
     }
   };
 
-  const todayTasks = useMemo<QuickTask[]>(() => {
-    const tasks: QuickTask[] = [];
-    const now = new Date();
-
-    if (!clockStatusLoading) {
-      if (clockStatus?.is_clocked_in) {
-        tasks.push({
-          id: 'clocked-in',
-          title: 'You are currently clocked in',
-          description: clockStatus.open_session?.clock_in_at
-            ? `Since ${formatClockTime(clockStatus.open_session.clock_in_at)}`
-            : undefined,
-          actionLabel: 'View log',
-          onAction: () => navigate('/attendance/clock'),
-        });
-      } else {
-        tasks.push({
-          id: 'clock-in',
-          title: 'Clock in to start your day',
-          description: 'Track today’s working hours',
-          actionLabel: 'Clock In',
-          onAction: handleClockButtonClick,
-        });
-      }
-    }
-
-    if (nextShift && isSameDay(parseISO(nextShift.shift_date), now)) {
-      tasks.push({
-        id: `shift-${nextShift.id}`,
-        title: `Shift starts at ${formatShiftTime(nextShift.start_time)}`,
-        description: nextShift.template_name,
-        actionLabel: isEmployee ? 'My shifts' : 'Schedule',
-        onAction: () => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar'),
-      });
-    }
-
-    if (stats.projects.length > 0) {
-      const project = stats.projects[0];
-      tasks.push({
-        id: `project-${project.id}`,
-        title: `Focus: ${project.name}`,
-        description: project.category || 'Project assignment',
-        actionLabel: 'Open project',
-        onAction: () => navigate(`/projects/${project.id}`),
-      });
-    }
-
-    return tasks.slice(0, 3);
-  }, [clockStatus, clockStatusLoading, nextShift, stats.projects, navigate, isEmployee, handleClockButtonClick]);
-
-
   if (isLoading) {
     return (
       <AppLayout>
@@ -685,143 +589,66 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
-
-          <Card className="shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between pb-1">
-              <div>
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                  <ListTodo className="h-5 w-5 text-blue-600" />
-                  Pending tasks for today
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">Personal reminders</p>
-              </div>
+          <Card className="shadow-lg border border-white/60 dark:border-slate-800/70 bg-white/80 dark:bg-slate-900/70 backdrop-blur-lg">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-semibold">Leave & Holiday Snapshot</CardTitle>
+              <p className="text-sm text-muted-foreground">Plan time off with confidence</p>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {todayTasks.length === 0 ? (
-                <div className="text-sm text-muted-foreground py-6 text-center">
-                  You&apos;re all caught up for today ✨
+            <CardContent className="space-y-4">
+              <div className="rounded-2xl border border-emerald-200/60 dark:border-emerald-500/30 bg-emerald-50/80 dark:bg-emerald-500/10 p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-200">Leave balance</p>
+                  <p className="text-3xl font-bold text-slate-900 dark:text-white">{stats.leaveBalance} days</p>
+                  <p className="text-xs text-muted-foreground">available right now</p>
                 </div>
-              ) : (
-                todayTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-muted/30 dark:bg-slate-900/60 flex items-center justify-between gap-3"
-                  >
-                    <div>
-                      <p className="font-medium">{task.title}</p>
-                      {task.description && (
-                        <p className="text-xs text-muted-foreground">{task.description}</p>
-                      )}
-                    </div>
-                    {task.onAction && (
-                      <Button size="sm" variant="outline" onClick={task.onAction}>
-                        {task.actionLabel || 'Open'}
-                      </Button>
-                    )}
-                  </div>
-                ))
-              )}
+                <Button
+                  onClick={handleApplyLeave}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white min-w-[120px]"
+                >
+                  Apply leave
+                </Button>
+              </div>
+              <div className="rounded-2xl border border-sky-200/60 dark:border-sky-500/30 bg-sky-50/80 dark:bg-sky-500/10 p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-sky-600 dark:text-sky-200">Upcoming holiday</p>
+                  {stats.nextHoliday ? (
+                    <>
+                      <p className="text-lg font-semibold text-slate-900 dark:text-white">{stats.nextHoliday.name}</p>
+                      <p className="text-sm text-muted-foreground">{formatHolidayDate(stats.nextHoliday.date)}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-lg font-semibold text-slate-900 dark:text-white">No holiday announced</p>
+                      <p className="text-sm text-muted-foreground">We&apos;ll update you soon</p>
+                    </>
+                  )}
+                </div>
+                <CalendarDays className="h-10 w-10 text-sky-500 dark:text-sky-300 drop-shadow-[0_8px_24px_rgba(14,165,233,0.35)]" />
+              </div>
             </CardContent>
           </Card>
 
-          {isManagerView && (
-            <Card className="shadow-sm">
-              <CardHeader className="pb-1">
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                  <PlayCircle className="h-5 w-5 text-amber-500" />
-                  Pending approvals by you
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">Manager actions</p>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {pendingCountsLoading ? (
-                  <div className="py-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading approvals…
-                  </div>
-                ) : (
-                  approvalsData.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 p-3">
-                      <div>
-                        <p className="text-sm font-semibold">{item.label}</p>
-                        <p className="text-xs text-muted-foreground">Awaiting your action</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-3xl font-bold text-slate-900 dark:text-white">{item.value}</span>
-                        <Button size="sm" variant="outline" onClick={item.action}>
-                          Review
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Main Stats Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-
-          {/* Leave Balance Card */}
-          <Card className="shadow-sm hover:shadow-md transition-shadow">
+          <Card className="shadow-lg border border-white/60 dark:border-slate-800/70 bg-white/80 dark:bg-slate-900/70 backdrop-blur-lg">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Leave Balance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-4xl font-bold mb-4">{stats.leaveBalance}</div>
-              <Button 
-                onClick={handleApplyLeave}
-                variant="outline"
-                className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950 font-semibold"
-              >
-                Apply
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Next Holiday Card */}
-          <Card className="shadow-sm hover:shadow-md transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Next Holiday</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {stats.nextHoliday ? (
-                <>
-                  <div className="text-3xl font-bold mb-1">
-                    {formatHolidayDate(stats.nextHoliday.date)}
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-4">{stats.nextHoliday.name}</p>
-                </>
-              ) : (
-                <>
-                  <div className="text-3xl font-bold mb-1">No upcoming</div>
-                  <p className="text-sm text-muted-foreground mb-4">holiday</p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Shifts Card */}
-          <Card className="shadow-sm hover:shadow-md transition-shadow dark:border-slate-800 dark:bg-slate-900">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {isEmployee ? 'My Shifts' : 'Shift Schedule'}
-              </CardTitle>
+              <CardTitle className="text-lg font-semibold">{isEmployee ? 'My Shifts' : 'Shift Schedule'}</CardTitle>
+              <p className="text-sm text-muted-foreground">Stay aligned with upcoming shifts</p>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 {loadingShifts ? (
-                  <div className="text-lg text-muted-foreground">Loading next shift…</div>
+                  <div className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading next shift…
+                  </div>
                 ) : nextShift ? (
-                  <div className={`relative rounded-2xl border ${shiftVisual?.border} bg-white dark:bg-slate-900 shadow-inner p-4 pl-14`}>
+                  <div className={`relative rounded-2xl border ${shiftVisual?.border} bg-white/90 dark:bg-slate-900/80 shadow-inner p-4 pl-14`}>
                     <div className={`absolute -top-3 -left-2 h-12 w-12 rounded-full ${shiftVisual?.badgeBg} flex items-center justify-center shadow`}>
                       {shiftVisual?.icon}
                     </div>
                     <div className={`text-2xl font-bold ${shiftVisual?.textColor}`}>
                       {shiftVisual?.label}
                     </div>
-                    <p className="text-sm font-semibold text-slate-800">
+                    <p className="text-sm font-semibold text-slate-800 dark:text-white">
                       {getShiftDateLabel(nextShift.shift_date)}
                     </p>
                     <p className="text-xs text-muted-foreground mb-2">
