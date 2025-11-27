@@ -1,4 +1,4 @@
-import { 
+import {
   LayoutDashboard,
   Users,
   FileText,
@@ -356,7 +356,7 @@ export function AppSidebar() {
         return employeeGroups;
     }
   };
-  
+
   const navigationGroups = getNavigationGroups();
   const captureMethod = attendanceSettings?.capture_method === 'clock_in_out' ? 'clock_in_out' : 'timesheets';
   const isClockMode = captureMethod === 'clock_in_out';
@@ -453,10 +453,9 @@ export function AppSidebar() {
           <NavLink
             to={item.url}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                isActive
-                  ? "bg-slate-800 text-white"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive
+                ? "bg-slate-800 text-white"
+                : "text-slate-300 hover:bg-slate-800 hover:text-white"
               }`
             }
           >
@@ -486,14 +485,14 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar className="bg-slate-900 border-r border-slate-800">
+    <Sidebar collapsible="icon" className="bg-slate-900 border-r border-slate-800">
       <SidebarHeader className="border-b border-slate-800 px-4 py-4">
         <div className="flex items-center gap-3">
           <div className="relative flex-shrink-0">
             {organization?.logo_url ? (
               <div className="relative h-12 w-12 rounded-lg overflow-hidden border border-slate-700 shadow-sm bg-slate-800">
-                <img 
-                  src={organization.logo_url} 
+                <img
+                  src={organization.logo_url}
                   alt={organization.name || 'Organization'}
                   className="h-full w-full object-cover"
                 />
@@ -512,7 +511,7 @@ export function AppSidebar() {
           </div>
         </div>
       </SidebarHeader>
-      
+
       <SidebarContent className="px-2 py-4">
         {navigationGroups.map((group) => {
           const renderedItems = group.items
@@ -557,10 +556,9 @@ export function AppSidebar() {
                     <NavLink
                       to="/admin"
                       className={({ isActive }) =>
-                        `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                          isActive
-                            ? "bg-slate-800 text-white"
-                            : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                        `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive
+                          ? "bg-slate-800 text-white"
+                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
                         }`
                       }
                     >
@@ -582,10 +580,9 @@ export function AppSidebar() {
                   <NavLink
                     to="/settings"
                     className={({ isActive }) =>
-                      `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                        isActive
-                          ? "bg-slate-800 text-white"
-                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive
+                        ? "bg-slate-800 text-white"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
                       }`
                     }
                   >

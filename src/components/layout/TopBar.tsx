@@ -68,8 +68,8 @@ export function TopBar() {
     navigate('/auth/login');
   };
 
-  const userName = user?.user_metadata?.first_name 
-    ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`
+  const userName = user?.firstName
+    ? `${user.firstName} ${user.lastName || ''}`
     : user?.email || 'User';
 
   const getPresenceColor = (status: string) => {
@@ -100,15 +100,19 @@ export function TopBar() {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-white shadow-sm">
-      <div className="flex h-14 items-center gap-4 px-4 lg:px-6">
-        <div className="flex-1 flex items-center gap-4">
-          <div className="relative max-w-lg flex-1">
+    <header className="sticky top-0 z-40 border-b bg-white shadow-sm h-16">
+      <div className="flex h-16 items-center justify-between px-4 lg:px-6 gap-4">
+        <div className="flex items-center gap-4">
+          <SidebarTrigger className="-ml-2" />
+        </div>
+
+        <div className="flex-1 max-w-xl mx-auto">
+          <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
               type="search"
               placeholder="Search..."
-              className="pl-10 h-10 bg-gray-50 border-gray-200 text-sm focus-visible:ring-blue-500"
+              className="pl-10 h-10 w-full bg-gray-50 border-gray-200 text-sm focus-visible:ring-blue-500 rounded-xl"
             />
           </div>
         </div>
@@ -117,14 +121,14 @@ export function TopBar() {
           <div className="relative">
             <Notifications />
           </div>
-          
+
           {/* Presence Status Bell */}
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="ghost" className="relative h-10 w-10 p-0 hover:bg-gray-50">
                 <Bell className="h-5 w-5 text-gray-600" />
-                <Circle 
-                  className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 ${getPresenceColor(presenceStatus)}`} 
+                <Circle
+                  className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 ${getPresenceColor(presenceStatus)}`}
                   fill="currentColor"
                 />
               </Button>
@@ -137,14 +141,13 @@ export function TopBar() {
                   <button
                     key={status}
                     onClick={() => handlePresenceChange(status)}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
-                      presenceStatus === status
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${presenceStatus === status
                         ? 'bg-blue-50 text-blue-700'
                         : 'hover:bg-gray-50 text-gray-700'
-                    }`}
+                      }`}
                   >
-                    <Circle 
-                      className={`h-2.5 w-2.5 ${getPresenceColor(status)}`} 
+                    <Circle
+                      className={`h-2.5 w-2.5 ${getPresenceColor(status)}`}
                       fill="currentColor"
                     />
                     <span>{getPresenceLabel(status)}</span>

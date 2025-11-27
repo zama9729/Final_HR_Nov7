@@ -59,6 +59,8 @@ export default function Workflows() {
   }, []);
 
   useEffect(() => {
+    console.log("API Object:", api);
+    console.log("Has listWorkflows:", typeof api.listWorkflows);
     fetchWorkflows();
   }, [fetchWorkflows]);
 
@@ -136,8 +138,8 @@ export default function Workflows() {
           {loading
             ? loadingState
             : workflows.length === 0
-            ? emptyState
-            : workflows.map((workflow) => (
+              ? emptyState
+              : workflows.map((workflow) => (
                 <Card key={workflow.id} className="transition-all hover:shadow-md">
                   <CardHeader>
                     <div className="flex items-start justify-between gap-4">

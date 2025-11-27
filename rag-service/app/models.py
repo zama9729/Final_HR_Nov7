@@ -44,12 +44,17 @@ class Employee(Base):
     tenant = relationship("Tenant", back_populates="employees")
     leave_requests = relationship("LeaveRequest", foreign_keys="LeaveRequest.employee_id", back_populates="employee")
     paystubs = relationship("Paystub", back_populates="employee")
+    
+    # Manager relationship
+    reporting_manager_id = Column(UUID(as_uuid=True), ForeignKey("employees.id"))
+    manager = relationship("Employee", remote_side=[id], backref="direct_reports")
+    timesheets = relationship("Timesheet", back_populates="employee")
 
 
 class Document(Base):
     """Document model for ingested files."""
     __tablename__ = "documents"
-
+    
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     filename = Column(String(255), nullable=False)
@@ -106,6 +111,40 @@ class LeaveRequest(Base):
     # Relationships
     employee = relationship("Employee", foreign_keys=[employee_id], back_populates="leave_requests")
     approver = relationship("Employee", foreign_keys=[approver_id], remote_side="Employee.id")
+
+
+class Timesheet(Base):
+    """Timesheet model."""
+    __tablename__ = "timesheets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    employee_id = Column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=False)
+    week_start_date = Column(DateTime, nullable=False)
+    week_end_date = Column(DateTime, nullable=False)
+    total_hours = Column(Float, default=0.0)
+    status = Column(String(50), default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    employee = relationship("Employee", back_populates="timesheets")
+    entries = relationship("TimesheetEntry", back_populates="timesheet", cascade="all, delete-orphan")
+
+
+class TimesheetEntry(Base):
+    """Timesheet entry model."""
+    __tablename__ = "timesheet_entries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    timesheet_id = Column(UUID(as_uuid=True), ForeignKey("timesheets.id"), nullable=False)
+    work_date = Column(DateTime, nullable=False)
+    hours = Column(Float, nullable=False)
+    description = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    timesheet = relationship("Timesheet", back_populates="entries")
 
 
 class Paystub(Base):

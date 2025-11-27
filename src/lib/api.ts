@@ -685,7 +685,7 @@ class ApiClient {
   }
 
   async getPerformanceReviews(cycleId?: string) {
-    const url = cycleId 
+    const url = cycleId
       ? `/api/performance-reviews?cycle=${cycleId}`
       : '/api/performance-reviews';
     return this.request(url);
@@ -713,7 +713,7 @@ class ApiClient {
 
   // Employee project assignments
   async getEmployeeProjects(employeeId: string, date?: string) {
-    const url = date 
+    const url = date
       ? `/api/timesheets/employee/${employeeId}/projects?date=${date}`
       : `/api/timesheets/employee/${employeeId}/projects`;
     return this.request(url);
@@ -1159,7 +1159,7 @@ class ApiClient {
   }
 
   async getOrgPolicies(date?: string) {
-    const url = date 
+    const url = date
       ? `/api/policies/org?date=${date}`
       : '/api/policies/org';
     return this.request(url);
@@ -1395,6 +1395,35 @@ class ApiClient {
       throw new Error('Failed to download Form 16');
     }
     return response.blob();
+  }
+  // Workflows
+  // Workflows
+  async listWorkflows() {
+    return this.request('/api/workflows');
+  }
+
+  async getWorkflow(id: string) {
+    return this.request(`/api/workflows/${id}`);
+  }
+
+  async createWorkflow(data: any) {
+    return this.request('/api/workflows', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateWorkflow(id: string, data: any) {
+    return this.request(`/api/workflows/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteWorkflow(id: string) {
+    return this.request(`/api/workflows/${id}`, {
+      method: 'DELETE',
+    });
   }
 }
 
