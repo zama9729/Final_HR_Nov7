@@ -36,9 +36,22 @@ export const SalaryImportDialog = ({ open, onOpenChange, onSuccess }: SalaryImpo
   };
 
   const downloadTemplate = () => {
-    // Simple CSV template generation
-    const headers = ["Employee ID", "Basic", "HRA", "CCA", "Conveyance", "Medical Allowance", "Special Allowance", "PF", "ESI"];
-    const dummyRow = ["EMP001", "50000", "20000", "5000", "2000", "3000", "15000", "6000", "0"];
+    // Complete CSV template with all salary components including new allowances
+    const headers = [
+      "Employee ID",
+      "Basic",
+      "HRA",
+      "Special Allowance",
+      "DA",
+      "LTA",
+      "Bonus",
+      "CCA",
+      "Conveyance",
+      "Medical Allowance",
+      "PF",
+      "ESI"
+    ];
+    const dummyRow = ["EMP001", "50000", "20000", "15000", "0", "0", "0", "5000", "2000", "3000", "6000", "0"];
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), dummyRow.join(",")].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -47,20 +60,16 @@ export const SalaryImportDialog = ({ open, onOpenChange, onSuccess }: SalaryImpo
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    toast.success("Template downloaded successfully");
   };
 
   const handleUpload = async () => {
     if (!file) return;
 
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-
     try {
-      // Direct API call to the import endpoint
-      const result = await api.post("imports/bulk-salary-structure", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      // Use the bulk import API method
+      const result = await api.employees.bulkImportSalary(file);
 
       setReport(result);
       if (result.success) {
@@ -84,6 +93,7 @@ export const SalaryImportDialog = ({ open, onOpenChange, onSuccess }: SalaryImpo
           <DialogTitle>Import Salary Structures</DialogTitle>
           <DialogDescription>
             Upload a CSV or Excel file to update salary components for multiple employees at once.
+            The file must include an "Employee ID" column and salary component columns (Basic, HRA, CCA, Conveyance, Medical Allowance, etc.).
           </DialogDescription>
         </DialogHeader>
 
