@@ -45,6 +45,9 @@ export const ManageCompensationDialog = ({
     lta?: number;
     special_allowance?: number;
     bonus?: number;
+    cca?: number;
+    conveyance?: number;
+    medical_allowance?: number;
     pf_contribution?: number;
     esi_contribution?: number;
     effective_from?: string;
@@ -61,6 +64,9 @@ export const ManageCompensationDialog = ({
             lta?: number;
             special_allowance?: number;
             bonus?: number;
+            cca?: number;
+            conveyance?: number;
+            medical_allowance?: number;
             pf_contribution?: number;
             esi_contribution?: number;
             effective_from?: string;
@@ -83,6 +89,9 @@ export const ManageCompensationDialog = ({
     lta: "0",
     special_allowance: "",
     bonus: "0",
+    cca: "0",
+    conveyance: "0",
+    medical_allowance: "0",
     pf_contribution: "0",
     esi_contribution: "0",
     effective_from: (joiningDate ? new Date(joiningDate) : new Date()).toISOString().split('T')[0],
@@ -101,6 +110,9 @@ export const ManageCompensationDialog = ({
           lta: existingCompensation.lta?.toString() || "0",
           special_allowance: existingCompensation.special_allowance?.toString() || "",
           bonus: existingCompensation.bonus?.toString() || "0",
+          cca: existingCompensation.cca?.toString() || "0",
+          conveyance: existingCompensation.conveyance?.toString() || "0",
+          medical_allowance: existingCompensation.medical_allowance?.toString() || "0",
           pf_contribution: existingCompensation.pf_contribution?.toString() || "0",
           esi_contribution: existingCompensation.esi_contribution?.toString() || "0",
           effective_from: existingCompensation.effective_from 
@@ -117,6 +129,9 @@ export const ManageCompensationDialog = ({
           lta: "0",
           special_allowance: "",
           bonus: "0",
+          cca: "0",
+          conveyance: "0",
+          medical_allowance: "0",
           pf_contribution: "0",
           esi_contribution: "0",
           effective_from: (joiningDate ? new Date(joiningDate) : new Date()).toISOString().split('T')[0],
@@ -134,15 +149,18 @@ export const ManageCompensationDialog = ({
       const body = {
         ...formData,
         // Convert string fields to numbers where appropriate
-        ctc: Number(formData.ctc),
-        basic_salary: Number(formData.basic_salary),
-        hra: Number(formData.hra),
-        da: Number(formData.da),
-        lta: Number(formData.lta),
-        special_allowance: Number(formData.special_allowance),
-        bonus: Number(formData.bonus),
-        pf_contribution: Number(formData.pf_contribution),
-        esi_contribution: Number(formData.esi_contribution),
+        ctc: Number(formData.ctc) || 0,
+        basic_salary: Number(formData.basic_salary) || 0,
+        hra: Number(formData.hra) || 0,
+        da: Number(formData.da) || 0,
+        lta: Number(formData.lta) || 0,
+        special_allowance: Number(formData.special_allowance) || 0,
+        bonus: Number(formData.bonus) || 0,
+        cca: Number(formData.cca) || 0,
+        conveyance: Number(formData.conveyance) || 0,
+        medical_allowance: Number(formData.medical_allowance) || 0,
+        pf_contribution: Number(formData.pf_contribution) || 0,
+        esi_contribution: Number(formData.esi_contribution) || 0,
       };
 
       // Call our new API endpoint using the proper method
@@ -170,6 +188,9 @@ export const ManageCompensationDialog = ({
         lta: "0",
         special_allowance: "",
         bonus: "0",
+        cca: "0",
+        conveyance: "0",
+        medical_allowance: "0",
         pf_contribution: "0",
         esi_contribution: "0",
         effective_from: (joiningDate ? new Date(joiningDate) : new Date()).toISOString().split('T')[0],
@@ -300,6 +321,42 @@ export const ManageCompensationDialog = ({
                   placeholder="Monthly bonus"
                   value={formData.bonus}
                   onChange={(e) => setFormData({ ...formData, bonus: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground mt-1">Monthly amount</p>
+              </div>
+
+              <div>
+                <Label htmlFor="cca">City Compensatory Allowance (CCA)</Label>
+                <Input
+                  id="cca"
+                  type="number"
+                  placeholder="Monthly CCA"
+                  value={formData.cca}
+                  onChange={(e) => setFormData({ ...formData, cca: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground mt-1">Monthly amount</p>
+              </div>
+
+              <div>
+                <Label htmlFor="conveyance">Conveyance Allowance</Label>
+                <Input
+                  id="conveyance"
+                  type="number"
+                  placeholder="Monthly conveyance"
+                  value={formData.conveyance}
+                  onChange={(e) => setFormData({ ...formData, conveyance: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground mt-1">Monthly amount</p>
+              </div>
+
+              <div>
+                <Label htmlFor="medical_allowance">Medical Allowance</Label>
+                <Input
+                  id="medical_allowance"
+                  type="number"
+                  placeholder="Monthly medical allowance"
+                  value={formData.medical_allowance}
+                  onChange={(e) => setFormData({ ...formData, medical_allowance: e.target.value })}
                 />
                 <p className="text-xs text-muted-foreground mt-1">Monthly amount</p>
               </div>

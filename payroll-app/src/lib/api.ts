@@ -250,6 +250,12 @@ export const api = {
     
     createCompensation: (employeeId, data) =>
       client.post(`/api/employees/${employeeId}/compensation`, data),
+    
+    bulkImportSalary: (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return client.upload(`/api/imports/bulk-salary-structure`, formData);
+    },
 
     updateStatus: (employeeId: string, status: string) =>
       client.patch(`/api/employees/${employeeId}/status`, { status }),
