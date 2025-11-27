@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 
-export type UserRole = 'employee' | 'manager' | 'hr' | 'director' | 'ceo' | 'admin' | 'super_user';
+export type UserRole = 'employee' | 'manager' | 'hr' | 'director' | 'ceo' | 'admin' | 'super_user' | 'accountant';
 
 export type AuthUser = {
   id: string;

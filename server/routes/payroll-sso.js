@@ -7,6 +7,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../db/pool.js';
+import { audit } from '../utils/auditLog.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -121,32 +122,19 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Log SSO attempt (for audit) - check if audit_logs table exists
     try {
-      const tableCheck = await query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'audit_logs'
-        );
-      `);
-      
-      if (tableCheck.rows[0]?.exists) {
-        await query(
-          `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [
-            profile.org_id,
-            userId,
-            'payroll_sso_initiated',
-            'sso',
-            null,
-            JSON.stringify({ 
-              email: profile.email, 
-              payroll_role: payrollRole,
-              hr_roles: hrRoles 
-            })
-          ]
-        );
-      }
+      await audit({
+        actorId: userId,
+        action: 'payroll_sso_initiated',
+        entityType: 'sso',
+        entityId: null,
+        details: {
+          orgId: profile.org_id,
+          email: profile.email,
+          payroll_role: payrollRole,
+          hr_roles: hrRoles,
+        },
+        scope: 'org',
+      });
     } catch (auditError) {
       // Continue even if audit log fails
       console.warn('Failed to log SSO audit:', auditError);

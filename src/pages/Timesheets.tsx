@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { Clock, Save, Check, X, Calendar as CalendarIcon, RotateCcw, Plus, Trash2, CheckCircle2, XCircle, Hourglass } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Clock, Save, Check, X, Calendar as CalendarIcon, RotateCcw, Plus, Trash2, CheckCircle2, XCircle, Hourglass, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -25,6 +26,8 @@ interface TimesheetEntry {
   project_id?: string | null;
   project_type?: 'assigned' | 'non-billable' | 'internal' | null;
   is_holiday?: boolean;
+  source?: string;
+  readonly?: boolean;
 }
 
 interface Timesheet {
@@ -68,6 +71,7 @@ export default function Timesheets() {
   });
   const { user } = useAuth();
   const { toast } = useToast();
+  const [hasShiftEntries, setHasShiftEntries] = useState(false);
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
@@ -349,6 +353,7 @@ export default function Timesheets() {
             project_id: null,
             project_type: null,
             is_holiday: isHoliday,
+            source: undefined,
           }];
         } else {
           // Update existing entries, but keep holiday entries as-is
@@ -361,6 +366,7 @@ export default function Timesheets() {
                 description: "Holiday",
                 project_id: null,
                 project_type: null,
+                source: entry.source,
               };
             } else if (!isHoliday && entry.is_holiday) {
               // Convert from holiday entry to regular entry
@@ -368,6 +374,7 @@ export default function Timesheets() {
                 ...entry,
                 is_holiday: false,
                 description: entry.description === "Holiday" ? "" : entry.description,
+                source: entry.source,
               };
             }
             return entry;
@@ -392,6 +399,7 @@ export default function Timesheets() {
           project_id: null,
           project_type: null,
           is_holiday: false,
+          source: undefined,
         }];
       });
       setEntries(emptyEntries);
@@ -411,6 +419,12 @@ export default function Timesheets() {
 
       // Map entries by date - group multiple entries per day
       const entriesMap: Record<string, TimesheetEntry[]> = {};
+      const containsShiftEntries = Boolean(
+        timesheetData?.entries?.some(
+          (entry: any) => typeof entry?.source === "string" && entry.source.toLowerCase() === "shift"
+        )
+      );
+      setHasShiftEntries(containsShiftEntries);
       
       // First, process existing timesheet entries if any
       if (timesheetData?.entries && Array.isArray(timesheetData.entries)) {
@@ -433,6 +447,8 @@ export default function Timesheets() {
             ...entry,
             work_date: workDate,
             is_holiday: entry.is_holiday || false, // Ensure this is set
+            source: entry.source,
+            readonly: entry.readonly,
           });
         });
       }
@@ -488,6 +504,7 @@ export default function Timesheets() {
               is_holiday: true,
               project_id: null,
               project_type: null,
+              source: undefined,
             }];
           } else {
             // Update first entry to holiday if not already
@@ -498,6 +515,7 @@ export default function Timesheets() {
                 description: "Holiday",
                 project_id: null,
                 project_type: null,
+                source: entriesMap[dateStr][0]?.source,
               };
             }
           }
@@ -510,6 +528,7 @@ export default function Timesheets() {
             project_id: null,
             project_type: null,
             is_holiday: false,
+            source: undefined,
           }];
         } else {
           // Ensure existing entries have project_id and project_type
@@ -518,6 +537,7 @@ export default function Timesheets() {
             is_holiday: entry.is_holiday || false,
             project_id: entry.project_id || null,
             project_type: entry.project_type || null,
+            source: entry.source,
           }));
         }
       });
@@ -543,9 +563,11 @@ export default function Timesheets() {
           project_id: null,
           project_type: null,
           is_holiday: false,
+          source: undefined,
         }];
       });
       setEntries(emptyEntries);
+      setHasShiftEntries(false);
     }
   };
 
@@ -608,6 +630,7 @@ export default function Timesheets() {
                   project_id: null,
                   project_type: null,
                   is_holiday: false,
+                source: "shift",
                 }];
               } else {
                 // Update first entry
@@ -615,6 +638,7 @@ export default function Timesheets() {
                   ...dayEntries[0],
                   hours: hours,
                   description: `Shift: ${shift.shift_type} (${shift.start_time} - ${shift.end_time})${shift.notes ? ` - ${shift.notes}` : ''}`,
+                source: dayEntries[0].source || "shift",
                 }];
               }
             } else {
@@ -624,6 +648,7 @@ export default function Timesheets() {
                 updatedEntries[date] = [{
                   ...dayEntries[0],
                   description: `${existingDesc} | Shift: ${shift.shift_type} (${shift.start_time} - ${shift.end_time})`.trim(),
+                source: dayEntries[0].source || "shift",
                 }, ...dayEntries.slice(1)];
               }
             }
@@ -631,6 +656,7 @@ export default function Timesheets() {
           
           return updatedEntries;
         });
+        setHasShiftEntries(true);
       }
     } catch (error) {
       console.error("Error fetching shifts:", error);
@@ -649,6 +675,7 @@ export default function Timesheets() {
         project_id: null,
         project_type: null,
         is_holiday: false,
+        source: undefined,
       };
       return {
         ...prev,
@@ -1023,6 +1050,16 @@ export default function Timesheets() {
             </Button>
           </div>
         </div>
+        {hasShiftEntries && (
+          <Alert className="border-primary/30 bg-primary/5 text-primary-foreground/90 dark:bg-primary/10 space-y-2">
+            <Info className="h-4 w-4 text-primary dark:text-primary-300" />
+            <AlertTitle>Shifts imported from approved schedules</AlertTitle>
+            <AlertDescription>
+              We pre-filled this week with hours from your published shift roster. Review and adjust any entry before
+              submitting—manual edits are still allowed if your worked hours changed.
+            </AlertDescription>
+          </Alert>
+        )}
       </div>
 
       <Card className="border-2 shadow-lg bg-card/50 backdrop-blur-sm">

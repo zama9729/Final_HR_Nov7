@@ -5,13 +5,18 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { z } from "zod";
 import { Progress } from "@/components/ui/progress";
+import { OnboardingDocsUploader } from "@/components/onboarding/OnboardingDocsUploader";
+import { Loader2 } from "lucide-react";
 
-const onboardingSchema = z.object({
+export const bankDetailsStatusSchema = z.enum(['pending', 'skipped']);
+
+const onboardingSchema = z
+  .object({
   emergencyContactName: z.string().trim().min(1, "Required").max(100),
   emergencyContactPhone: z.string().trim().min(10, "Invalid phone").max(15),
   emergencyContactRelation: z.string().trim().min(1, "Required"),
@@ -30,19 +35,58 @@ const onboardingSchema = z.object({
   city: z.string().trim().optional(),
   state: z.string().trim().optional(),
   postalCode: z.string().trim().optional(),
-  bankAccountNumber: z.string().trim().min(1, "Required"),
-  bankName: z.string().trim().min(1, "Required"),
-  bankBranch: z.string().trim().min(1, "Required"),
-  ifscCode: z.string().trim().min(1, "Required"),
+  bankAccountNumber: z.string().trim().optional(),
+  bankName: z.string().trim().optional(),
+  bankBranch: z.string().trim().optional(),
+  ifscCode: z.string().trim().optional(),
   panNumber: z.string().trim().min(10, "Invalid PAN").max(10),
   aadharNumber: z.string().trim().min(12, "Invalid Aadhar").max(12),
   passportNumber: z.string().trim().optional(),
   gender: z.enum(["male", "female", "other", "prefer_not_to_say"]).optional(),
-});
+  uanNumber: z
+    .string()
+    .trim()
+    .regex(/^\d{12}$/, { message: "UAN must be 12 digits" })
+    .optional(),
+  bankDetailsStatus: bankDetailsStatusSchema.default('pending'),
+})
+  .superRefine((data, ctx) => {
+    if (data.bankDetailsStatus !== 'skipped') {
+      if (!data.bankAccountNumber) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['bankAccountNumber'],
+          message: 'Required',
+        });
+      }
+      if (!data.bankName) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['bankName'],
+          message: 'Required',
+        });
+      }
+      if (!data.bankBranch) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['bankBranch'],
+          message: 'Required',
+        });
+      }
+      if (!data.ifscCode) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ifscCode'],
+          message: 'Required',
+        });
+      }
+    }
+  });
 
 export default function Onboarding() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1);
@@ -72,17 +116,23 @@ export default function Onboarding() {
     aadharNumber: "",
     passportNumber: "",
     gender: "" as "male" | "female" | "other" | "prefer_not_to_say" | "",
+    uanNumber: "",
+    bankDetailsStatus: 'pending' as z.infer<typeof bankDetailsStatusSchema>,
   });
 
   const [documents, setDocuments] = useState<Array<{ id: string; document_type: string; file_name: string; uploaded_at: string }>>([]);
   const [uploading, setUploading] = useState(false);
+  const docsFlag = (import.meta.env.VITE_FEATURE_ONBOARDING_V2_DOCS || "true") !== "false";
+
+  const [isUploading, setIsUploading] = useState(false);
+  const [skipLoading, setSkipLoading] = useState(false);
 
   useEffect(() => {
     fetchEmployeeId();
-  }, [user]);
+  }, [user, isUploading, location.pathname]);
 
   const fetchEmployeeId = async () => {
-    if (!user) return;
+    if (!user || isUploading) return; // Don't check status during upload
     
     try {
       const employeeData = await api.checkEmployeePasswordChange();
@@ -90,8 +140,11 @@ export default function Onboarding() {
       // employeeData should have id field from the API
       if (employeeData && employeeData.id) {
         setEmployeeId(employeeData.id);
-        if (employeeData.onboarding_status === 'completed') {
-          navigate('/dashboard');
+        // Only redirect if onboarding is completed AND we're not currently uploading
+        if (employeeData.onboarding_status === 'completed' && !isUploading) {
+          if (location.pathname !== '/onboarding/next-step') {
+            navigate('/onboarding/next-step');
+          }
         }
       } else {
         console.warn('No employee record found for user');
@@ -122,6 +175,8 @@ export default function Onboarding() {
       setLoading(true);
 
       // Submit onboarding data via API
+      const shouldSendBankDetails = validated.bankDetailsStatus !== 'skipped';
+
       await api.submitOnboarding(employeeId, {
         emergencyContactName: validated.emergencyContactName,
         emergencyContactPhone: validated.emergencyContactPhone,
@@ -139,14 +194,16 @@ export default function Onboarding() {
         city: validated.city || validated.currentCity,
         state: validated.state || validated.currentState,
         postalCode: validated.postalCode || validated.currentPostalCode,
-        bankAccountNumber: validated.bankAccountNumber,
-        bankName: validated.bankName,
-        bankBranch: validated.bankBranch,
-        ifscCode: validated.ifscCode,
+        bankAccountNumber: shouldSendBankDetails ? validated.bankAccountNumber : null,
+        bankName: shouldSendBankDetails ? validated.bankName : null,
+        bankBranch: shouldSendBankDetails ? validated.bankBranch : null,
+        ifscCode: shouldSendBankDetails ? validated.ifscCode : null,
         panNumber: validated.panNumber,
         aadharNumber: validated.aadharNumber,
         passportNumber: validated.passportNumber || null,
         gender: validated.gender || null,
+        uanNumber: validated.uanNumber || null,
+        bankDetailsStatus: validated.bankDetailsStatus,
       });
 
       toast({
@@ -176,25 +233,69 @@ export default function Onboarding() {
       return;
     }
 
+    setIsUploading(true);
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('document', file);
-      formData.append('employeeId', employeeId);
-      formData.append('documentType', documentType);
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/onboarding/upload-document`, {
+      // Step 1: Get presigned URL
+      const presignResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/onboarding/docs/presign`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json',
         },
-        body: formData,
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+        }),
       });
 
-      const result = await response.json();
+      if (!presignResponse.ok) {
+        const error = await presignResponse.json();
+        throw new Error(error.error || 'Failed to get upload URL');
+      }
 
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to upload document');
+      const { url, key } = await presignResponse.json();
+
+      // Step 2: Upload file directly to MinIO/S3
+      const uploadResponse = await fetch(url, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          'Content-Type': file.type,
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload file to storage');
+      }
+
+      // Step 3: Calculate checksum (SHA-256)
+      const arrayBuffer = await file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const checksum = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // Step 4: Complete upload (save metadata to DB)
+      const completeResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/onboarding/docs/complete`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key,
+          filename: file.name,
+          size: file.size,
+          checksum,
+          docType: documentType,
+          consent: true,
+          notes: '',
+        }),
+      });
+
+      if (!completeResponse.ok) {
+        const error = await completeResponse.json();
+        throw new Error(error.error || 'Failed to complete upload');
       }
 
       toast({
@@ -204,14 +305,55 @@ export default function Onboarding() {
 
       // Refresh documents list
       fetchDocuments();
+      setStep(4);
+      navigate('/onboarding/next-step');
     } catch (error: any) {
       toast({
         title: "Upload failed",
         description: error.message || "Failed to upload document",
         variant: "destructive",
       });
+      // Stay on page - don't redirect on error
     } finally {
+      setIsUploading(false);
       setUploading(false);
+    }
+  };
+
+  const handleSkipBankDetails = async () => {
+    if (!employeeId) {
+      toast({
+        title: "Error",
+        description: "Employee ID not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setSkipLoading(true);
+      await api.skipBankDetails(employeeId);
+      setFormData((prev) => ({
+        ...prev,
+        bankDetailsStatus: 'skipped',
+        bankAccountNumber: "",
+        bankName: "",
+        bankBranch: "",
+        ifscCode: "",
+      }));
+      toast({
+        title: "Bank details skipped",
+        description: "You can provide bank information later. HR will reach out if needed.",
+      });
+      setStep(3);
+    } catch (error: any) {
+      toast({
+        title: "Unable to skip bank details",
+        description: error.message || "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setSkipLoading(false);
     }
   };
 
@@ -395,13 +537,19 @@ export default function Onboarding() {
             {step === 2 && (
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold">Bank Details</h3>
+                {formData.bankDetailsStatus === 'skipped' && (
+                  <p className="text-sm text-muted-foreground">
+                    You chose to skip bank details. HR will help you capture them later.
+                  </p>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="bankAccountNumber">Account Number *</Label>
                   <Input
                     id="bankAccountNumber"
                     value={formData.bankAccountNumber}
                     onChange={(e) => setFormData({ ...formData, bankAccountNumber: e.target.value })}
-                    required
+                    required={formData.bankDetailsStatus !== 'skipped'}
+                    disabled={formData.bankDetailsStatus === 'skipped'}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -411,7 +559,8 @@ export default function Onboarding() {
                       id="bankName"
                       value={formData.bankName}
                       onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
-                      required
+                      required={formData.bankDetailsStatus !== 'skipped'}
+                      disabled={formData.bankDetailsStatus === 'skipped'}
                     />
                   </div>
                   <div className="space-y-2">
@@ -420,7 +569,8 @@ export default function Onboarding() {
                       id="bankBranch"
                       value={formData.bankBranch}
                       onChange={(e) => setFormData({ ...formData, bankBranch: e.target.value })}
-                      required
+                      required={formData.bankDetailsStatus !== 'skipped'}
+                      disabled={formData.bankDetailsStatus === 'skipped'}
                     />
                   </div>
                 </div>
@@ -430,8 +580,19 @@ export default function Onboarding() {
                     id="ifscCode"
                     value={formData.ifscCode}
                     onChange={(e) => setFormData({ ...formData, ifscCode: e.target.value })}
-                    required
+                    required={formData.bankDetailsStatus !== 'skipped'}
+                    disabled={formData.bankDetailsStatus === 'skipped'}
                   />
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={handleSkipBankDetails}
+                    disabled={skipLoading || formData.bankDetailsStatus === 'skipped'}
+                  >
+                    {formData.bankDetailsStatus === 'skipped' ? 'Bank details skipped' : skipLoading ? 'Skipping...' : 'Skip bank details'}
+                  </Button>
                 </div>
               </div>
             )}
@@ -439,6 +600,16 @@ export default function Onboarding() {
             {step === 3 && (
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold">Government IDs</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="uanNumber">UAN Number (Optional)</Label>
+                  <Input
+                    id="uanNumber"
+                    value={formData.uanNumber}
+                    onChange={(e) => setFormData({ ...formData, uanNumber: e.target.value })}
+                    maxLength={12}
+                    placeholder="Enter 12-digit UAN"
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="panNumber">PAN Number *</Label>
                   <Input
@@ -475,95 +646,107 @@ export default function Onboarding() {
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold">Verification Documents</h3>
                 <p className="text-sm text-muted-foreground">
-                  Please upload copies of your verification documents (PAN, Aadhar, Passport, etc.)
+                  Please upload copies of your verification documents (PAN, Aadhaar, Passport, etc.)
                 </p>
-                
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="panDocument">PAN Card Document</Label>
-                    <Input
-                      id="panDocument"
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          handleDocumentUpload(file, 'PAN');
-                        }
-                      }}
-                      disabled={uploading}
-                    />
+                {isUploading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Uploading document... please stay on this page until it finishes.</span>
                   </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="aadharDocument">Aadhar Card Document</Label>
-                    <Input
-                      id="aadharDocument"
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          handleDocumentUpload(file, 'Aadhar');
-                        }
-                      }}
-                      disabled={uploading}
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="passportDocument">Passport Document (Optional)</Label>
-                    <Input
-                      id="passportDocument"
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          handleDocumentUpload(file, 'Passport');
-                        }
-                      }}
-                      disabled={uploading}
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="bankDocument">Bank Statement / Cancelled Cheque</Label>
-                    <Input
-                      id="bankDocument"
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          handleDocumentUpload(file, 'Bank Statement');
-                        }
-                      }}
-                      disabled={uploading}
-                    />
-                  </div>
-                </div>
-
-                {uploading && (
-                  <p className="text-sm text-muted-foreground">Uploading document...</p>
                 )}
-
-                {documents.length > 0 && (
-                  <div className="space-y-2 mt-4">
-                    <Label>Uploaded Documents</Label>
-                    <div className="space-y-2">
-                      {documents.map((doc) => (
-                        <div key={doc.id} className="flex items-center justify-between p-2 border rounded">
-                          <div>
-                            <p className="text-sm font-medium">{doc.file_name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {doc.document_type} • {new Date(doc.uploaded_at).toLocaleDateString()}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
+                {docsFlag ? (
+                  <OnboardingDocsUploader
+                    employeeId={employeeId}
+                    onRefresh={fetchDocuments}
+                    onUploadStart={() => setIsUploading(true)}
+                    onUploadEnd={() => setIsUploading(false)}
+                    onUploadSuccess={() => navigate('/onboarding/next-step')}
+                  />
+                ) : (
+                  <>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="panDocument">PAN Card Document</Label>
+                        <Input
+                          id="panDocument"
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleDocumentUpload(file, 'PAN');
+                            }
+                          }}
+                          disabled={uploading}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="aadharDocument">Aadhar Card Document</Label>
+                        <Input
+                          id="aadharDocument"
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleDocumentUpload(file, 'Aadhar');
+                            }
+                          }}
+                          disabled={uploading}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="passportDocument">Passport Document (Optional)</Label>
+                        <Input
+                          id="passportDocument"
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleDocumentUpload(file, 'Passport');
+                            }
+                          }}
+                          disabled={uploading}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="bankDocument">Bank Statement / Cancelled Cheque</Label>
+                        <Input
+                          id="bankDocument"
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleDocumentUpload(file, 'Bank Statement');
+                            }
+                          }}
+                          disabled={uploading}
+                        />
+                      </div>
                     </div>
-                  </div>
+                    {uploading && (
+                      <p className="text-sm text-muted-foreground">Uploading document...</p>
+                    )}
+                    {documents.length > 0 && (
+                      <div className="space-y-2 mt-4">
+                        <Label>Uploaded Documents</Label>
+                        <div className="space-y-2">
+                          {documents.map((doc) => (
+                            <div key={doc.id} className="flex items-center justify-between p-2 border rounded">
+                              <div>
+                                <p className="text-sm font-medium">{doc.file_name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {doc.document_type} • {new Date(doc.uploaded_at).toLocaleDateString()}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

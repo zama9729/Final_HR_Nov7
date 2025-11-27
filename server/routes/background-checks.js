@@ -158,6 +158,7 @@ router.post('/', authenticateToken, async (req, res) => {
       notes,
       consent,
       scope,
+      attach_doc_ids,
     } = req.body;
 
     if (!employee_id && !candidate_id) {
@@ -174,6 +175,7 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
+    const verificationScope = Array.isArray(scope) ? scope : (scope ? [scope] : null);
     const insertResult = await query(
       `
       INSERT INTO background_checks (
@@ -185,9 +187,10 @@ router.post('/', authenticateToken, async (req, res) => {
         vendor_id,
         consent_snapshot,
         request_payload,
-        initiated_by
+        initiated_by,
+        verification_scope
       )
-      VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,$8)
+      VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,$8,$9)
       RETURNING *
       `,
       [
@@ -204,6 +207,7 @@ router.post('/', authenticateToken, async (req, res) => {
         ),
         JSON.stringify({ scope: scope || {} }),
         req.user.id,
+        verificationScope,
       ]
     );
 
@@ -216,6 +220,35 @@ router.post('/', authenticateToken, async (req, res) => {
       `,
       [check.id, req.user.id, notes || null, JSON.stringify({ scope })]
     );
+
+    if (Array.isArray(attach_doc_ids) && attach_doc_ids.length > 0) {
+      const { rows: documents } = await query(
+        `SELECT id, employee_id, tenant_id FROM onboarding_documents WHERE id = ANY($1::uuid[])`,
+        [attach_doc_ids]
+      );
+
+      const unmatched = attach_doc_ids.filter(
+        (docId) => !documents.find((doc) => doc.id === docId)
+      );
+      if (unmatched.length > 0) {
+        return res.status(400).json({ error: 'One or more documents not found' });
+      }
+
+      for (const doc of documents) {
+        if (doc.tenant_id && doc.tenant_id !== tenantId) {
+          return res.status(403).json({ error: 'Document tenant mismatch' });
+        }
+        if (employee_id && doc.employee_id && doc.employee_id !== employee_id) {
+          return res.status(400).json({ error: 'Document does not belong to employee' });
+        }
+        await query(
+          `INSERT INTO background_check_documents (background_check_id, document_id)
+           VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [check.id, doc.id]
+        );
+      }
+    }
 
     await audit({
       actorId: req.user.id,
@@ -236,7 +269,7 @@ router.post('/', authenticateToken, async (req, res) => {
 router.patch('/:id/status', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, result_summary, notes } = req.body;
+    const { status, result_summary, notes, verification_result, verification_scope } = req.body;
 
     if (!status) {
       return res.status(400).json({ error: 'status is required' });
@@ -267,6 +300,12 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
     const check = checkResult.rows[0];
 
     // Update status
+    const scopeArray = Array.isArray(verification_scope)
+      ? verification_scope
+      : verification_scope
+      ? [verification_scope]
+      : check.verification_scope;
+
     await query(
       `
       UPDATE background_checks
@@ -274,10 +313,19 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
           result_summary = COALESCE($2,result_summary),
           notes = COALESCE($3, notes),
           completed_at = CASE WHEN $1 LIKE 'completed%' THEN now() ELSE completed_at END,
-          updated_at = now()
-      WHERE id = $4
+          updated_at = now(),
+          verification_result = COALESCE($4, verification_result),
+          verification_scope = COALESCE($5, verification_scope)
+      WHERE id = $6
       `,
-      [status, result_summary ? JSON.stringify(result_summary) : null, notes || null, id]
+      [
+        status,
+        result_summary ? JSON.stringify(result_summary) : null,
+        notes || null,
+        verification_result || null,
+        scopeArray,
+        id,
+      ]
     );
 
     await query(
@@ -285,8 +333,31 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       INSERT INTO background_check_events (check_id, event_type, actor, note, payload)
       VALUES ($1,'status_update',$2,$3,$4)
       `,
-      [id, req.user.id, notes || null, JSON.stringify({ new_status: status, result_summary })]
+      [id, req.user.id, notes || null, JSON.stringify({ new_status: status, result_summary, verification_result })]
     );
+
+    if (check.employee_id && verification_result) {
+      const resultLower = verification_result.toLowerCase();
+      if (resultLower === 'accepted') {
+        await query(
+          `UPDATE employees
+           SET verified_by = $1,
+               verified_at = now(),
+               verified_scope = $2
+           WHERE id = $3`,
+          [req.user.id, scopeArray, check.employee_id]
+        );
+      } else if (['rejected', 'needs review', 'needs_review'].includes(resultLower)) {
+        await query(
+          `UPDATE employees
+           SET verified_by = NULL,
+               verified_at = NULL,
+               verified_scope = NULL
+           WHERE id = $1`,
+          [check.employee_id]
+        );
+      }
+    }
 
     // Audit log
     await audit({
@@ -294,7 +365,7 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       action: 'background_check_status_updated',
       entityType: 'background_check',
       entityId: id,
-      details: { status, result_summary, notes },
+      details: { status, result_summary, notes, verification_result },
       diff: { old_status: check.status, new_status: status },
     });
 
@@ -329,7 +400,16 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       `,
       [req.params.id]
     );
-    res.json({ ...rows[0], events: events.rows });
+    const attachments = await query(
+      `
+      SELECT d.id, d.document_type, d.file_name, d.status
+      FROM background_check_documents bcd
+      JOIN onboarding_documents d ON d.id = bcd.document_id
+      WHERE bcd.background_check_id = $1
+      `,
+      [req.params.id]
+    );
+    res.json({ ...rows[0], events: events.rows, attachments: attachments.rows });
   } catch (error) {
     console.error('Error fetching background check report:', error);
     res.status(500).json({ error: 'Failed to fetch report' });

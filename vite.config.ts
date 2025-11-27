@@ -20,4 +20,10 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: {
     include: ["react", "react-dom"],
   },
+  test: {
+    globals: true,
+    environment: "jsdom",
+    setupFiles: "./src/tests/setup.ts",
+    exclude: ["server/**", "payroll-app/**", "node_modules/**", "dist/**"],
+  },
 }));

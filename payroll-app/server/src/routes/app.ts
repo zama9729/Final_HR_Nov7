@@ -1028,7 +1028,11 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
             const adjustedSa = sa * adjustmentRatio;
 
             // Calculate deductions based on adjusted gross
-            const pf = (adjustedBasic * Number(settings.pf_rate)) / 100;
+            // PF: 12% of basic, capped at ₹15,000
+            // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+            const pfWageCeiling = 15000;
+            const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+            const pf = (pfBasis * Number(settings.pf_rate)) / 100;
             const esi = adjustedGross <= 21000 ? (adjustedGross * 0.75) / 100 : 0;
             const pt = Number(settings.pt_rate) || 200;
             const annual = adjustedGross * 12;
@@ -2239,99 +2243,200 @@ appRouter.get("/payroll/new-cycle-data", requireAuth, async (req, res) => {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const payrollMonthEnd = new Date(currentYear, currentMonth, 0);
       
-      // Get active employees who were employed by current month
-      const { rows: countRows } = await query(
-          `SELECT count(*) 
-           FROM employees 
-           WHERE tenant_id = $1 
-             AND status = 'active'
-             AND (date_of_joining IS NULL OR 
-                  (EXTRACT(YEAR FROM date_of_joining) < $2 OR 
-                   (EXTRACT(YEAR FROM date_of_joining) = $2 AND EXTRACT(MONTH FROM date_of_joining) <= $3)))`,
-          [tenantId, currentYear, currentMonth]
-      );
-      const employeeCount = parseInt(countRows[0].count, 10) || 0;
+      // Get active employees with their compensation data
+      let employeesResult;
+      try {
+        employeesResult = await query(
+          `SELECT 
+            e.employee_id as id,
+            COALESCE(e.first_name, '') as first_name,
+            COALESCE(e.last_name, '') as last_name,
+            e.employee_code as employee_id,
+            COALESCE(cs.ctc / 12, 0) as gross_pay
+           FROM payroll_employee_view e
+           LEFT JOIN LATERAL (
+             SELECT ctc
+             FROM compensation_structures cs
+             WHERE cs.employee_id = e.employee_id
+               AND cs.tenant_id = $1
+               AND cs.effective_from <= $2
+             ORDER BY cs.effective_from DESC
+             LIMIT 1
+           ) cs ON true
+           WHERE e.org_id = $1 
+             AND e.employment_status = 'active'
+             AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
+           ORDER BY e.first_name, e.last_name`,
+          [tenantId, payrollMonthEnd.toISOString()]
+        );
+      } catch (viewError: any) {
+        // Fallback to employees table if view doesn't exist
+        console.warn('payroll_employee_view not available, using employees table:', viewError.message);
+        employeesResult = await query(
+          `SELECT 
+            e.id,
+            COALESCE(p.first_name, '') as first_name,
+            COALESCE(p.last_name, '') as last_name,
+            e.employee_code as employee_id,
+            COALESCE(cs.ctc / 12, 0) as gross_pay
+           FROM employees e
+           INNER JOIN profiles p ON e.user_id = p.id
+           LEFT JOIN LATERAL (
+             SELECT ctc
+             FROM compensation_structures cs
+             WHERE cs.employee_id = e.id
+               AND cs.tenant_id = $1
+               AND cs.effective_from <= $2
+             ORDER BY cs.effective_from DESC
+             LIMIT 1
+           ) cs ON true
+           WHERE e.tenant_id = $1 
+             AND e.status = 'active'
+             AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
+           ORDER BY p.first_name, p.last_name`,
+          [tenantId, payrollMonthEnd.toISOString()]
+        );
+      }
 
-      // Get total monthly compensation for employees active in current month
-      const { rows: compRows } = await query(
-        `SELECT SUM(cs.ctc / 12) as total
-         FROM compensation_structures cs
-         JOIN payroll_employee_view e ON e.employee_id = cs.employee_id
-         WHERE e.org_id = $1 
-           AND e.employment_status = 'active'
-           AND (e.date_of_joining IS NULL OR 
-                (EXTRACT(YEAR FROM e.date_of_joining) < $2 OR 
-                 (EXTRACT(YEAR FROM e.date_of_joining) = $2 AND EXTRACT(MONTH FROM e.date_of_joining) <= $3)))
-         AND cs.effective_from = (
-             SELECT MAX(effective_from)
-             FROM compensation_structures
-             WHERE employee_id = e.id
-               AND (EXTRACT(YEAR FROM effective_from) < $2 OR 
-                    (EXTRACT(YEAR FROM effective_from) = $2 AND EXTRACT(MONTH FROM effective_from) <= $3))
-         )`,
-        [tenantId, currentYear, currentMonth]
-      );
-      const totalCompensation = parseFloat(compRows[0].total) || 0;
+      const employees = employeesResult.rows.map((row: any) => ({
+        id: row.id,
+        first_name: row.first_name || '',
+        last_name: row.last_name || '',
+        employee_id: row.employee_id || '',
+        gross_pay: parseFloat(row.gross_pay) || 0
+      }));
+
+      const employeeCount = employees.length;
+      const totalCompensation = employees.reduce((sum: number, emp: any) => sum + emp.gross_pay, 0);
 
       return res.json({
           employeeCount,
-          totalCompensation
+          totalCompensation,
+          employees
       });
   }
 
   // Calculate the payroll month end date for filtering
   const payrollMonthEnd = new Date(year, month, 0); // Last day of the payroll month
   
-  // Get active employees who were employed by the payroll month
-  const { rows: countRows } = await query(
-      `SELECT count(*) 
-       FROM payroll_employee_view 
-       WHERE org_id = $1 
-         AND employment_status = 'active'
-         AND (date_of_joining IS NULL OR date_of_joining <= $2)`,
+  // Get active employees with their compensation data
+  let employeesResult;
+  try {
+    employeesResult = await query(
+      `SELECT 
+        e.employee_id as id,
+        COALESCE(e.first_name, '') as first_name,
+        COALESCE(e.last_name, '') as last_name,
+        e.employee_code as employee_id,
+        COALESCE(cs.ctc / 12, 0) as gross_pay
+       FROM payroll_employee_view e
+       LEFT JOIN LATERAL (
+         SELECT ctc
+         FROM compensation_structures cs
+         WHERE cs.employee_id = e.employee_id
+           AND cs.tenant_id = $1
+           AND cs.effective_from <= $2
+         ORDER BY cs.effective_from DESC
+         LIMIT 1
+       ) cs ON true
+       WHERE e.org_id = $1 
+         AND e.employment_status = 'active'
+         AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
+       ORDER BY e.first_name, e.last_name`,
       [tenantId, payrollMonthEnd.toISOString()]
-  );
-  const employeeCount = parseInt(countRows[0].count, 10) || 0;
+    );
+  } catch (viewError: any) {
+    // Fallback to employees table if view doesn't exist
+    console.warn('payroll_employee_view not available, using employees table:', viewError.message);
+    employeesResult = await query(
+      `SELECT 
+        e.id,
+        COALESCE(p.first_name, '') as first_name,
+        COALESCE(p.last_name, '') as last_name,
+        e.employee_code as employee_id,
+        COALESCE(cs.ctc / 12, 0) as gross_pay
+       FROM employees e
+       INNER JOIN profiles p ON e.user_id = p.id
+       LEFT JOIN LATERAL (
+         SELECT ctc
+         FROM compensation_structures cs
+         WHERE cs.employee_id = e.id
+           AND cs.tenant_id = $1
+           AND cs.effective_from <= $2
+         ORDER BY cs.effective_from DESC
+         LIMIT 1
+       ) cs ON true
+       WHERE e.tenant_id = $1 
+         AND e.status = 'active'
+         AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
+       ORDER BY p.first_name, p.last_name`,
+      [tenantId, payrollMonthEnd.toISOString()]
+    );
+  }
 
-  // Get total monthly compensation for employees active in the payroll month
-  // Note: Using payroll_employee_view which maps join_date to date_of_joining
-  const { rows: compRows } = await query(
-    `SELECT SUM(cs.ctc / 12) as total
-     FROM compensation_structures cs
-     JOIN payroll_employee_view e ON e.employee_id = cs.employee_id
-     WHERE e.org_id = $1 
-       AND e.employment_status = 'active'
-       AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
-     AND cs.effective_from = (
-         SELECT MAX(effective_from)
-         FROM compensation_structures
-         WHERE employee_id = cs.employee_id
-           AND effective_from <= $2
-     )`,
-    [tenantId, payrollMonthEnd.toISOString()]
-  );
-  const totalCompensation = parseFloat(compRows[0].total) || 0;
+  const employees = employeesResult.rows.map((row: any) => ({
+    id: row.id,
+    first_name: row.first_name || '',
+    last_name: row.last_name || '',
+    employee_id: row.employee_id || '',
+    gross_pay: parseFloat(row.gross_pay) || 0
+  }));
+
+  const employeeCount = employees.length;
+  const totalCompensation = employees.reduce((sum: number, emp: any) => sum + emp.gross_pay, 0);
 
   res.json({
       employeeCount,
-      totalCompensation
+      totalCompensation,
+      employees
   });
 });
 
 appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
   const tenantId = (req as any).tenantId as string; // Get from middleware
+  const hrUserId = (req as any).hrUserId as string | null; // Get HR user ID from middleware
   if (!tenantId) {
       return res.status(403).json({ error: "User tenant not found" });
   }
 
-  const { month, year, payday, employeeCount, totalCompensation } = req.body;
+  const { month, year, payday, employeeCount, totalCompensation, included_employee_ids } = req.body;
   if (!month || !year) {
       return res.status(400).json({ error: "Month and year are required" });
   }
+  
+  // Validate included_employee_ids if provided
+  if (included_employee_ids && !Array.isArray(included_employee_ids)) {
+      return res.status(400).json({ error: "included_employee_ids must be an array" });
+  }
 
   try {
+      // Get the HR user ID (profile ID) to use for created_by
+      // The payroll_cycles.created_by references profiles(id), not users(id)
+      let createdByProfileId: string | null = hrUserId;
+      
+      // If hrUserId is not available, try to fetch it from the users table
+      if (!createdByProfileId) {
+        try {
+          const userResult = await query(
+            `SELECT hr_user_id FROM users WHERE id = $1`,
+            [userId]
+          );
+          createdByProfileId = userResult.rows[0]?.hr_user_id || null;
+        } catch (fetchError: any) {
+          console.warn('[CREATE PAYROLL CYCLE] Could not fetch hr_user_id:', fetchError.message);
+          // If we can't get hr_user_id, we'll set created_by to null (if column allows it)
+          createdByProfileId = null;
+        }
+      }
+      
+      // If still no hr_user_id, log a warning but continue (created_by can be null)
+      if (!createdByProfileId) {
+        console.warn('[CREATE PAYROLL CYCLE] No hr_user_id found for user:', userId, '- setting created_by to null');
+      }
+      
       // Check if payday column exists - use a try-catch to handle any errors
       let hasPayday = false;
       try {
@@ -2404,14 +2509,14 @@ appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
       }
       
       if (hasPayday && payday) {
-        console.log('[CREATE PAYROLL CYCLE] Using INSERT with payday column, payday:', payday);
+        console.log('[CREATE PAYROLL CYCLE] Using INSERT with payday column, payday:', payday, 'created_by:', createdByProfileId);
         insertQuery = `INSERT INTO payroll_cycles
            (tenant_id, created_by, month, year, payday, status, total_employees, total_amount)
            VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7)
            RETURNING *`;
         insertValues = [
           tenantId,
-          userId,
+          createdByProfileId,
           parseInt(month, 10),
           parseInt(year, 10),
           payday,
@@ -2419,14 +2524,14 @@ appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
           totalCompensation || 0
         ];
       } else {
-        console.log('[CREATE PAYROLL CYCLE] Using INSERT without payday column, hasPayday:', hasPayday, 'payday provided:', !!payday);
+        console.log('[CREATE PAYROLL CYCLE] Using INSERT without payday column, hasPayday:', hasPayday, 'payday provided:', !!payday, 'created_by:', createdByProfileId);
         insertQuery = `INSERT INTO payroll_cycles
            (tenant_id, created_by, month, year, status, total_employees, total_amount)
            VALUES ($1, $2, $3, $4, 'draft', $5, $6)
            RETURNING *`;
         insertValues = [
           tenantId,
-          userId,
+          createdByProfileId,
           parseInt(month, 10),
           parseInt(year, 10),
           employeeCount || 0,
@@ -2463,14 +2568,21 @@ appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
       };
 
       // Get all active employees who were employed by the payroll month
-      const employeesResult = await query(
-        `SELECT e.id
+      // Filter by included_employee_ids if provided
+      let employeesQuery = `
+        SELECT e.id
          FROM employees e
          WHERE e.tenant_id = $1
            AND e.status = 'active'
-           AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)`,
-        [tenantId, payrollMonthEnd.toISOString()]
-      );
+           AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)`;
+      const employeesParams: any[] = [tenantId, payrollMonthEnd.toISOString()];
+      
+      if (included_employee_ids && included_employee_ids.length > 0) {
+        employeesQuery += ` AND e.id = ANY($3)`;
+        employeesParams.push(included_employee_ids);
+      }
+      
+      const employeesResult = await query(employeesQuery, employeesParams);
 
       let processedCount = 0;
       let totalGrossSalary = 0;
@@ -2525,7 +2637,11 @@ appRouter.post("/payroll-cycles", requireAuth, async (req, res) => {
         const adjustedSa = sa * adjustmentRatio;
 
         // Calculate deductions based on adjusted gross
-        const pf = (adjustedBasic * Number(settings.pf_rate)) / 100;
+        // PF: 12% of basic, capped at ₹15,000
+        // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+        const pfWageCeiling = 15000;
+        const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+        const pf = (pfBasis * Number(settings.pf_rate)) / 100;
         const esi = adjustedGross <= 21000 ? (adjustedGross * 0.75) / 100 : 0;
         const pt = Number(settings.pt_rate) || 200;
         const annual = adjustedGross * 12;
@@ -2708,6 +2824,10 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       });
     }
 
+    const payrollMonth = cycle.month;
+    const payrollYear = cycle.year;
+    const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
+
     const existingItemsResult = await query(
       `SELECT 
          pi.employee_id,
@@ -2778,10 +2898,6 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
 
       return res.json({ payrollItems: items });
     }
-
-    const payrollMonth = cycle.month;
-    const payrollYear = cycle.year;
-    const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
 
     // Get payroll settings
     const settingsResult = await query(
@@ -2874,7 +2990,11 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       const adjustedBonus = monthlyBonus * adjustmentRatio;
 
       // Calculate deductions based on adjusted gross
-      const pfDeduction = (adjustedBasic * Number(settings.pf_rate)) / 100;
+      // PF: 12% of basic, capped at ₹15,000
+      // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+      const pfWageCeiling = 15000;
+      const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+      const pfDeduction = (pfBasis * Number(settings.pf_rate)) / 100;
       const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
       const ptDeduction = Number(settings.pt_rate) || 200;
       
@@ -3111,6 +3231,60 @@ appRouter.post("/payroll-cycles/:cycleId/approve", requireAuth, async (req, res)
   }
 });
 
+// Delete payroll cycle (only for draft and pending_approval statuses)
+appRouter.delete("/payroll-cycles/:cycleId", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const tenantId = (req as any).tenantId as string;
+  const { cycleId } = req.params;
+
+  if (!tenantId) {
+    return res.status(403).json({ error: "User tenant not found" });
+  }
+
+  try {
+    // Get payroll cycle
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Only allow deletion for draft and pending_approval statuses
+    // Prevent deletion of processing, completed, paid, or failed cycles
+    if (!['draft', 'pending_approval'].includes(cycle.status)) {
+      return res.status(400).json({ 
+        error: `Cannot delete payroll cycle. Current status is '${cycle.status}'. Only 'draft' or 'pending_approval' payroll cycles can be deleted.` 
+      });
+    }
+
+    // Delete the payroll cycle (CASCADE will automatically delete related payroll_items and payroll_incentives)
+    await query(
+      "DELETE FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    console.log(`✅ Payroll cycle deleted: ${cycleId} (${cycle.month}/${cycle.year}) by user ${userId}`);
+
+    return res.status(200).json({ 
+      message: "Payroll cycle deleted successfully",
+      deletedCycle: {
+        id: cycle.id,
+        month: cycle.month,
+        year: cycle.year,
+        status: cycle.status
+      }
+    });
+  } catch (e: any) {
+    console.error("Error deleting payroll cycle:", e);
+    return res.status(500).json({ error: e.message || "Failed to delete payroll cycle" });
+  }
+});
+
 // Reject/Return payroll (pending_approval -> draft)
 appRouter.post("/payroll-cycles/:cycleId/reject", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
@@ -3166,6 +3340,248 @@ appRouter.post("/payroll-cycles/:cycleId/reject", requireAuth, async (req, res) 
 });
 
 // Process payroll - generate payslips for all eligible employees (accepts edited items)
+// Save payroll items without processing (for draft cycles)
+appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const tenantId = (req as any).tenantId as string;
+  const { cycleId } = req.params;
+
+  if (!tenantId) {
+    return res.status(403).json({ error: "User tenant not found" });
+  }
+
+  try {
+    // Get payroll cycle
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Only allow saving for draft or pending_approval cycles
+    if (!['draft', 'pending_approval'].includes(cycle.status)) {
+      return res.status(400).json({ 
+        error: `Cannot save changes. Current status is '${cycle.status}'. Only 'draft' or 'pending_approval' payroll can be edited.` 
+      });
+    }
+
+    const payrollMonth = cycle.month;
+    const payrollYear = cycle.year;
+    const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
+
+    // Get payroll settings
+    const settingsResult = await query(
+      "SELECT * FROM payroll_settings WHERE tenant_id = $1",
+      [tenantId]
+    );
+    
+    const settings = settingsResult.rows[0] || {
+      pf_rate: 12.00,
+      esi_rate: 3.25,
+      pt_rate: 200.00,
+      tds_threshold: 250000.00,
+    };
+
+    // Get incentives
+    const incentivesExistingResult = await query(
+      `SELECT employee_id, amount
+       FROM payroll_incentives
+       WHERE tenant_id = $1
+         AND payroll_cycle_id = $2`,
+      [tenantId, cycleId]
+    );
+    const incentiveMap = new Map<string, number>();
+    incentivesExistingResult.rows.forEach((row) => {
+      incentiveMap.set(row.employee_id, Number(row.amount || 0));
+    });
+
+    // Get edited payroll items from request body
+    const { payrollItems: editedItems } = req.body;
+
+    if (!editedItems || !Array.isArray(editedItems) || editedItems.length === 0) {
+      return res.status(400).json({ error: "payrollItems array is required" });
+    }
+
+    // Get all existing payroll items for this cycle
+    const existingItemsResult = await query(
+      "SELECT employee_id FROM payroll_items WHERE payroll_cycle_id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+    const existingEmployeeIds = new Set(existingItemsResult.rows.map(row => row.employee_id));
+    
+    // Get the set of employee IDs that should be saved (from editedItems)
+    const itemsToSaveEmployeeIds = new Set(editedItems.map((item: any) => item.employee_id));
+    
+    // Delete payroll items for employees that are NOT in the editedItems (held employees)
+    for (const existingEmployeeId of existingEmployeeIds) {
+      if (!itemsToSaveEmployeeIds.has(existingEmployeeId)) {
+        // This employee was held - delete their payroll item
+        await query(
+          "DELETE FROM payroll_items WHERE payroll_cycle_id = $1 AND employee_id = $2 AND tenant_id = $3",
+          [cycleId, existingEmployeeId, tenantId]
+        );
+        // Also delete any incentives for this employee
+        await query(
+          "DELETE FROM payroll_incentives WHERE payroll_cycle_id = $1 AND employee_id = $2 AND tenant_id = $3",
+          [cycleId, existingEmployeeId, tenantId]
+        );
+      }
+    }
+
+    let savedCount = 0;
+    let totalGrossSalary = 0;
+    let totalDeductions = 0;
+
+    for (const item of editedItems) {
+      const {
+        employee_id,
+        basic_salary,
+        hra,
+        special_allowance,
+        da = 0,
+        lta = 0,
+        bonus = 0,
+        lop_days,
+        paid_days,
+        total_working_days,
+      } = item;
+
+      // If LOP days are provided, use them; otherwise calculate
+      let finalLopDays: number;
+      let finalPaidDays: number;
+      let finalTotalWorkingDays: number;
+
+      if (lop_days !== undefined && paid_days !== undefined && total_working_days !== undefined) {
+        finalLopDays = Number(lop_days);
+        finalPaidDays = Number(paid_days);
+        finalTotalWorkingDays = Number(total_working_days);
+      } else {
+        const calculated = await calculateLopAndPaidDays(tenantId, employee_id, payrollMonth, payrollYear);
+        finalLopDays = calculated.lopDays;
+        finalPaidDays = calculated.paidDays;
+        finalTotalWorkingDays = calculated.totalWorkingDays;
+      }
+
+      // Recalculate gross salary from edited components
+      const incentiveAmount = Number(item.incentive_amount ?? incentiveMap.get(employee_id) ?? 0);
+      const editedGrossSalary = Number(basic_salary) + Number(hra) + Number(special_allowance) + Number(da) + Number(lta) + Number(bonus) + incentiveAmount;
+
+      // Recalculate deductions based on edited values
+      const pfWageCeiling = 15000;
+      const editedBasic = Number(basic_salary);
+      const editedPfBasis = editedBasic <= pfWageCeiling ? editedBasic : pfWageCeiling;
+      const editedPfDeduction = (editedPfBasis * Number(settings.pf_rate)) / 100;
+      const editedEsiDeduction = editedGrossSalary <= 21000 ? (editedGrossSalary * 0.75) / 100 : 0;
+      const editedPtDeduction = Number(settings.pt_rate) || 200;
+      
+      const annualIncome = editedGrossSalary * 12;
+      let editedTdsDeduction = 0;
+      if (annualIncome > Number(settings.tds_threshold)) {
+        const excessAmount = annualIncome - Number(settings.tds_threshold);
+        editedTdsDeduction = (excessAmount * 5) / 100 / 12;
+      }
+
+      const calculatedDeductions = editedPfDeduction + editedEsiDeduction + editedPtDeduction + editedTdsDeduction;
+      const netSalary = editedGrossSalary - calculatedDeductions;
+
+      // Insert or update payroll item
+      await query(
+        `INSERT INTO payroll_items (
+          tenant_id, payroll_cycle_id, employee_id,
+          gross_salary, deductions, net_salary,
+          basic_salary, hra, special_allowance,
+          incentive_amount,
+          pf_deduction, esi_deduction, tds_deduction, pt_deduction,
+          lop_days, paid_days, total_working_days
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
+          gross_salary = EXCLUDED.gross_salary,
+          deductions = EXCLUDED.deductions,
+          net_salary = EXCLUDED.net_salary,
+          basic_salary = EXCLUDED.basic_salary,
+          hra = EXCLUDED.hra,
+          special_allowance = EXCLUDED.special_allowance,
+          incentive_amount = EXCLUDED.incentive_amount,
+          pf_deduction = EXCLUDED.pf_deduction,
+          esi_deduction = EXCLUDED.esi_deduction,
+          tds_deduction = EXCLUDED.tds_deduction,
+          pt_deduction = EXCLUDED.pt_deduction,
+          lop_days = EXCLUDED.lop_days,
+          paid_days = EXCLUDED.paid_days,
+          total_working_days = EXCLUDED.total_working_days,
+          updated_at = NOW()`,
+        [
+          tenantId,
+          cycleId,
+          employee_id,
+          editedGrossSalary,
+          calculatedDeductions,
+          netSalary,
+          Number(basic_salary),
+          Number(hra),
+          Number(special_allowance),
+          incentiveAmount,
+          editedPfDeduction,
+          editedEsiDeduction,
+          editedTdsDeduction,
+          editedPtDeduction,
+          finalLopDays,
+          finalPaidDays,
+          finalTotalWorkingDays,
+        ]
+      );
+
+      if (incentiveAmount > 0) {
+        await query(
+          `INSERT INTO payroll_incentives (
+            tenant_id, payroll_cycle_id, employee_id, amount, updated_at
+          ) VALUES ($1, $2, $3, $4, NOW())
+          ON CONFLICT (payroll_cycle_id, employee_id)
+          DO UPDATE SET amount = EXCLUDED.amount, updated_at = NOW()`,
+          [tenantId, cycleId, employee_id, incentiveAmount]
+        );
+      } else {
+        await query(
+          `DELETE FROM payroll_incentives
+           WHERE tenant_id = $1 AND payroll_cycle_id = $2 AND employee_id = $3`,
+          [tenantId, cycleId, employee_id]
+        );
+      }
+
+      incentiveMap.set(employee_id, incentiveAmount);
+      savedCount++;
+      totalGrossSalary += editedGrossSalary;
+      totalDeductions += calculatedDeductions;
+    }
+
+    // Update payroll cycle totals but keep status unchanged
+    await query(
+      `UPDATE payroll_cycles
+       SET total_employees = $1,
+           total_amount = $2,
+           updated_at = NOW()
+       WHERE id = $3 AND tenant_id = $4`,
+      [savedCount, totalGrossSalary, cycleId, tenantId]
+    );
+
+    return res.status(200).json({
+      message: `Payroll changes saved successfully for ${savedCount} employees`,
+      savedCount,
+      totalGrossSalary,
+      totalDeductions,
+      totalNetSalary: totalGrossSalary - totalDeductions,
+    });
+  } catch (e: any) {
+    console.error("Error saving payroll changes:", e);
+    return res.status(500).json({ error: e.message || "Failed to save payroll changes" });
+  }
+});
+
 // Now only works with approved cycles
 appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
@@ -3288,6 +3704,32 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         }
 
         // Use the edited items provided (for draft cycles only)
+        // First, get all existing payroll items for this cycle
+        const existingItemsResult = await query(
+          "SELECT employee_id FROM payroll_items WHERE payroll_cycle_id = $1 AND tenant_id = $2",
+          [cycleId, tenantId]
+        );
+        const existingEmployeeIds = new Set(existingItemsResult.rows.map(row => row.employee_id));
+        
+        // Get the set of employee IDs that should be processed (from editedItems)
+        const itemsToProcessEmployeeIds = new Set(editedItems.map(item => item.employee_id));
+        
+        // Delete payroll items for employees that are NOT in the editedItems (held employees)
+        for (const existingEmployeeId of existingEmployeeIds) {
+          if (!itemsToProcessEmployeeIds.has(existingEmployeeId)) {
+            // This employee was held - delete their payroll item
+            await query(
+              "DELETE FROM payroll_items WHERE payroll_cycle_id = $1 AND employee_id = $2 AND tenant_id = $3",
+              [cycleId, existingEmployeeId, tenantId]
+            );
+            // Also delete any incentives for this employee
+            await query(
+              "DELETE FROM payroll_incentives WHERE payroll_cycle_id = $1 AND employee_id = $2 AND tenant_id = $3",
+              [cycleId, existingEmployeeId, tenantId]
+            );
+          }
+        }
+        
         let processedCount = 0;
         let totalGrossSalary = 0;
         let totalDeductions = 0;
@@ -3329,7 +3771,12 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         const editedGrossSalary = Number(basic_salary) + Number(hra) + Number(special_allowance) + Number(da) + Number(lta) + Number(bonus) + incentiveAmount;
 
         // Recalculate deductions based on edited values
-        const editedPfDeduction = (Number(basic_salary) * Number(settings.pf_rate)) / 100;
+        // PF: 12% of basic, capped at ₹15,000
+        // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+        const pfWageCeiling = 15000;
+        const editedBasic = Number(basic_salary);
+        const editedPfBasis = editedBasic <= pfWageCeiling ? editedBasic : pfWageCeiling;
+        const editedPfDeduction = (editedPfBasis * Number(settings.pf_rate)) / 100;
         const editedEsiDeduction = editedGrossSalary <= 21000 ? (editedGrossSalary * 0.75) / 100 : 0;
         const editedPtDeduction = Number(settings.pt_rate) || 200;
         
@@ -3538,8 +3985,11 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       const adjustedSpecialAllowance = monthlySpecialAllowance * adjustmentRatio;
 
       // Calculate deductions based on adjusted gross
-      // PF: 12% of basic (employee contribution)
-      const pfDeduction = (adjustedBasic * Number(settings.pf_rate)) / 100;
+      // PF: 12% of basic (employee contribution), capped at ₹15,000
+      // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
+      const pfWageCeiling = 15000;
+      const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+      const pfDeduction = (pfBasis * Number(settings.pf_rate)) / 100;
       
       // ESI: 0.75% of gross if gross <= 21000 (employee contribution)
       const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
@@ -4031,4 +4481,278 @@ appRouter.get("/reports/payroll-register", requireAuth, async (req, res) => {
 
 // Reimbursement routes
 appRouter.use("/v1/reimbursements", requireAuth, reimbursementsRouter);
+
+// Statutory Reports Proxy - Forward requests to HR API with authentication
+appRouter.get("/reports/statutory/pf-ecr", requireAuth, async (req, res) => {
+  try {
+    const hrUserId = (req as any).hrUserId as string | null;
+    const tenantId = (req as any).tenantId as string;
+    const { month, year } = req.query;
+
+    if (!hrUserId) {
+      return res.status(403).json({ 
+        error: "HR user ID not found", 
+        message: "User must be linked to HR system to access statutory reports" 
+      });
+    }
+
+    if (!month || !year) {
+      return res.status(400).json({ error: "Month and year are required" });
+    }
+
+    // Generate JWT token for HR API
+    const hrJwtSecret = process.env.HR_JWT_SECRET || process.env.JWT_SECRET || "dev_secret";
+    const hrToken = jwt.sign(
+      { 
+        id: hrUserId,
+        org_id: tenantId
+      },
+      hrJwtSecret,
+      { expiresIn: "5m" }
+    );
+
+    // Forward request to HR API
+    const hrApiUrl = process.env.HR_API_URL || process.env.HR_BASE_URL || "http://api:3001";
+    const hrEndpoint = `${hrApiUrl}/api/reports/statutory/pf-ecr?month=${month}&year=${year}`;
+    
+    console.log(`[STATUTORY] Proxying PF ECR request to HR API: ${hrEndpoint}`);
+    console.log(`[STATUTORY] HR API URL: ${hrApiUrl}, HR User ID: ${hrUserId}, Tenant ID: ${tenantId}`);
+    
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    let hrResponse;
+    try {
+      hrResponse = await fetch(hrEndpoint, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${hrToken}`,
+          "Content-Type": "text/plain",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      console.log(`[STATUTORY] HR API response status: ${hrResponse.status}`);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      console.error("[STATUTORY] Error fetching from HR API:", {
+        message: fetchError.message,
+        code: fetchError.code,
+        cause: fetchError.cause,
+        stack: fetchError.stack
+      });
+      
+      if (fetchError.code === 'ECONNREFUSED' || 
+          fetchError.message?.includes('ECONNREFUSED') || 
+          fetchError.cause?.code === 'ECONNREFUSED') {
+        return res.status(503).json({ 
+          error: "HR API service unavailable", 
+          message: `Cannot connect to HR API at ${hrApiUrl}. Please ensure the HR API service is running and accessible.` 
+        });
+      }
+      if (fetchError.name === 'AbortError') {
+        return res.status(504).json({ 
+          error: "Request timeout", 
+          message: "HR API request timed out. Please try again." 
+        });
+      }
+      return res.status(500).json({ 
+        error: "Failed to fetch PF ECR", 
+        message: fetchError.message || "Unknown error occurred",
+        details: fetchError.cause?.message || fetchError.code
+      });
+    }
+
+    if (!hrResponse.ok) {
+      const error = await hrResponse.json().catch(() => ({ error: "Failed to fetch PF ECR" }));
+      return res.status(hrResponse.status).json(error);
+    }
+
+    // Forward the response
+    const content = await hrResponse.text();
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="PF-ECR-${String(month).padStart(2, '0')}-${year}.txt"`
+    );
+    res.send(content);
+  } catch (error: any) {
+    console.error("Error proxying PF ECR request:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch PF ECR" });
+  }
+});
+
+appRouter.get("/reports/statutory/esi-return", requireAuth, async (req, res) => {
+  try {
+    const hrUserId = (req as any).hrUserId as string | null;
+    const tenantId = (req as any).tenantId as string;
+    const { month, year } = req.query;
+
+    if (!hrUserId) {
+      return res.status(403).json({ 
+        error: "HR user ID not found", 
+        message: "User must be linked to HR system to access statutory reports" 
+      });
+    }
+
+    if (!month || !year) {
+      return res.status(400).json({ error: "Month and year are required" });
+    }
+
+    // Generate JWT token for HR API
+    const hrJwtSecret = process.env.HR_JWT_SECRET || process.env.JWT_SECRET || "dev_secret";
+    const hrToken = jwt.sign(
+      { 
+        id: hrUserId,
+        org_id: tenantId
+      },
+      hrJwtSecret,
+      { expiresIn: "5m" }
+    );
+
+    // Forward request to HR API
+    const hrApiUrl = process.env.HR_API_URL || process.env.HR_BASE_URL || "http://api:3001";
+    
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    let hrResponse;
+    try {
+      hrResponse = await fetch(
+        `${hrApiUrl}/api/reports/statutory/esi-return?month=${month}&year=${year}`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${hrToken}`,
+            "Content-Type": "text/csv",
+          },
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      console.error("Error fetching from HR API:", fetchError);
+      if (fetchError.code === 'ECONNREFUSED' || fetchError.message?.includes('ECONNREFUSED') || fetchError.cause?.code === 'ECONNREFUSED') {
+        return res.status(503).json({ 
+          error: "HR API service unavailable", 
+          message: "Cannot connect to HR API. Please ensure the HR API service is running and accessible." 
+        });
+      }
+      if (fetchError.name === 'AbortError') {
+        return res.status(504).json({ 
+          error: "Request timeout", 
+          message: "HR API request timed out. Please try again." 
+        });
+      }
+      return res.status(500).json({ 
+        error: "Failed to fetch ESI Return", 
+        message: fetchError.message || "Unknown error occurred" 
+      });
+    }
+
+    if (!hrResponse.ok) {
+      const error = await hrResponse.json().catch(() => ({ error: "Failed to fetch ESI Return" }));
+      return res.status(hrResponse.status).json(error);
+    }
+
+    // Forward the response
+    const content = await hrResponse.text();
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="ESI-Return-${String(month).padStart(2, '0')}-${year}.csv"`
+    );
+    res.send(content);
+  } catch (error: any) {
+    console.error("Error proxying ESI Return request:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch ESI Return" });
+  }
+});
+
+appRouter.get("/reports/statutory/tds-summary", requireAuth, async (req, res) => {
+  try {
+    const hrUserId = (req as any).hrUserId as string | null;
+    const tenantId = (req as any).tenantId as string;
+    const { month, year } = req.query;
+
+    if (!hrUserId) {
+      return res.status(403).json({ 
+        error: "HR user ID not found", 
+        message: "User must be linked to HR system to access statutory reports" 
+      });
+    }
+
+    if (!month || !year) {
+      return res.status(400).json({ error: "Month and year are required" });
+    }
+
+    // Generate JWT token for HR API
+    const hrJwtSecret = process.env.HR_JWT_SECRET || process.env.JWT_SECRET || "dev_secret";
+    const hrToken = jwt.sign(
+      { 
+        id: hrUserId,
+        org_id: tenantId
+      },
+      hrJwtSecret,
+      { expiresIn: "5m" }
+    );
+
+    // Forward request to HR API
+    const hrApiUrl = process.env.HR_API_URL || process.env.HR_BASE_URL || "http://api:3001";
+    
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    let hrResponse;
+    try {
+      hrResponse = await fetch(
+        `${hrApiUrl}/api/reports/statutory/tds-summary?month=${month}&year=${year}`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${hrToken}`,
+            "Content-Type": "application/json",
+          },
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      console.error("Error fetching from HR API:", fetchError);
+      if (fetchError.code === 'ECONNREFUSED' || fetchError.message?.includes('ECONNREFUSED') || fetchError.cause?.code === 'ECONNREFUSED') {
+        return res.status(503).json({ 
+          error: "HR API service unavailable", 
+          message: "Cannot connect to HR API. Please ensure the HR API service is running and accessible." 
+        });
+      }
+      if (fetchError.name === 'AbortError') {
+        return res.status(504).json({ 
+          error: "Request timeout", 
+          message: "HR API request timed out. Please try again." 
+        });
+      }
+      return res.status(500).json({ 
+        error: "Failed to fetch TDS Summary", 
+        message: fetchError.message || "Unknown error occurred" 
+      });
+    }
+
+    if (!hrResponse.ok) {
+      const error = await hrResponse.json().catch(() => ({ error: "Failed to fetch TDS Summary" }));
+      return res.status(hrResponse.status).json(error);
+    }
+
+    // Forward the JSON response
+    const data = await hrResponse.json();
+    res.json(data);
+  } catch (error: any) {
+    console.error("Error proxying TDS Summary request:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch TDS Summary" });
+  }
+});
 

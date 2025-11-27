@@ -1,0 +1,73 @@
+# Docker Compose configuration with SSL/HTTPS support via Nginx
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.ssl.yml up
+
+version: '3.8'
+
+services:
+  # Nginx Reverse Proxy with SSL
+  nginx:
+    image: nginx:alpine
+    container_name: hr-suite-nginx
+    ports:
+      - "80:80"   # HTTP - redirects to HTTPS
+      - "443:443" # HTTPS
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - api
+      - app
+      - payroll-api
+      - payroll-app
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # Update existing services to use network
+  postgres:
+    networks:
+      - hr-suite-network
+
+  redis:
+    networks:
+      - hr-suite-network
+
+  minio:
+    networks:
+      - hr-suite-network
+
+  api:
+    networks:
+      - hr-suite-network
+    environment:
+      - FRONTEND_URL=https://localhost
+      - NODE_ENV=production
+
+  app:
+    networks:
+      - hr-suite-network
+    environment:
+      - VITE_API_URL=https://localhost/api
+
+  payroll-api:
+    networks:
+      - hr-suite-network
+    environment:
+      - PAYROLL_BASE_URL=https://localhost/payroll-api
+      - HR_BASE_URL=https://localhost
+
+  payroll-app:
+    networks:
+      - hr-suite-network
+    environment:
+      - VITE_API_URL=https://localhost/payroll-api
+      - VITE_PAYROLL_BASE_URL=https://localhost/payroll
+
+volumes:
+  nginx_logs:
+
+networks:
+  hr-suite-network:
+    driver: bridge
+

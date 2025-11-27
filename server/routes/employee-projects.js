@@ -34,7 +34,14 @@ router.get('/employees/:id/projects', authenticateToken, async (req, res) => {
     }
     
     const result = await withClient(async (client) => {
-      return client.query('SELECT * FROM employee_projects WHERE employee_id = $1 AND tenant_id = $2 ORDER BY start_date DESC NULLS LAST', [id, empTenant]);
+      return client.query(
+        `SELECT ep.*
+         FROM employee_projects ep
+         JOIN employees e ON e.id = ep.employee_id
+         WHERE ep.employee_id = $1 AND e.tenant_id = $2
+         ORDER BY ep.start_date DESC NULLS LAST`,
+        [id, empTenant]
+      );
     }, empTenant);
     res.json(result.rows || []);
   } catch (error) {
@@ -73,10 +80,10 @@ router.post('/employees/:id/projects', authenticateToken, async (req, res) => {
     }
     
     const result = await withClient(async (client) => client.query(
-      `INSERT INTO employee_projects (employee_id, project_name, role, start_date, end_date, technologies, description, tenant_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      `INSERT INTO employee_projects (employee_id, project_name, role, start_date, end_date, technologies, description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
         RETURNING *`,
-      [id, project_name, role || null, start_date || null, end_date || null, Array.isArray(technologies) ? technologies : [], description || null, tenant]
+      [id, project_name, role || null, start_date || null, end_date || null, Array.isArray(technologies) ? technologies : [], description || null]
     ), tenant);
     res.json(result.rows[0]);
   } catch (error) {
@@ -116,16 +123,20 @@ router.put('/employees/:id/projects/:projectId', authenticateToken, async (req, 
     
     const result = await withClient(async (client) => {
       return client.query(
-        `UPDATE employee_projects 
-         SET project_name = COALESCE($1, project_name),
+        `UPDATE employee_projects ep
+         SET project_name = COALESCE($1, ep.project_name),
              role = $2,
              start_date = $3,
              end_date = $4,
              technologies = $5,
              description = $6,
              updated_at = now()
-         WHERE id = $7 AND employee_id = $8 AND tenant_id = $9
-         RETURNING *`,
+         FROM employees e
+         WHERE ep.id = $7
+           AND ep.employee_id = $8
+           AND e.id = ep.employee_id
+           AND e.tenant_id = $9
+         RETURNING ep.*`,
         [
           project_name || null, 
           role || null, 
@@ -181,9 +192,13 @@ router.delete('/employees/:id/projects/:projectId', authenticateToken, async (re
     
     const result = await withClient(async (client) => {
       return client.query(
-        `DELETE FROM employee_projects 
-         WHERE id = $1 AND employee_id = $2 AND tenant_id = $3
-         RETURNING id`,
+        `DELETE FROM employee_projects ep
+         USING employees e
+         WHERE ep.id = $1
+           AND ep.employee_id = $2
+           AND e.id = ep.employee_id
+           AND e.tenant_id = $3
+         RETURNING ep.id`,
         [projectId, id, tenant]
       );
     }, tenant);

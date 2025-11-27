@@ -65,6 +65,158 @@ const assignmentSelectFragment = `
   ), '[]'::json) as assignments
 `;
 
+// Profile change request routes
+router.post('/profile/requests', authenticateToken, async (req, res) => {
+  try {
+    const { changes, reason } = req.body;
+    if (!changes || typeof changes !== 'object' || Object.keys(changes).length === 0) {
+      return res.status(400).json({ error: 'changes object required' });
+    }
+
+    const employeeResult = await query(
+      'SELECT id, tenant_id FROM employees WHERE user_id = $1',
+      [req.user.id]
+    );
+    if (employeeResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee record not found' });
+    }
+    const employeeId = employeeResult.rows[0].id;
+
+    const requestInsert = await query(
+      `INSERT INTO profile_change_requests (
+        employee_id, tenant_id, changed_fields, requested_by, status, reason
+      ) VALUES ($1, $2, $3, $4, 'pending', $5)
+      RETURNING id, status`,
+      [
+        employeeId,
+        employeeResult.rows[0].tenant_id,
+        JSON.stringify(changes),
+        req.user.id,
+        reason || null,
+      ]
+    );
+
+    res.json(requestInsert.rows[0]);
+  } catch (error) {
+    console.error('Profile change request error:', error);
+    res.status(500).json({ error: error.message || 'Failed to submit request' });
+  }
+});
+
+router.get('/profile/requests', authenticateToken, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
+  try {
+    const tenantResult = await query('SELECT tenant_id FROM profiles WHERE id = $1', [req.user.id]);
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    const requests = await query(
+      `SELECT 
+        r.id,
+        r.employee_id,
+        r.changed_fields,
+        r.status,
+        r.reason,
+        r.created_at,
+        json_build_object(
+          'first_name', p.first_name,
+          'last_name', p.last_name,
+          'email', p.email
+        ) AS employee_profile
+       FROM profile_change_requests r
+       JOIN employees e ON e.id = r.employee_id
+       JOIN profiles p ON p.id = e.user_id
+       WHERE r.tenant_id = $1
+       ORDER BY r.created_at DESC
+       LIMIT 100`,
+      [tenantId]
+    );
+
+    res.json(requests.rows);
+  } catch (error) {
+    console.error('List profile change requests error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch requests' });
+  }
+});
+
+router.post('/profile/requests/:id/review', authenticateToken, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, note } = req.body;
+    if (!['approve', 'deny'].includes(action)) {
+      return res.status(400).json({ error: 'action must be approve or deny' });
+    }
+
+    const tenantResult = await query('SELECT tenant_id FROM profiles WHERE id = $1', [req.user.id]);
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    await query('BEGIN');
+    try {
+      const requestResult = await query(
+        `SELECT * FROM profile_change_requests WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [id, tenantId]
+      );
+      if (requestResult.rows.length === 0) {
+        await query('ROLLBACK');
+        return res.status(404).json({ error: 'Request not found' });
+      }
+      const request = requestResult.rows[0];
+      if (request.status !== 'pending') {
+        await query('ROLLBACK');
+        return res.status(400).json({ error: 'Request already processed' });
+      }
+
+      if (action === 'approve') {
+        const changedFields = request.changed_fields || {};
+        const allowedFields = ['first_name', 'last_name', 'email', 'phone', 'work_location'];
+        const updates = [];
+        const params = [];
+        let paramIndex = 1;
+
+        Object.entries(changedFields).forEach(([key, value]) => {
+          if (allowedFields.includes(key)) {
+            updates.push(`${key} = $${paramIndex++}`);
+            params.push(value);
+          }
+        });
+
+        if (updates.length > 0) {
+          params.push(request.employee_id);
+          await query(
+            `UPDATE employees
+             SET ${updates.join(', ')}, updated_at = now()
+             WHERE id = $${params.length}`,
+            params
+          );
+        }
+      }
+
+      await query(
+        `UPDATE profile_change_requests
+         SET status = $1,
+             reviewed_by = $2,
+             reviewed_at = now(),
+             review_note = $3
+         WHERE id = $4`,
+        [action === 'approve' ? 'approved' : 'denied', req.user.id, note || null, id]
+      );
+
+      await query('COMMIT');
+      res.json({ id, status: action === 'approve' ? 'approved' : 'denied' });
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    console.error('Review profile change request error:', error);
+    res.status(500).json({ error: error.message || 'Failed to review request' });
+  }
+});
+
 // Get all employees
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -227,6 +379,26 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'No organization found' });
     }
     
+    // Check if verified_by column exists
+    const columnCheck = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_name = 'employees' AND column_name = 'verified_by'`
+    );
+    const hasVerifiedBy = columnCheck.rows.length > 0;
+
+    // Build query conditionally based on column existence
+    const verifiedByJoin = hasVerifiedBy 
+      ? `LEFT JOIN profiles vb ON vb.id = e.verified_by`
+      : '';
+    const verifiedBySelect = hasVerifiedBy
+      ? `json_build_object(
+          'id', vb.id,
+          'first_name', vb.first_name,
+          'last_name', vb.last_name
+        ) as verified_by_profile`
+      : `NULL::jsonb as verified_by_profile`;
+
     // Get employee with profile data, reporting manager info, and organization info
     const employeeResult = await query(
       `SELECT 
@@ -249,12 +421,14 @@ router.get('/:id', authenticateToken, async (req, res) => {
         json_build_object(
           'name', o.name,
           'domain', o.domain
-        ) as organization
+        ) as organization,
+        ${verifiedBySelect}
       FROM employees e
       JOIN profiles p ON p.id = e.user_id
       LEFT JOIN employees mgr_e ON mgr_e.id = e.reporting_manager_id
       LEFT JOIN profiles mgr_p ON mgr_p.id = mgr_e.user_id
       LEFT JOIN organizations o ON o.id = e.tenant_id
+      ${verifiedByJoin}
       WHERE e.id = $1 AND e.tenant_id = $2`,
       [id, userTenantId]
     );
@@ -292,6 +466,16 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (onboardingResult.rows.length > 0) {
       employee.onboarding_data = onboardingResult.rows[0];
     }
+
+    const probationResult = await query(
+      `SELECT *
+       FROM probations
+       WHERE employee_id = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [id]
+    );
+    employee.probation = probationResult.rows[0] || null;
     
     // Get performance reviews
     const reviewsResult = await query(

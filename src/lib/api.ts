@@ -451,6 +451,10 @@ class ApiClient {
     return this.request('/api/background-checks');
   }
 
+  async getBackgroundChecksForEmployee(employeeId: string) {
+    return this.request(`/api/background-checks/employee/${employeeId}`);
+  }
+
   async createBackgroundCheck(payload: {
     employee_id?: string;
     candidate_id?: string;
@@ -459,6 +463,7 @@ class ApiClient {
     notes?: string;
     scope?: any;
     consent?: any;
+    attach_doc_ids?: string[];
   }) {
     return this.request('/api/background-checks', {
       method: 'POST',
@@ -608,6 +613,138 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ employeeId, ...data }),
     });
+  }
+
+  async submitProfileChangeRequest(changes: Record<string, any>, reason?: string) {
+    return this.request('/api/employees/profile/requests', {
+      method: 'POST',
+      body: JSON.stringify({ changes, reason }),
+    });
+  }
+
+  async skipBankDetails(employeeId: string) {
+    return this.request('/api/onboarding/bank-details/skip', {
+      method: 'POST',
+      body: JSON.stringify({ employeeId }),
+    });
+  }
+
+  async uploadOnboardingDocument(
+    candidateId: string,
+    payload: { file: File; docType: string; consent: boolean; notes?: string; source?: string }
+  ) {
+    const formData = new FormData();
+    formData.append('file', payload.file);
+    formData.append('doc_type', payload.docType);
+    formData.append('consent', String(payload.consent));
+    if (payload.notes) formData.append('notes', payload.notes);
+    if (payload.source) formData.append('source', payload.source);
+
+    return this.request(
+      `/api/onboarding/${candidateId}/documents`,
+      {
+        method: 'POST',
+        body: formData,
+        headers: {} as HeadersInit,
+      },
+      true,
+    );
+  }
+
+  async getOnboardingDocuments(candidateId: string, params?: { status?: string; docType?: string }) {
+    const search = new URLSearchParams();
+    if (params?.status) search.append('status', params.status);
+    if (params?.docType) search.append('doc_type', params.docType);
+    const qs = search.toString() ? `?${search.toString()}` : '';
+    return this.request(`/api/onboarding/${candidateId}/documents${qs}`);
+  }
+
+  async approveDocument(docId: string, payload?: { notes?: string }) {
+    return this.request(`/api/onboarding/documents/${docId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async rejectDocument(docId: string, payload?: { reason?: string }) {
+    return this.request(`/api/onboarding/documents/${docId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  // New presigned URL upload methods
+  async getPresignedUploadUrl(filename: string, contentType: string) {
+    return this.request('/api/onboarding/docs/presign', {
+      method: 'POST',
+      body: JSON.stringify({ filename, contentType }),
+    });
+  }
+
+  async completeDocumentUpload(payload: {
+    key: string;
+    filename: string;
+    size: number;
+    checksum: string;
+    docType?: string;
+    consent?: boolean;
+    notes?: string;
+  }) {
+    return this.request('/api/onboarding/docs/complete', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getDocumentDownloadUrl(docId: string) {
+    return this.request(`/api/onboarding/docs/${docId}/download`);
+  }
+
+  async getEmployeeDocumentsForHr(employeeId: string) {
+    return this.request(`/api/onboarding/docs/hr/employees/${employeeId}/documents`);
+  }
+
+  async verifyDocument(docId: string, action: 'approve' | 'deny', note?: string) {
+    return this.request(`/api/onboarding/docs/hr/documents/${docId}/verify`, {
+      method: 'POST',
+      body: JSON.stringify({ action, note }),
+    });
+  }
+
+  async requestDocumentResubmission(docId: string, payload?: { note?: string }) {
+    return this.request(`/api/onboarding/documents/${docId}/request-resubmission`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async listProbations(params?: { status?: string }) {
+    const search = new URLSearchParams();
+    if (params?.status) search.append('status', params.status);
+    const qs = search.toString() ? `?${search.toString()}` : '';
+    return this.request(`/api/probation${qs}`);
+  }
+
+  async createProbation(payload: Record<string, any>) {
+    return this.request('/api/probation', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getEmployeeProbation(employeeId: string) {
+    return this.request(`/api/probation/employee/${employeeId}`);
+  }
+
+  async confirmProbation(probationId: string) {
+    return this.request(`/api/probation/${probationId}/confirm`, {
+      method: 'POST',
+    });
+  }
+
+  async validateProbationLeave(employeeId: string, from: string, to: string) {
+    const params = new URLSearchParams({ employee_id: employeeId, from, to });
+    return this.request(`/api/probation/validate?${params.toString()}`);
   }
 
   // Timesheet methods
@@ -1177,6 +1314,12 @@ class ApiClient {
     });
   }
 
+  async deleteOrgPolicy(id: string) {
+    return this.request(`/api/policies/org/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   async getEmployeePolicies(userId: string, date?: string) {
     const url = date
       ? `/api/policies/employee/${userId}?date=${date}`
@@ -1194,6 +1337,16 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  // Rich policy-management (document-style) methods
+  async getManagedPolicies(params?: { status?: string; type?: string }) {
+    const search = new URLSearchParams();
+    if (params?.status) search.append('status', params.status);
+    if (params?.type) search.append('type', params.type);
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const res = await this.request(`/api/policy-management/policies${suffix}`);
+    return res?.policies ?? [];
   }
 
   // Promotion methods
@@ -1397,7 +1550,6 @@ class ApiClient {
     return response.blob();
   }
   // Workflows
-  // Workflows
   async listWorkflows() {
     return this.request('/api/workflows');
   }
@@ -1424,6 +1576,328 @@ class ApiClient {
     return this.request(`/api/workflows/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  // Roster scheduling endpoints
+  async getRosterTemplates() {
+    return this.request('/api/roster/templates');
+  }
+
+  async createRosterTemplate(data: {
+    name: string;
+    timezone?: string;
+    description?: string;
+    coveragePlan: Array<Record<string, any>>;
+    restRules?: Record<string, any>;
+    constraintRules?: Record<string, any>;
+    preferenceRules?: Record<string, any>;
+    metadata?: Record<string, any>;
+  }) {
+    return this.request('/api/roster/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateRosterTemplate(
+    id: string,
+    data: Partial<{
+      name: string;
+      timezone: string;
+      description: string;
+      coveragePlan: Array<Record<string, any>>;
+      restRules: Record<string, any>;
+      constraintRules: Record<string, any>;
+      preferenceRules: Record<string, any>;
+      metadata: Record<string, any>;
+    }>
+  ) {
+    return this.request(`/api/roster/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteRosterTemplate(id: string) {
+    return this.request(`/api/roster/templates/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getRosterRuns() {
+    return this.request('/api/roster/runs');
+  }
+
+  async startRosterRun(data: {
+    templateId?: string;
+    startDate: string;
+    endDate: string;
+    preserveManualEdits?: boolean;
+    seed?: number | string | null;
+    name?: string;
+    existingScheduleId?: string | null;
+  }) {
+    return this.request('/api/roster/runs', {
+      method: 'POST',
+      body: JSON.stringify({
+        templateId: data.templateId,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        preserveManualEdits: data.preserveManualEdits,
+        seed: data.seed ?? null,
+        name: data.name,
+        existingScheduleId: data.existingScheduleId,
+      }),
+    });
+  }
+
+  async getRosterSchedules(params?: { status?: string; start_date?: string; end_date?: string }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.append('status', params.status);
+    if (params?.start_date) query.append('start_date', params.start_date);
+    if (params?.end_date) query.append('end_date', params.end_date);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/api/roster/schedules${suffix}`);
+  }
+
+  async getRosterSchedule(scheduleId: string) {
+    return this.request(`/api/roster/schedules/${scheduleId}`);
+  }
+
+  async updateRosterSlot(
+    scheduleId: string,
+    slotId: string,
+    data: {
+      assigned_employee_id?: string | null;
+      manual_lock?: boolean;
+    }
+  ) {
+    return this.request(`/api/roster/schedules/${scheduleId}/slots/${slotId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async publishRosterSchedule(scheduleId: string) {
+    return this.request(`/api/roster/schedules/${scheduleId}/publish`, {
+      method: 'POST',
+    });
+  }
+
+  // Legacy scheduling endpoints (back-compat)
+  async getShiftTemplates(params?: { team_id?: string; branch_id?: string }) {
+    const query = new URLSearchParams();
+    if (params?.team_id) query.append('team_id', params.team_id);
+    if (params?.branch_id) query.append('branch_id', params.branch_id);
+    return this.request(`/api/scheduling/templates?${query.toString()}`);
+  }
+
+  async createShiftTemplate(data: {
+    name: string;
+    start_time: string;
+    end_time: string;
+    shift_type: 'day' | 'evening' | 'night' | 'custom';
+    duration_hours?: number;
+    crosses_midnight?: boolean;
+    is_default?: boolean;
+    team_id?: string;
+    branch_id?: string;
+  }) {
+    return this.request('/api/scheduling/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateShiftTemplate(
+    id: string,
+    data: Partial<{
+      name: string;
+      start_time: string;
+      end_time: string;
+      shift_type: string;
+      duration_hours: number;
+      crosses_midnight: boolean;
+      is_default: boolean;
+      team_id: string;
+      branch_id: string;
+      branch_id: string;
+    }>
+  ) {
+    return this.request(`/api/scheduling/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteShiftTemplate(id: string) {
+    return this.request(`/api/scheduling/templates/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getRuleSets() {
+    return this.request('/api/scheduling/rule-sets');
+  }
+
+  async createRuleSet(data: {
+    name: string;
+    description?: string;
+    is_default?: boolean;
+    rules: Array<{
+      id: string;
+      name: string;
+      type: 'hard' | 'soft';
+      weight?: number;
+      params?: Record<string, any>;
+    }>;
+  }) {
+    return this.request('/api/scheduling/rule-sets', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateRuleSet(id: string, data: { name: string; description?: string; is_default?: boolean; rules: Array<any> }) {
+    return this.request(`/api/scheduling/rule-sets/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getAvailability(params?: { employee_id?: string; date_from?: string; date_to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.employee_id) query.append('employee_id', params.employee_id);
+    if (params?.date_from) query.append('date_from', params.date_from);
+    if (params?.date_to) query.append('date_to', params.date_to);
+    return this.request(`/api/scheduling/availability?${query.toString()}`);
+  }
+
+  async createAvailability(data: {
+    employee_id: string;
+    date: string;
+    start_time?: string;
+    end_time?: string;
+    availability_type: 'available' | 'unavailable' | 'preferred' | 'blackout';
+    shift_template_id?: string;
+    is_pinned?: boolean;
+    is_forbidden?: boolean;
+    notes?: string;
+  }) {
+    return this.request('/api/scheduling/availability', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async runScheduler(data: {
+    week_start_date: string;
+    week_end_date: string;
+    rule_set_id: string;
+    algorithm: 'greedy' | 'ilp' | 'simulated_annealing';
+    template_ids?: string[];
+    employee_ids?: string[];
+    branch_id?: string;
+    team_id?: string;
+    seed?: number;
+    replace_schedule_id?: string;
+  }) {
+    return this.request('/api/scheduling/schedules/run', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getSchedules(params?: { week_start?: string; week_end?: string; status?: string }) {
+    const query = new URLSearchParams();
+    if (params?.week_start) query.append('week_start', params.week_start);
+    if (params?.week_end) query.append('week_end', params.week_end);
+    if (params?.status) query.append('status', params.status);
+    return this.request(`/api/scheduling/schedules?${query.toString()}`);
+  }
+
+  async getSchedule(id: string) {
+    return this.request(`/api/scheduling/schedules/${id}`);
+  }
+
+  async approveSchedule(id: string) {
+    return this.request(`/api/scheduling/schedules/${id}/approve`, {
+      method: 'PATCH',
+    });
+  }
+
+  async deleteSchedule(id: string) {
+    return this.request(`/api/scheduling/schedules/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async manualEditSchedule(
+    id: string,
+    data: {
+      assignments: Array<{
+        id?: string;
+        employee_id: string;
+        shift_date: string;
+        shift_template_id: string;
+        start_time: string;
+        end_time: string;
+      }>;
+      reason?: string;
+    }
+  ) {
+    return this.request(`/api/scheduling/schedules/${id}/manual-edit`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createException(data: {
+    schedule_id?: string;
+    employee_id: string;
+    rule_id: string;
+    exception_type: 'allow_violation' | 'force_assignment' | 'prevent_assignment';
+    reason: string;
+  }) {
+    return this.request('/api/scheduling/exceptions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async approveException(id: string) {
+    return this.request(`/api/scheduling/exceptions/${id}/approve`, {
+      method: 'PATCH',
+    });
+  }
+
+  async exportScheduleCSV(id: string) {
+    const url = `${this.baseURL}/api/scheduling/schedules/${id}/export/csv`;
+    const headers: HeadersInit = {};
+    if (this._token) {
+      headers['Authorization'] = `Bearer ${this._token}`;
+    }
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      throw new Error('Failed to export schedule');
+    }
+    return response.blob();
+  }
+
+  async getCalendar(params: {
+    start_date: string;
+    end_date: string;
+    employee_id?: string;
+    project_id?: string;
+    view_type?: 'employee' | 'organization';
+  }) {
+    const query = new URLSearchParams();
+    query.append('start_date', params.start_date);
+    query.append('end_date', params.end_date);
+    if (params.employee_id) query.append('employee_id', params.employee_id);
+    if (params.project_id) query.append('project_id', params.project_id);
+    if (params.view_type) query.append('view_type', params.view_type);
+    return this.request(`/api/calendar?${query.toString()}`);
   }
 }
 

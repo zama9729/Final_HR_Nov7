@@ -9,7 +9,27 @@ import {
 } from '../services/termination-settlement.js';
 
 const router = express.Router();
-const FEATURE_ENABLED = process.env.TERMINATION_REHIRE_V1 !== 'false';
+const FLAG_CACHE_MS = 60 * 1000;
+let cachedTerminationFlag = null;
+let cachedFlagFetchedAt = 0;
+
+const isTerminationFeatureEnabled = async () => {
+  const now = Date.now();
+  if (cachedTerminationFlag !== null && now - cachedFlagFetchedAt < FLAG_CACHE_MS) {
+    return cachedTerminationFlag;
+  }
+
+  const { rows } = await query(
+    `SELECT is_enabled FROM feature_flags WHERE feature_key = 'termination_feature' LIMIT 1`
+  );
+  const isEnabled =
+    rows[0]?.is_enabled ??
+    (process.env.TERMINATION_FEATURE_ENABLED === 'true' ||
+      process.env.TERMINATION_REHIRE_V1 === 'true');
+  cachedTerminationFlag = Boolean(isEnabled);
+  cachedFlagFetchedAt = now;
+  return cachedTerminationFlag;
+};
 
 const getTenantId = async (userId) => {
   const { rows } = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
@@ -86,10 +106,19 @@ const getNextStatus = (type, currentStatus) => {
 };
 
 router.use((req, res, next) => {
-  if (!FEATURE_ENABLED) {
-    return res.status(404).json({ error: 'termination_rehire_v1 feature flag disabled' });
-  }
-  next();
+  isTerminationFeatureEnabled()
+    .then((enabled) => {
+      if (!enabled) {
+        return res
+          .status(410)
+          .json({ error: 'Termination & rehire workflows are archived for this tenant.' });
+      }
+      return next();
+    })
+    .catch((error) => {
+      console.error('Termination feature flag check failed:', error);
+      return res.status(500).json({ error: 'Termination feature flag check failed' });
+    });
 });
 
 router.get('/', authenticateToken, async (req, res) => {

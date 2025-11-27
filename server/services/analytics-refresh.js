@@ -1,8 +1,10 @@
 import { query } from '../db/pool.js';
 
+const REFRESH_SQL = 'REFRESH MATERIALIZED VIEW analytics.org_activity_summary';
+
 export async function refreshAnalyticsViews() {
   try {
-    await query('SELECT analytics.refresh_org_views()');
+    await query(REFRESH_SQL);
   } catch (error) {
     console.error('Failed to refresh analytics views', error);
     throw error;
@@ -26,5 +28,3 @@ export async function scheduleAnalyticsRefresh() {
     }
   });
 }
-
-

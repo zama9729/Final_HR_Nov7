@@ -1,5 +1,6 @@
 import express from 'express';
 import { query, queryWithOrg } from '../db/pool.js';
+import { audit } from '../utils/auditLog.js';
 import { authenticateToken, requireRole, requireSuperadmin } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
 import { Parser } from 'json2csv';
@@ -208,24 +209,20 @@ router.delete('/orgs/:orgId/reset', authenticateToken, setTenantContext, require
       await query('DELETE FROM profiles WHERE tenant_id = $1 AND id != $2', [orgId, adminUserId]);
       */
 
-      // Log audit (before deleting audit_logs)
-      await query(
-        `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          orgId,
-          adminUserId,
-          'reset',
-          'organization',
-          orgId,
-          JSON.stringify({ 
-            org_name: org.name,
-            org_slug: org.slug,
-            reset_by: adminUserId,
-            timestamp: new Date().toISOString()
-          })
-        ]
-      );
+      // Log audit (before resetting org)
+      await audit({
+        actorId: adminUserId,
+        action: 'organization_reset',
+        entityType: 'organization',
+        entityId: orgId,
+        details: {
+          org_name: org.name,
+          org_slug: org.slug,
+          reset_by: adminUserId,
+          timestamp: new Date().toISOString(),
+        },
+        scope: 'org',
+      });
 
       await query('COMMIT');
 

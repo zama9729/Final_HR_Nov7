@@ -6,12 +6,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, Edit, Trash2, Users } from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Plus, Edit, ShieldCheck, Filter, Search, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 
 interface PolicyCatalog {
@@ -57,6 +58,7 @@ export default function PoliciesManagement() {
   const [selectedEmployee, setSelectedEmployee] = useState<string>("");
   const [employees, setEmployees] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState("org");
+  const [libraryPolicies, setLibraryPolicies] = useState<any[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editPolicy, setEditPolicy] = useState<OrgPolicy | null>(null);
   const [formData, setFormData] = useState({
@@ -65,11 +67,13 @@ export default function PoliciesManagement() {
     effective_from: new Date().toISOString().split('T')[0],
     effective_to: "",
   });
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     fetchCatalog();
     fetchOrgPolicies();
     fetchEmployees();
+    fetchLibraryPolicies();
   }, []);
 
   useEffect(() => {
@@ -88,6 +92,16 @@ export default function PoliciesManagement() {
         description: error.message || "Failed to fetch policy catalog",
         variant: "destructive",
       });
+    }
+  };
+
+  const fetchLibraryPolicies = async () => {
+    try {
+      const data = await api.getManagedPolicies({});
+      const list = Array.isArray(data?.policies) ? data.policies : [];
+      setLibraryPolicies(list);
+    } catch (error: any) {
+      console.error("Error fetching rich policies:", error);
     }
   };
 
@@ -213,27 +227,59 @@ export default function PoliciesManagement() {
     }, {} as Record<string, (OrgPolicy | EmployeePolicy)[]>);
   };
 
+  const filteredOrgPolicies = useMemo(() => {
+    if (!search.trim()) return orgPolicies;
+    const term = search.toLowerCase();
+    return orgPolicies.filter((p) =>
+      (p.display_name || "").toLowerCase().includes(term) ||
+      (p.category || "").toLowerCase().includes(term) ||
+      (p.policy_key || "").toLowerCase().includes(term)
+    );
+  }, [orgPolicies, search]);
+
   return (
     <AppLayout>
       <div className="p-6 space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Policies Management</h1>
-          <p className="text-muted-foreground">Manage organization and employee policies</p>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-slate-50 shadow-sm">
+              <ShieldCheck className="h-3 w-3 text-emerald-300" />
+              Policy Management
+            </div>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight">Policies</h1>
+            <p className="text-sm text-muted-foreground">
+              Configure organization-wide rules and fine-tune employee overrides.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative w-full md:w-64">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Search policies…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+          </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList>
+          <TabsList className="bg-slate-100 dark:bg-slate-900/40 flex flex-wrap">
             <TabsTrigger value="org">Organization Policies</TabsTrigger>
             <TabsTrigger value="employee">Employee Overrides</TabsTrigger>
+            <TabsTrigger value="library">Policy Library</TabsTrigger>
           </TabsList>
 
           <TabsContent value="org" className="space-y-4">
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <div>
                     <CardTitle>Organization Policies</CardTitle>
-                    <CardDescription>Policies that apply to all employees</CardDescription>
+                    <CardDescription>
+                      Define default rules for leave, working hours, benefits, and more.
+                    </CardDescription>
                   </div>
                   <Button onClick={() => handleOpenDialog()}>
                     <Plus className="mr-2 h-4 w-4" />
@@ -242,9 +288,17 @@ export default function PoliciesManagement() {
                 </div>
               </CardHeader>
               <CardContent>
-                {Object.entries(policiesByCategory(orgPolicies)).map(([category, categoryPolicies]) => (
+                {Object.entries(policiesByCategory(filteredOrgPolicies)).map(([category, categoryPolicies]) => (
                   <div key={category} className="mb-6">
-                    <h3 className="text-lg font-semibold mb-3">{category}</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-semibold flex items-center gap-2">
+                        {category}
+                        <Badge variant="outline" className="text-xs">
+                          {categoryPolicies.length} policy
+                          {categoryPolicies.length !== 1 ? "ies" : ""}
+                        </Badge>
+                      </h3>
+                    </div>
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -257,8 +311,15 @@ export default function PoliciesManagement() {
                       </TableHeader>
                       <TableBody>
                         {categoryPolicies.map((policy) => (
-                          <TableRow key={policy.id}>
-                            <TableCell className="font-medium">{policy.display_name}</TableCell>
+                          <TableRow key={policy.id} className="align-top">
+                            <TableCell className="font-medium">
+                              <div className="flex flex-col gap-0.5">
+                                <span>{policy.display_name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {policy.policy_key}
+                                </span>
+                              </div>
+                            </TableCell>
                             <TableCell>
                               {policy.value_type === 'JSON' ? (
                                 <pre className="text-xs bg-muted p-2 rounded max-w-xs overflow-auto">
@@ -270,15 +331,48 @@ export default function PoliciesManagement() {
                             </TableCell>
                             <TableCell>{new Date(policy.effective_from).toLocaleDateString()}</TableCell>
                             <TableCell>
-                              {policy.effective_to ? new Date(policy.effective_to).toLocaleDateString() : 'Indefinite'}
+                              {policy.effective_to ? (
+                                <span>{new Date(policy.effective_to).toLocaleDateString()}</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Indefinite</span>
+                              )}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="space-x-1">
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleOpenDialog(policy as OrgPolicy)}
                               >
                                 <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-500 hover:text-red-600"
+                                onClick={async () => {
+                                  if (!confirm("Delete this policy? This cannot be undone.")) {
+                                    return;
+                                  }
+                                  try {
+                                    setLoading(true);
+                                    await api.deleteOrgPolicy(policy.id);
+                                    toast({
+                                      title: "Deleted",
+                                      description: "Organization policy deleted.",
+                                    });
+                                    fetchOrgPolicies();
+                                  } catch (err: any) {
+                                    toast({
+                                      title: "Error",
+                                      description: err?.message || "Failed to delete policy",
+                                      variant: "destructive",
+                                    });
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </TableCell>
                           </TableRow>
@@ -373,11 +467,111 @@ export default function PoliciesManagement() {
                       </div>
                     ))}
                     {employeePolicies.length === 0 && (
-                      <p className="text-muted-foreground text-center py-8">No overrides for this employee.</p>
+                      <p className="text-muted-foreground text-center py-8">
+                        No overrides for this employee.
+                      </p>
                     )}
                   </>
                 ) : (
-                  <p className="text-muted-foreground text-center py-8">Select an employee to view their policy overrides.</p>
+                  <p className="text-muted-foreground text-center py-8">
+                    Select an employee to view their policy overrides.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* New document-style Policy Library */}
+          <TabsContent value="library" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <CardTitle>Policy Library</CardTitle>
+                    <CardDescription>
+                      Rich, versioned policy documents with PDF export.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => (window.location.href = "/policies/editor/new")}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    New Document Policy
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {libraryPolicies.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-12">
+                    No document-style policies created yet. Use{" "}
+                    <span className="font-semibold">New Document Policy</span> to add one.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Title</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Version</TableHead>
+                        <TableHead>Effective From</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {libraryPolicies.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{p.title}</span>
+                              <span className="text-xs text-muted-foreground">{p.key}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={p.status === "published" ? "default" : "secondary"}
+                              className="text-xs"
+                            >
+                              {p.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>v{p.version}</TableCell>
+                          <TableCell>
+                            {p.effective_from
+                              ? new Date(p.effective_from).toLocaleDateString()
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                (window.location.href = `/policies/editor/${p.id}`)
+                              }
+                            >
+                              <Edit className="h-3 w-3 mr-1" />
+                              Edit
+                            </Button>
+                            {p.status === "published" && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  window.open(
+                                    `/api/policy-management/policies/${p.id}/download`,
+                                    "_blank"
+                                  )
+                                }
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                PDF
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>

@@ -41,7 +41,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Progress as ProgressBar } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { format } from 'date-fns';
+import { format, differenceInCalendarDays } from 'date-fns';
+import { DocumentReviewPanel } from '@/components/hr/DocumentReviewPanel';
+import { BackgroundCheckPanel } from '@/components/hr/BackgroundCheckPanel';
+import { ProbationPanel } from '@/components/hr/ProbationPanel';
 
 interface EmployeeData {
   id: string;
@@ -148,6 +151,7 @@ export default function EmployeeDetail() {
     reportingManagerId: '',
   });
   const [managers, setManagers] = useState<Array<{ id: string; name: string }>>([]);
+  const isHrUser = userRole ? ['hr', 'hrbp', 'hradmin', 'ceo', 'director', 'admin'].includes(userRole) : false;
 
   useEffect(() => {
     (async () => {
@@ -397,6 +401,12 @@ export default function EmployeeDetail() {
                   <div>
                     <h2 className="text-2xl font-bold">{getFullName()}</h2>
                     <p className="text-muted-foreground">{employee.position || 'Employee'}</p>
+                    {employee.verified_at && (
+                      <p className="text-xs text-sky-600 flex items-center gap-1 mt-1">
+                        <UserCheck className="h-3 w-3" />
+                        Verified on {format(new Date(employee.verified_at), 'MMM dd, yyyy')}
+                      </p>
+                    )}
                   </div>
                 </div>
                 
@@ -457,6 +467,22 @@ export default function EmployeeDetail() {
               <Briefcase className="mr-2 h-4 w-4" />
               Past Projects
             </TabsTrigger>
+            {isHrUser && (
+              <>
+                <TabsTrigger value="documents">
+                  <FileText className="mr-2 h-4 w-4" />
+                  Documents
+                </TabsTrigger>
+                <TabsTrigger value="checks">
+                  <UserCheck className="mr-2 h-4 w-4" />
+                  Background
+                </TabsTrigger>
+                <TabsTrigger value="probation">
+                  <Activity className="mr-2 h-4 w-4" />
+                  Probation
+                </TabsTrigger>
+              </>
+            )}
           </TabsList>
 
           <TabsContent value="about">
@@ -545,6 +571,30 @@ export default function EmployeeDetail() {
                   )}
                 </CardContent>
               </Card>
+
+          {employee?.probation && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5" />
+                  Probation
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Status</span>
+                  <Badge variant="secondary">{employee.probation.status}</Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Ends</span>
+                  <span className="font-medium">{format(new Date(employee.probation.probation_end), 'MMM dd, yyyy')}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {differenceInCalendarDays(new Date(employee.probation.probation_end), new Date())} days remaining
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
               {/* Financial Information */}
               {employee?.onboarding_data && (
@@ -699,6 +749,19 @@ export default function EmployeeDetail() {
               />
             )}
           </TabsContent>
+          {isHrUser && employee?.id && (
+            <>
+              <TabsContent value="documents">
+                <DocumentReviewPanel employeeId={employee.id} />
+              </TabsContent>
+              <TabsContent value="checks">
+                <BackgroundCheckPanel employeeId={employee.id} />
+              </TabsContent>
+              <TabsContent value="probation">
+                <ProbationPanel employeeId={employee.id} canEdit={isHrUser} />
+              </TabsContent>
+            </>
+          )}
         </Tabs>
       </div>
     </AppLayout>

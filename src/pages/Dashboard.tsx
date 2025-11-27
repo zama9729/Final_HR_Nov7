@@ -6,14 +6,26 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Calendar, Bot } from "lucide-react";
-import { format, startOfWeek, endOfWeek, isFuture, parseISO } from "date-fns";
+import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity } from "lucide-react";
+import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay } from "date-fns";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { Badge } from "@/components/ui/badge";
+import CalendarPanel from "@/components/dashboard/CalendarPanel";
 
 interface DashboardStats {
   timesheetHours: number;
   leaveBalance: number;
   nextHoliday: { date: string; name: string } | null;
   projects: Array<{ id: string; name: string; category?: string }>;
+}
+
+interface UpcomingShift {
+  id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  template_name: string;
+  shift_type: string;
 }
 
 export default function Dashboard() {
@@ -28,12 +40,26 @@ export default function Dashboard() {
     projects: [],
   });
   const [presenceStatus, setPresenceStatus] = useState<string>('online');
+  const [upcomingShifts, setUpcomingShifts] = useState<UpcomingShift[]>([]);
+  const [loadingShifts, setLoadingShifts] = useState(false);
+  const [attendanceTrends, setAttendanceTrends] = useState<Array<{ date: string; hours: number }>>([]);
+  const [loadingTrends, setLoadingTrends] = useState(false);
 
   useEffect(() => {
     checkOnboardingStatus();
     fetchDashboardStats();
     fetchPresenceStatus();
   }, [user]);
+
+  useEffect(() => {
+    if (userRole) {
+      fetchUpcomingShifts();
+      fetchAttendanceTrends();
+    } else {
+      setUpcomingShifts([]);
+      setAttendanceTrends([]);
+    }
+  }, [userRole]);
 
   const fetchDashboardStats = async () => {
     if (!user) return;
@@ -164,7 +190,8 @@ export default function Dashboard() {
   };
 
   const getFirstName = () => {
-    return user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'User';
+    const metadata = (user as any)?.user_metadata;
+    return metadata?.first_name || user?.email?.split('@')[0] || 'User';
   };
 
   const formatHolidayDate = (dateStr: string) => {
@@ -176,6 +203,9 @@ export default function Dashboard() {
     }
   };
 
+  const isEmployee = userRole === 'employee';
+  const showTimesheetCard = !isEmployee;
+
   const handleSubmitTimesheet = () => {
     navigate('/timesheets');
   };
@@ -184,11 +214,168 @@ export default function Dashboard() {
     navigate('/leaves');
   };
 
+  const formatShiftTime = (time: string) => {
+    if (!time) return '';
+    // Convert 24h time to 12h format
+    const [hours, minutes] = time.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  const getShiftDateLabel = (dateStr: string) => {
+    const date = parseISO(dateStr);
+    if (isToday(date)) return 'Today';
+    if (isTomorrow(date)) return 'Tomorrow';
+    return format(date, 'EEE, MMM d');
+  };
+
+  const nextShift = upcomingShifts[0];
+  const shiftVisual = nextShift
+    ? nextShift.shift_type === 'night'
+      ? {
+          label: 'Night Shift',
+          textColor: 'text-indigo-700 dark:text-indigo-200',
+          badgeBg: 'bg-indigo-100 dark:bg-indigo-500/20',
+          border: 'border-indigo-200 dark:border-indigo-500/40',
+          icon: <MoonStar className="h-5 w-5 text-indigo-600 dark:text-indigo-300" />,
+        }
+      : {
+          label: 'Day Shift',
+          textColor: 'text-sky-700 dark:text-sky-200',
+          badgeBg: 'bg-amber-100 dark:bg-amber-500/20',
+          border: 'border-amber-200 dark:border-amber-400/40',
+          icon: <SunMedium className="h-5 w-5 text-amber-500 dark:text-amber-300" />,
+        }
+    : null;
+
+  const fetchUpcomingShifts = async () => {
+    if (!user) {
+      setUpcomingShifts([]);
+      return;
+    }
+    
+    try {
+      setLoadingShifts(true);
+      const employeeId = await api.getEmployeeId();
+      if (!employeeId?.id) {
+        setLoadingShifts(false);
+        return;
+      }
+
+      // Get upcoming shifts (next 7 days)
+      const today = new Date();
+      const nextWeek = addDays(today, 7);
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/scheduling/employee/${employeeId.id}/shifts?start_date=${format(today, 'yyyy-MM-dd')}&end_date=${format(nextWeek, 'yyyy-MM-dd')}`,
+        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const sorted = (data.shifts || []).sort((a: UpcomingShift, b: UpcomingShift) => {
+          const dateCompare = new Date(a.shift_date).getTime() - new Date(b.shift_date).getTime();
+          if (dateCompare !== 0) return dateCompare;
+          return a.start_time.localeCompare(b.start_time);
+        });
+        setUpcomingShifts(sorted);
+      } else {
+        setUpcomingShifts([]);
+      }
+    } catch (error) {
+      console.error('Error fetching upcoming shifts:', error);
+    } finally {
+      setLoadingShifts(false);
+    }
+  };
+
+  const fetchAttendanceTrends = async () => {
+    if (!user) {
+      setAttendanceTrends([]);
+      return;
+    }
+
+    try {
+      setLoadingTrends(true);
+      const employeeId = await api.getEmployeeId();
+      if (!employeeId?.id) {
+        setAttendanceTrends([]);
+        return;
+      }
+
+      // Get last 30 days of attendance data
+      const today = startOfDay(new Date());
+      const thirtyDaysAgo = subDays(today, 30);
+      
+      // Fetch timesheet data for the last 30 days
+      const weekStart = format(thirtyDaysAgo, 'yyyy-MM-dd');
+      const weekEnd = format(today, 'yyyy-MM-dd');
+      
+      // Group by week for better visualization
+      const trends: Array<{ date: string; hours: number }> = [];
+      const weeks: Record<string, number> = {};
+      
+      // Fetch data week by week
+      for (let i = 0; i < 4; i++) {
+        const weekStartDate = subDays(today, (i + 1) * 7);
+        const weekEndDate = subDays(today, i * 7);
+        const weekKey = format(weekStartDate, 'MMM d');
+        
+        try {
+          const timesheet = await api.getTimesheet(
+            format(weekStartDate, 'yyyy-MM-dd'),
+            format(weekEndDate, 'yyyy-MM-dd')
+          );
+          
+          let totalHours = 0;
+          if (timesheet.total_hours !== undefined && timesheet.total_hours !== null) {
+            totalHours = parseFloat(timesheet.total_hours) || 0;
+          } else if (timesheet.entries && Array.isArray(timesheet.entries)) {
+            totalHours = timesheet.entries
+              .filter((entry: any) => !entry.is_holiday)
+              .reduce((total: number, entry: any) => {
+                return total + (parseFloat(entry.hours || 0));
+              }, 0);
+          }
+          
+          weeks[weekKey] = Math.round(totalHours);
+        } catch (error) {
+          console.error(`Error fetching timesheet for week ${weekKey}:`, error);
+          weeks[weekKey] = 0;
+        }
+      }
+      
+      // Convert to array format for chart (already sorted by week order)
+      const sortedWeeks = Object.entries(weeks)
+        .map(([date, hours]) => ({ date, hours }));
+      
+      setAttendanceTrends(sortedWeeks);
+    } catch (error) {
+      console.error('Error fetching attendance trends:', error);
+      setAttendanceTrends([]);
+    } finally {
+      setLoadingTrends(false);
+    }
+  };
+
+
   if (isLoading) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="animate-pulse">Loading...</div>
+        <div className="flex flex-col gap-6 p-6 animate-pulse">
+          <div className="h-8 w-1/3 rounded bg-muted" />
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {[...Array(4)].map((_, idx) => (
+              <div key={idx} className="h-32 rounded-lg bg-muted" />
+            ))}
+          </div>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="h-64 rounded-lg bg-muted" />
+            <div className="h-64 rounded-lg bg-muted" />
+          </div>
+          <div className="h-[460px] rounded-lg bg-muted" />
         </div>
       </AppLayout>
     );
@@ -205,23 +392,25 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid gap-4 md:grid-cols-3">
+        {/* Main Stats Grid */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {/* Timesheet Card */}
-          <Card className="shadow-sm hover:shadow-md transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Timesheet</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-4xl font-bold mb-4">{stats.timesheetHours}</div>
-              <Button 
-                onClick={handleSubmitTimesheet}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                Submit
-              </Button>
-            </CardContent>
-          </Card>
+          {showTimesheetCard && (
+            <Card className="shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Timesheet</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-4xl font-bold mb-4">{stats.timesheetHours}</div>
+                <Button 
+                  onClick={handleSubmitTimesheet}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  Submit
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Leave Balance Card */}
           <Card className="shadow-sm hover:shadow-md transition-shadow">
@@ -233,7 +422,7 @@ export default function Dashboard() {
               <Button 
                 onClick={handleApplyLeave}
                 variant="outline"
-                className="w-full border-blue-200 text-blue-600 hover:bg-blue-50"
+                className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950 font-semibold"
               >
                 Apply
               </Button>
@@ -259,6 +448,49 @@ export default function Dashboard() {
                   <p className="text-sm text-muted-foreground mb-4">holiday</p>
                 </>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Shifts Card */}
+          <Card className="shadow-sm hover:shadow-md transition-shadow dark:border-slate-800 dark:bg-slate-900">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                {isEmployee ? 'My Shifts' : 'Shift Schedule'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {loadingShifts ? (
+                  <div className="text-lg text-muted-foreground">Loading next shift…</div>
+                ) : nextShift ? (
+                  <div className={`relative rounded-2xl border ${shiftVisual?.border} bg-white dark:bg-slate-900 shadow-inner p-4 pl-14`}>
+                    <div className={`absolute -top-3 -left-2 h-12 w-12 rounded-full ${shiftVisual?.badgeBg} flex items-center justify-center shadow`}>
+                      {shiftVisual?.icon}
+                    </div>
+                    <div className={`text-2xl font-bold ${shiftVisual?.textColor}`}>
+                      {shiftVisual?.label}
+                    </div>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {getShiftDateLabel(nextShift.shift_date)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {formatShiftTime(nextShift.start_time)} – {formatShiftTime(nextShift.end_time)}
+                    </p>
+                    <Badge variant="outline" className="text-[11px] font-semibold dark:border-slate-700">
+                      {nextShift.template_name}
+                    </Badge>
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No upcoming shifts scheduled</div>
+                )}
+                <Button
+                  onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar')}
+                  variant="outline"
+                  className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950 font-semibold"
+                >
+                  {isEmployee ? 'View My Shifts' : 'View Calendar'}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -295,24 +527,65 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* AI Assistant */}
+          {/* Attendance Trends */}
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-semibold">AI Assistant</CardTitle>
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Activity className="h-5 w-5 text-blue-600" />
+                Attendance Trends
+              </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col items-center justify-center py-8">
-              <Bot className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-sm text-muted-foreground mb-4 text-center">
-                Need help? Ask AI to assist you.
-              </p>
-              <Button 
-                onClick={() => navigate('/ai-assistant')}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                Ask AI
-              </Button>
+            <CardContent>
+              {loadingTrends ? (
+                <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    Loading trends...
+                  </div>
+                </div>
+              ) : attendanceTrends.length === 0 ? (
+                <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                  <p className="text-sm">No attendance data available</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={attendanceTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+                    <XAxis 
+                      hide={true}
+                    />
+                    <YAxis 
+                      hide={true}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'white', 
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '6px',
+                        fontSize: '12px'
+                      }}
+                      formatter={(value: any) => [`${value} hours`, 'Hours']}
+                      labelFormatter={() => ''}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="hours" 
+                      stroke="#3b82f6" 
+                      strokeWidth={3}
+                      dot={false}
+                      activeDot={{ r: 6, fill: "#3b82f6" }}
+                      name="Hours"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
+        </div>
+
+        {/* Unified Team Calendar */}
+        <div className="pt-2">
+          <CalendarPanel />
         </div>
       </div>
     </AppLayout>

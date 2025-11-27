@@ -1,6 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { query, queryWithOrg } from '../db/pool.js';
+import { audit } from '../utils/auditLog.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
 import { sendInviteEmail } from '../services/email.js';
@@ -141,19 +142,20 @@ router.post('/invite', authenticateToken, setTenantContext, requireRole('hr', 'c
     }
 
     // Log audit
-    await queryWithOrg(
-      `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
+    await audit({
+      actorId: req.user.id,
+      action: 'invite_users',
+      entityType: 'users',
+      entityId: null,
+      details: {
         orgId,
-        req.user.id,
-        'invite_users',
-        'users',
-        null,
-        JSON.stringify({ emails, role, results, errors })
-      ],
-      orgId
-    );
+        emails,
+        role,
+        results,
+        errors,
+      },
+      scope: 'org',
+    });
 
     res.status(201).json({
       success: true,

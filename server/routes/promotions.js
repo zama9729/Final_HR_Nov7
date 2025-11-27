@@ -1,5 +1,6 @@
 import express from 'express';
 import { query, queryWithOrg } from '../db/pool.js';
+import { audit } from '../utils/auditLog.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
 
@@ -141,19 +142,20 @@ router.post('/cycles', authenticateToken, setTenantContext, requireRole('hr', 'c
     );
 
     // Log audit
-    await queryWithOrg(
-      `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
+    await audit({
+      actorId: req.user.id,
+      action: 'promotion_cycle_create',
+      entityType: 'promotion_cycle',
+      entityId: result.rows[0].id,
+      details: {
         orgId,
-        req.user.id,
-        'create',
-        'promotion_cycle',
-        result.rows[0].id,
-        JSON.stringify({ name, period, start_date, end_date })
-      ],
-      orgId
-    );
+        name,
+        period,
+        start_date,
+        end_date,
+      },
+      scope: 'org',
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -244,19 +246,20 @@ router.post('/evaluations', authenticateToken, setTenantContext, requireRole('ma
     );
 
     // Log audit
-    await queryWithOrg(
-      `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
+    await audit({
+      actorId: managerId,
+      action: 'promotion_evaluation_submit',
+      entityType: 'promotion_evaluation',
+      entityId: result.rows[0].id,
+      details: {
         orgId,
-        managerId,
-        'create',
-        'promotion_evaluation',
-        result.rows[0].id,
-        JSON.stringify({ cycle_id, employee_id, rating, recommendation })
-      ],
-      orgId
-    );
+        cycle_id,
+        employee_id,
+        rating,
+        recommendation,
+      },
+      scope: 'org',
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -299,19 +302,17 @@ router.post('/review/:id', authenticateToken, setTenantContext, requireRole('hr'
     );
 
     // Log audit
-    await queryWithOrg(
-      `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
+    await audit({
+      actorId: req.user.id,
+      action: 'promotion_evaluation_review',
+      entityType: 'promotion_evaluation',
+      entityId: id,
+      details: {
         orgId,
-        req.user.id,
-        'review',
-        'promotion_evaluation',
-        id,
-        JSON.stringify({ cycle_id: evalCheck.rows[0].cycle_id })
-      ],
-      orgId
-    );
+        cycle_id: evalCheck.rows[0].cycle_id,
+      },
+      scope: 'org',
+    });
 
     res.json({ success: true, message: 'Promotion evaluation reviewed' });
   } catch (error) {
@@ -363,23 +364,19 @@ router.post('/approve/:id', authenticateToken, setTenantContext, requireRole('ce
     );
 
     // Log audit
-    await queryWithOrg(
-      `INSERT INTO audit_logs (org_id, actor_user_id, action, object_type, object_id, payload)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
+    await audit({
+      actorId: req.user.id,
+      action: 'promotion_evaluation_approve',
+      entityType: 'promotion_evaluation',
+      entityId: id,
+      details: {
         orgId,
-        req.user.id,
-        'approve',
-        'promotion_evaluation',
-        id,
-        JSON.stringify({ 
-          cycle_id: evaluation.cycle_id,
-          employee_id: evaluation.employee_id,
-          recommendation: evaluation.recommendation
-        })
-      ],
-      orgId
-    );
+        cycle_id: evaluation.cycle_id,
+        employee_id: evaluation.employee_id,
+        recommendation: evaluation.recommendation,
+      },
+      scope: 'org',
+    });
 
     res.json({ success: true, message: 'Promotion approved' });
   } catch (error) {
