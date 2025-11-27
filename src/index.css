@@ -164,3 +164,15 @@ All colors MUST be HSL.
 .leaflet-control {
   z-index: 8 !important;
 }
+
+/* Org Chart Animations */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

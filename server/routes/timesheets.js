@@ -528,10 +528,30 @@ router.get('/pending', authenticateToken, async (req, res) => {
     // Fetch entries separately for each timesheet
     const timesheetsWithEntries = await Promise.all(
       result.rows.map(async (timesheet) => {
-        const entriesResult = await query(
-          'SELECT id, work_date, hours, description, project_id, project_type FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date',
-          [timesheet.id]
-        );
+        // Check if project_id column exists, if not use a simpler query
+        let entriesResult;
+        try {
+          entriesResult = await query(
+            'SELECT id, work_date, hours, description, project_id, project_type FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date',
+            [timesheet.id]
+          );
+        } catch (err) {
+          // If project_id doesn't exist, use query without those columns
+          if (err.code === '42703') {
+            entriesResult = await query(
+              'SELECT id, work_date, hours, description FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date',
+              [timesheet.id]
+            );
+            // Add null values for missing columns
+            entriesResult.rows = entriesResult.rows.map(row => ({
+              ...row,
+              project_id: null,
+              project_type: null
+            }));
+          } else {
+            throw err;
+          }
+        }
         return {
           ...timesheet,
           entries: entriesResult.rows || [],
@@ -696,6 +716,21 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const { id: employeeId, tenant_id: tenantId } = empResult.rows[0];
 
+    // Check if project_id and project_type columns exist (cache for this request)
+    let hasProjectColumns = false;
+    try {
+      const columnCheck = await query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'timesheet_entries'
+        AND column_name IN ('project_id', 'project_type')
+      `);
+      hasProjectColumns = columnCheck.rows.length === 2;
+    } catch (err) {
+      // If check fails, assume columns don't exist
+      hasProjectColumns = false;
+    }
+
     await query('BEGIN');
 
     try {
@@ -805,19 +840,34 @@ router.post('/', authenticateToken, async (req, res) => {
             description,
           });
           
-          await query(
-            `INSERT INTO timesheet_entries (timesheet_id, tenant_id, work_date, hours, description, is_holiday, project_id, project_type)
-             VALUES ($1, $2, $3, $4, $5, false, $6, $7)`,
-            [
-              timesheetId,
-              tenantId,
-              workDate,
-              Number(entry.hours) || 0,
-              description,
-              projectId,
-              projectType,
-            ]
-          );
+          if (hasProjectColumns) {
+            await query(
+              `INSERT INTO timesheet_entries (timesheet_id, tenant_id, work_date, hours, description, is_holiday, project_id, project_type)
+               VALUES ($1, $2, $3, $4, $5, false, $6, $7)`,
+              [
+                timesheetId,
+                tenantId,
+                workDate,
+                Number(entry.hours) || 0,
+                description,
+                projectId,
+                projectType,
+              ]
+            );
+          } else {
+            // Insert without project columns
+            await query(
+              `INSERT INTO timesheet_entries (timesheet_id, tenant_id, work_date, hours, description, is_holiday)
+               VALUES ($1, $2, $3, $4, $5, false)`,
+              [
+                timesheetId,
+                tenantId,
+                workDate,
+                Number(entry.hours) || 0,
+                description,
+              ]
+            );
+          }
         }
       }
 

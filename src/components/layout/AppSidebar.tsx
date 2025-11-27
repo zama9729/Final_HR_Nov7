@@ -366,7 +366,9 @@ export function AppSidebar() {
     if (item.roles && (!userRole || !item.roles.includes(userRole))) {
       return false;
     }
-    if (item.feature === 'timesheets' && !isTimesheetMode) return false;
+    // Always show timesheets for admin/hr/ceo/director/manager roles, regardless of capture method
+    const canManageTimesheets = ['admin', 'hr', 'ceo', 'director', 'manager'].includes(userRole || '');
+    if (item.feature === 'timesheets' && !isTimesheetMode && !canManageTimesheets) return false;
     if (item.feature === 'clock' && !isClockMode) return false;
     if (item.sso && !payrollIntegrationEnabled) return false;
     return true;
