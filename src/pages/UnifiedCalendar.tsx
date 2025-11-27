@@ -77,6 +77,7 @@ type CalendarData = {
   holidays: Array<{ id: string; name: string; date: string; region?: string }>;
   leaves: Array<{ id: string; employee_id: string; leave_label: string }>;
   conflicts: Array<{ type: string; date: string; message: string }>;
+  scheduledRanges?: Array<{ start: string; end: string }>;
 };
 
 export default function UnifiedCalendar() {
@@ -232,6 +233,7 @@ export default function UnifiedCalendar() {
     });
     return map;
   }, [filteredEvents]);
+
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -521,11 +523,6 @@ const getEventColor = (event: CalendarEvent | null) => {
                               +{dayEvents.length - 3} more
                             </div>
                           )}
-                          {dayEvents.length === 0 && (
-                            <div className="text-xs text-muted-foreground px-1.5 font-medium">
-                              Week Off
-                            </div>
-                          )}
                         </div>
                       </div>
                     );
@@ -679,11 +676,6 @@ const getEventColor = (event: CalendarEvent | null) => {
                     )}
                   </div>
                 ))}
-                {(!eventsByDate[format(selectedDate, "yyyy-MM-dd")] || eventsByDate[format(selectedDate, "yyyy-MM-dd")].length === 0) && (
-                  <div className="text-center text-muted-foreground py-4">
-                    Week Off
-                  </div>
-                )}
               </div>
             )}
           </DialogContent>

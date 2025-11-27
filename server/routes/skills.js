@@ -4,6 +4,22 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Cache for column existence checks
+let hasTenantIdColumn = null;
+
+async function checkTenantIdColumn(client) {
+  if (hasTenantIdColumn !== null) {
+    return hasTenantIdColumn;
+  }
+  const result = await client.query(`
+    SELECT column_name 
+    FROM information_schema.columns 
+    WHERE table_name = 'certifications' AND column_name = 'tenant_id'
+  `);
+  hasTenantIdColumn = result.rows.length > 0;
+  return hasTenantIdColumn;
+}
+
 // Get skills for employee (CEO/HR can view any employee in same tenant, employee can view own)
 router.get('/employees/:id/skills', authenticateToken, async (req, res) => {
   try {
@@ -235,12 +251,12 @@ router.get('/employees/:id/certifications', authenticateToken, async (req, res) 
       return res.status(403).json({ error: 'Unauthorized: only CEO/HR or employee can view certifications' });
     }
     
-    const result = await withClient(async (client) => {
-      return client.query('SELECT * FROM certifications WHERE employee_id = $1 AND tenant_id = $2 ORDER BY issue_date DESC NULLS LAST', [id, empTenant]);
-    }, empTenant);
+    // Query certifications - tenant isolation is handled by application-level checks above
+    const result = await query('SELECT * FROM certifications WHERE employee_id = $1 ORDER BY issue_date DESC NULLS LAST', [id]);
     res.json(result.rows || []);
   } catch (error) {
     console.error('Error fetching certifications:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ error: error.message || 'Failed to fetch certifications' });
   }
 });
@@ -277,12 +293,23 @@ router.post('/employees/:id/certifications', authenticateToken, async (req, res)
     }
     
     const result = await withClient(async (client) => {
-      return client.query(
-        `INSERT INTO certifications (employee_id, name, issuer, issue_date, expiry_date, file_url, tenant_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         RETURNING *`,
-        [id, name, issuer || null, issue_date || null, expiry_date || null, file_url || null, tenant]
-      );
+      const hasTenantId = await checkTenantIdColumn(client);
+      
+      if (hasTenantId) {
+        return client.query(
+          `INSERT INTO certifications (employee_id, name, issuer, issue_date, expiry_date, file_url, tenant_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           RETURNING *`,
+          [id, name, issuer || null, issue_date || null, expiry_date || null, file_url || null, tenant]
+        );
+      } else {
+        return client.query(
+          `INSERT INTO certifications (employee_id, name, issuer, issue_date, expiry_date, file_url)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           RETURNING *`,
+          [id, name, issuer || null, issue_date || null, expiry_date || null, file_url || null]
+        );
+      }
     }, tenant);
     if (result.rows && result.rows.length > 0) {
       res.json(result.rows[0]);
@@ -325,18 +352,35 @@ router.put('/employees/:id/certifications/:certId', authenticateToken, async (re
     }
     
     const result = await withClient(async (client) => {
-      return client.query(
-        `UPDATE certifications 
-         SET name = COALESCE($1, name),
-             issuer = $2,
-             issue_date = $3,
-             expiry_date = $4,
-             file_url = $5,
-             updated_at = now()
-         WHERE id = $6 AND employee_id = $7 AND tenant_id = $8
-         RETURNING *`,
-        [name || null, issuer || null, issue_date || null, expiry_date || null, file_url || null, certId, id, tenant]
-      );
+      const hasTenantId = await checkTenantIdColumn(client);
+      
+      if (hasTenantId) {
+        return client.query(
+          `UPDATE certifications 
+           SET name = COALESCE($1, name),
+               issuer = $2,
+               issue_date = $3,
+               expiry_date = $4,
+               file_url = $5,
+               updated_at = now()
+           WHERE id = $6 AND employee_id = $7 AND tenant_id = $8
+           RETURNING *`,
+          [name || null, issuer || null, issue_date || null, expiry_date || null, file_url || null, certId, id, tenant]
+        );
+      } else {
+        return client.query(
+          `UPDATE certifications 
+           SET name = COALESCE($1, name),
+               issuer = $2,
+               issue_date = $3,
+               expiry_date = $4,
+               file_url = $5,
+               updated_at = now()
+           WHERE id = $6 AND employee_id = $7
+           RETURNING *`,
+          [name || null, issuer || null, issue_date || null, expiry_date || null, file_url || null, certId, id]
+        );
+      }
     }, tenant);
     
     if (result.rows.length === 0) {
@@ -379,12 +423,23 @@ router.delete('/employees/:id/certifications/:certId', authenticateToken, async 
     }
     
     const result = await withClient(async (client) => {
-      return client.query(
-        `DELETE FROM certifications 
-         WHERE id = $1 AND employee_id = $2 AND tenant_id = $3
-         RETURNING id`,
-        [certId, id, tenant]
-      );
+      const hasTenantId = await checkTenantIdColumn(client);
+      
+      if (hasTenantId) {
+        return client.query(
+          `DELETE FROM certifications 
+           WHERE id = $1 AND employee_id = $2 AND tenant_id = $3
+           RETURNING id`,
+          [certId, id, tenant]
+        );
+      } else {
+        return client.query(
+          `DELETE FROM certifications 
+           WHERE id = $1 AND employee_id = $2
+           RETURNING id`,
+          [certId, id]
+        );
+      }
     }, tenant);
     
     if (result.rows.length === 0) {

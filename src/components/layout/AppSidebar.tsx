@@ -36,6 +36,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrgSetup } from "@/contexts/OrgSetupContext";
@@ -225,6 +226,8 @@ const superUserGroups: NavGroup[] = [
 
 export function AppSidebar() {
   const { user, userRole } = useAuth();
+  const { state } = useSidebar();
+  const isCollapsed = state === "collapsed";
   const { toast } = useToast();
   const [pendingCounts, setPendingCounts] = useState<{
     timesheets: number;
@@ -475,28 +478,30 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="bg-slate-900 border-r border-slate-800">
       <SidebarHeader className="border-b border-slate-800 px-4 py-4">
-        <div className="flex items-center gap-3">
-          <div className="relative flex-shrink-0">
+        <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center' : ''}`}>
+          <div className="relative flex-shrink-0 w-12 h-12">
             {organization?.logo_url ? (
-              <div className="relative h-12 w-12 rounded-lg overflow-hidden border border-slate-700 shadow-sm bg-slate-800">
+              <div className="relative w-full h-full rounded-lg overflow-hidden border border-slate-700 shadow-sm bg-slate-800 flex items-center justify-center">
                 <img
                   src={organization.logo_url}
                   alt={organization.name || 'Organization'}
-                  className="h-full w-full object-cover"
+                  className="w-full h-full object-contain p-1"
                 />
               </div>
             ) : (
-              <div className="h-12 w-12 rounded-lg bg-blue-600 border border-slate-700 flex items-center justify-center shadow-sm">
+              <div className="w-full h-full rounded-lg bg-blue-600 border border-slate-700 flex items-center justify-center shadow-sm">
                 <span className="text-white font-bold text-lg">{getLogoText()}</span>
               </div>
             )}
           </div>
-          <div className="hidden lg:block min-w-0 flex-1">
-            <h2 className="text-lg font-bold text-white leading-tight truncate">
-              {getLogoText()}
-            </h2>
-            <p className="text-xs text-slate-400 leading-tight mt-1">Powered by AI</p>
-          </div>
+          {!isCollapsed && (
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-bold text-white leading-tight truncate">
+                {organization?.name || 'HR Suite'}
+              </h2>
+              <p className="text-xs text-slate-400 leading-tight mt-1">Powered by AI</p>
+            </div>
+          )}
         </div>
       </SidebarHeader>
 

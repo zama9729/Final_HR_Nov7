@@ -53,6 +53,7 @@ app = FastAPI(
 )
 
 # CORS - Allow HR app origins
+# Note: Cannot use "*" with allow_credentials=True, must specify exact origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -62,7 +63,6 @@ app.add_middleware(
         "http://127.0.0.1:8080",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3300",
-        "*"  # Allow all in development, restrict in production
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -212,21 +212,28 @@ async def query_rag(
             latency_ms=latency_ms,
             request_id=request_id
         )
+    except HTTPException:
+        # Re-raise HTTP exceptions (they already have proper status codes)
+        raise
     except Exception as e:
-        logger.error(f"Query failed: {e}")
+        logger.error(f"Query failed: {e}", exc_info=True)
         latency_ms = int((time.time() - start_time) * 1000)
         
-        log_audit(
-            db=db,
-            tenant_id=tenant.id,
-            user_id=user.id,
-            user_role=user.role,
-            action="query",
-            request_id=request_id,
-            query_text=request.query,
-            error_message=str(e),
-            latency_ms=latency_ms
-        )
+        # Try to log audit, but don't fail if it fails
+        try:
+            log_audit(
+                db=db,
+                tenant_id=tenant.id,
+                user_id=user.id if user else None,
+                user_role=user.role if user else None,
+                action="query",
+                request_id=request_id,
+                query_text=request.query,
+                error_message=str(e),
+                latency_ms=latency_ms
+            )
+        except Exception as audit_error:
+            logger.error(f"Audit logging failed: {audit_error}")
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -505,6 +512,23 @@ async def reprocess_document(
     except Exception as e:
         logger.error(f"Failed to reprocess document: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reprocess document: {str(e)}")
+
+
+# Global exception handler to ensure CORS headers are always included
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Handle all unhandled exceptions and ensure CORS headers are included."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 
 if __name__ == "__main__":

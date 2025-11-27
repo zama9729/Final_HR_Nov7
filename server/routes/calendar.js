@@ -582,6 +582,22 @@ router.get('/', authenticateToken, async (req, res) => {
     // Removed fallback mechanism that was loading data from other organizations
     // This ensures proper organization isolation and RLS compliance
 
+    // Get scheduled date ranges (for determining which dates should show "Week Off")
+    const scheduledRangesQuery = `
+      SELECT DISTINCT week_start_date, week_end_date
+      FROM generated_schedules
+      WHERE tenant_id = $1
+        AND status NOT IN ('archived', 'rejected')
+        AND week_start_date <= $3::date
+        AND week_end_date >= $2::date
+      ORDER BY week_start_date ASC
+    `;
+    const scheduledRangesRes = await query(scheduledRangesQuery, [tenantId, rangeStart, rangeEnd]);
+    const scheduledRanges = scheduledRangesRes.rows.map(row => ({
+      start: row.week_start_date instanceof Date ? row.week_start_date.toISOString().split('T')[0] : row.week_start_date,
+      end: row.week_end_date instanceof Date ? row.week_end_date.toISOString().split('T')[0] : row.week_end_date,
+    }));
+
     console.log('[Calendar] tenant', tenantId, 'view', view_type, 'range', rangeStart, rangeEnd, 'events', events.length);
     res.json({
       events,
@@ -590,7 +606,8 @@ router.get('/', authenticateToken, async (req, res) => {
       availability: availabilityPeriods,
       leaves: leaveEvents,
       holidays,
-      conflicts
+      conflicts,
+      scheduledRanges // Add scheduled date ranges
     });
   } catch (error) {
     console.error('Error fetching calendar data:', error);
