@@ -134,9 +134,9 @@ export function UnifiedAssistantWorkspace() {
             {/* Left Panel - 30% */}
             <div className="hidden w-[300px] flex-col gap-6 lg:flex shrink-0">
                 {/* Quick Prompts */}
-                <Card className="border-none shadow-sm bg-white/50">
+                <Card className="border-none shadow-sm bg-white/50 dark:bg-slate-800/50">
                     <CardHeader className="pb-3">
-                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                        <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
                             <Zap className="h-4 w-4 text-amber-500" />
                             Quick Prompts
                         </CardTitle>
@@ -146,9 +146,9 @@ export function UnifiedAssistantWorkspace() {
                             <button
                                 key={prompt.id}
                                 onClick={() => handleSend(prompt.text)}
-                                className="text-left text-xs p-2.5 rounded-lg hover:bg-slate-100 transition-colors border border-transparent hover:border-slate-200 group relative"
+                                className="text-left text-xs p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-600 group relative"
                             >
-                                <span className="line-clamp-2 text-slate-700">{prompt.text}</span>
+                                <span className="line-clamp-2 text-slate-700 dark:text-slate-200">{prompt.text}</span>
                                 {prompt.pinned && (
                                     <Pin className="h-3 w-3 text-slate-400 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity" />
                                 )}
@@ -162,18 +162,18 @@ export function UnifiedAssistantWorkspace() {
 
                 {/* Knowledge & Tips */}
                 <div className="space-y-3">
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
+                    <h3 className="text-xs font-semibold text-muted-foreground dark:text-slate-400 uppercase tracking-wider px-1">
                         Knowledge & Tips
                     </h3>
                     {TIPS.map((tip) => (
-                        <Card key={tip.title} className="border-none shadow-sm bg-blue-50/50">
+                        <Card key={tip.title} className="border-none shadow-sm bg-blue-50/50 dark:bg-blue-900/20">
                             <CardContent className="p-4 flex gap-3">
-                                <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                                    <tip.icon className="h-4 w-4 text-blue-600" />
+                                <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
+                                    <tip.icon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                                 </div>
                                 <div>
-                                    <p className="text-sm font-medium text-slate-900">{tip.title}</p>
-                                    <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{tip.title}</p>
+                                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
                                         {tip.description}
                                     </p>
                                 </div>
@@ -184,23 +184,23 @@ export function UnifiedAssistantWorkspace() {
 
                 {/* Expanded Citation Panel (Conditional) */}
                 {expandedCitation !== null && messages[expandedCitation]?.provenance?.snippets && (
-                    <Card className="flex-1 border-l-4 border-l-blue-500 shadow-md animate-in slide-in-from-left-2">
-                        <CardHeader className="py-3 bg-slate-50 border-b">
+                    <Card className="flex-1 border-l-4 border-l-blue-500 dark:border-l-blue-400 shadow-md animate-in slide-in-from-left-2">
+                        <CardHeader className="py-3 bg-slate-50 dark:bg-slate-800 border-b dark:border-slate-700">
                             <div className="flex items-center justify-between">
-                                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                                    <FileText className="h-4 w-4 text-blue-600" />
+                                <CardTitle className="text-sm font-medium flex items-center gap-2 text-slate-900 dark:text-slate-100">
+                                    <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                                     Source Citations
                                 </CardTitle>
                                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setExpandedCitation(null)}>
                                     <span className="sr-only">Close</span>
-                                    <ChevronRight className="h-4 w-4" />
+                                    <ChevronRight className="h-4 w-4 text-slate-600 dark:text-slate-300" />
                                 </Button>
                             </div>
                         </CardHeader>
                         <ScrollArea className="h-[200px]">
                             <div className="p-4 space-y-4">
                                 {messages[expandedCitation].provenance!.snippets!.map((snippet, idx) => (
-                                    <div key={idx} className="text-xs text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                    <div key={idx} className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700">
                                         {snippet}
                                     </div>
                                 ))}
@@ -211,16 +211,16 @@ export function UnifiedAssistantWorkspace() {
             </div>
 
             {/* Main Workspace - 70% */}
-            <div className="flex-1 flex flex-col min-w-0 bg-white rounded-3xl border shadow-sm overflow-hidden relative">
+            <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-slate-800 rounded-3xl border dark:border-slate-700 shadow-sm overflow-hidden relative">
                 {/* Header / KPIs */}
-                <div className="h-16 border-b flex items-center justify-between px-6 bg-white/80 backdrop-blur z-10">
+                <div className="h-16 border-b dark:border-slate-700 flex items-center justify-between px-6 bg-white/80 dark:bg-slate-800/80 backdrop-blur z-10">
                     <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center shadow-sm">
+                        <div className="h-8 w-8 rounded-full bg-blue-600 dark:bg-blue-500 flex items-center justify-center shadow-sm">
                             <Bot className="h-5 w-5 text-white" />
                         </div>
                         <div>
-                            <h2 className="text-sm font-semibold text-slate-900">AI Assistant</h2>
-                            <p className="text-xs text-slate-500 flex items-center gap-1">
+                            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">AI Assistant</h2>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
                                 <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
                                 Online & Ready
                             </p>
@@ -233,11 +233,11 @@ export function UnifiedAssistantWorkspace() {
                             { label: "Tools", value: "18 Active", icon: Zap },
                             { label: "Avg Time", value: "< 3s", icon: Clock },
                         ].map((stat) => (
-                            <div key={stat.label} className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-100">
-                                <stat.icon className="h-3.5 w-3.5 text-slate-500" />
+                            <div key={stat.label} className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 dark:bg-slate-700/50 border border-slate-100 dark:border-slate-600">
+                                <stat.icon className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                                 <div className="flex flex-col leading-none">
-                                    <span className="text-[10px] text-slate-400 font-medium uppercase">{stat.label}</span>
-                                    <span className="text-xs font-semibold text-slate-700">{stat.value}</span>
+                                    <span className="text-[10px] text-slate-400 dark:text-slate-400 font-medium uppercase">{stat.label}</span>
+                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{stat.value}</span>
                                 </div>
                             </div>
                         ))}
@@ -249,12 +249,12 @@ export function UnifiedAssistantWorkspace() {
                     <div className="max-w-3xl mx-auto space-y-8 pb-4">
                         {messages.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-[400px] text-center space-y-6">
-                                <div className="h-20 w-20 rounded-3xl bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center shadow-inner">
-                                    <Sparkles className="h-10 w-10 text-blue-600" />
+                                <div className="h-20 w-20 rounded-3xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 flex items-center justify-center shadow-inner">
+                                    <Sparkles className="h-10 w-10 text-blue-600 dark:text-blue-400" />
                                 </div>
                                 <div className="space-y-2 max-w-md">
-                                    <h3 className="text-xl font-semibold text-slate-900">How can I help you today?</h3>
-                                    <p className="text-sm text-slate-500">
+                                    <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">How can I help you today?</h3>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400">
                                         I can help you find policy information, manage leave requests,
                                         or analyze team attendance data.
                                     </p>
@@ -264,7 +264,7 @@ export function UnifiedAssistantWorkspace() {
                                         <button
                                             key={p.id}
                                             onClick={() => handleSend(p.text)}
-                                            className="text-xs text-left p-3 rounded-xl border bg-white hover:bg-slate-50 hover:border-blue-200 transition-all shadow-sm"
+                                            className="text-xs text-left p-3 rounded-xl border bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 hover:border-blue-200 dark:hover:border-blue-500 dark:border-slate-600 transition-all shadow-sm text-slate-700 dark:text-slate-200"
                                         >
                                             {p.text}
                                         </button>
@@ -280,7 +280,7 @@ export function UnifiedAssistantWorkspace() {
                                     {/* Avatar */}
                                     <div className={cn(
                                         "h-8 w-8 rounded-full flex items-center justify-center shrink-0 shadow-sm",
-                                        msg.role === "user" ? "bg-slate-900" : "bg-blue-600"
+                                        msg.role === "user" ? "bg-slate-900 dark:bg-slate-700" : "bg-blue-600 dark:bg-blue-500"
                                     )}>
                                         {msg.role === "user" ? (
                                             <span className="text-xs text-white font-medium">ME</span>
@@ -297,8 +297,8 @@ export function UnifiedAssistantWorkspace() {
                                         <div className={cn(
                                             "rounded-2xl px-5 py-3.5 text-sm leading-relaxed shadow-sm",
                                             msg.role === "user"
-                                                ? "bg-slate-900 text-white rounded-tr-none"
-                                                : "bg-white border border-slate-100 text-slate-800 rounded-tl-none"
+                                                ? "bg-slate-900 dark:bg-slate-700 text-white rounded-tr-none"
+                                                : "bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-tl-none"
                                         )}>
                                             <p className="whitespace-pre-wrap">{msg.content}</p>
                                         </div>
@@ -309,19 +309,19 @@ export function UnifiedAssistantWorkspace() {
                                                 {msg.provenance?.snippets && msg.provenance.snippets.length > 0 && (
                                                     <button
                                                         onClick={() => setExpandedCitation(expandedCitation === idx ? null : idx)}
-                                                        className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-full transition-colors"
+                                                        className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-2.5 py-1 rounded-full transition-colors"
                                                     >
                                                         <FileText className="h-3 w-3" />
                                                         Sources ({msg.provenance.snippets.length})
                                                     </button>
                                                 )}
                                                 {msg.tool_calls?.map((tool, i) => (
-                                                    <Badge key={i} variant="outline" className="gap-1 bg-white text-xs font-normal text-slate-600">
+                                                    <Badge key={i} variant="outline" className="gap-1 bg-white dark:bg-slate-800 text-xs font-normal text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700">
                                                         <Zap className="h-3 w-3 text-amber-500" />
                                                         Executed: {tool.name}
                                                     </Badge>
                                                 ))}
-                                                <span className="text-[10px] text-slate-400 py-1">
+                                                <span className="text-[10px] text-slate-400 dark:text-slate-500 py-1">
                                                     {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                                 </span>
                                             </div>
@@ -333,13 +333,13 @@ export function UnifiedAssistantWorkspace() {
 
                         {isLoading && (
                             <div className="flex gap-4">
-                                <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center shrink-0 shadow-sm">
+                                <div className="h-8 w-8 rounded-full bg-blue-600 dark:bg-blue-500 flex items-center justify-center shrink-0 shadow-sm">
                                     <Bot className="h-4 w-4 text-white" />
                                 </div>
-                                <div className="bg-white border border-slate-100 rounded-2xl rounded-tl-none px-5 py-4 shadow-sm flex items-center gap-2">
-                                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                <div className="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl rounded-tl-none px-5 py-4 shadow-sm flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-blue-400 dark:bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                    <div className="w-2 h-2 bg-blue-400 dark:bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                    <div className="w-2 h-2 bg-blue-400 dark:bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                                 </div>
                             </div>
                         )}
@@ -347,12 +347,12 @@ export function UnifiedAssistantWorkspace() {
                 </ScrollArea>
 
                 {/* Sticky Input Area */}
-                <div className="p-4 bg-white border-t">
+                <div className="p-4 bg-white dark:bg-slate-800 border-t dark:border-slate-700">
                     <div className="max-w-3xl mx-auto relative">
-                        <div className="relative flex items-end gap-2 bg-slate-50 border border-slate-200 rounded-[20px] p-2 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 focus-within:border-blue-400 transition-all">
+                        <div className="relative flex items-end gap-2 bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-[20px] p-2 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-900/50 focus-within:border-blue-400 dark:focus-within:border-blue-500 transition-all">
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-slate-500 hover:text-blue-600 hover:bg-blue-50 shrink-0 mb-0.5">
+                                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 shrink-0 mb-0.5">
                                         <Plus className="h-5 w-5" />
                                     </Button>
                                 </DropdownMenuTrigger>
@@ -405,7 +405,7 @@ export function UnifiedAssistantWorkspace() {
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
                                 placeholder="Ask anything or type '/' for commands..."
-                                className="border-none bg-transparent shadow-none focus-visible:ring-0 min-h-[44px] py-3 text-base"
+                                className="border-none bg-transparent shadow-none focus-visible:ring-0 min-h-[44px] py-3 text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                             />
 
                             <Button
@@ -416,12 +416,13 @@ export function UnifiedAssistantWorkspace() {
                             >
                                 <Send className="h-4 w-4" />
                             </Button>
-                            <p className="text-[10px] text-center text-slate-400 mt-2">
+                            <p className="text-[10px] text-center text-slate-400 dark:text-slate-500 mt-2">
                                 AI can make mistakes. Please review critical actions.
                             </p>
                         </div>
                     </div>
                 </div>
             </div>
-            );
+        </div>
+    );
 }
