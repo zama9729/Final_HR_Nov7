@@ -455,6 +455,13 @@ class ApiClient {
     return this.request(`/api/background-checks/employee/${employeeId}`);
   }
 
+  async getBackgroundCheckReport(checkId: string, options?: { legacy?: boolean }) {
+    if (options?.legacy) {
+      return this.request(`/api/background-checks/${checkId}/report`);
+    }
+    return this.request(`/api/onboarding/${checkId}/background-check`);
+  }
+
   async createBackgroundCheck(payload: {
     employee_id?: string;
     candidate_id?: string;
@@ -629,6 +636,18 @@ class ApiClient {
     });
   }
 
+  async updateBankDetails(employeeId: string, data: {
+    bankAccountNumber: string;
+    bankName: string;
+    bankBranch: string;
+    ifscCode: string;
+  }) {
+    return this.request('/api/onboarding/bank-details/update', {
+      method: 'POST',
+      body: JSON.stringify({ employeeId, ...data }),
+    });
+  }
+
   async uploadOnboardingDocument(
     candidateId: string,
     payload: { file: File; docType: string; consent: boolean; notes?: string; source?: string }
@@ -649,6 +668,19 @@ class ApiClient {
       },
       true,
     );
+  }
+
+  async getOnboardingProgress() {
+    return this.request('/api/onboarding/me/progress');
+  }
+
+  async getBackgroundCheck(candidateId: string) {
+    return this.request(`/api/onboarding/${candidateId}/background-check`);
+  }
+
+  // Public request method for custom endpoints (wrapper around private request)
+  async customRequest(endpoint: string, options: RequestInit = {}) {
+    return this.request(endpoint, options);
   }
 
   async getOnboardingDocuments(candidateId: string, params?: { status?: string; docType?: string }) {
@@ -1898,6 +1930,26 @@ class ApiClient {
     if (params.project_id) query.append('project_id', params.project_id);
     if (params.view_type) query.append('view_type', params.view_type);
     return this.request(`/api/calendar?${query.toString()}`);
+  }
+
+  // Profile picture upload
+  async getProfilePicturePresignedUrl(contentType: string) {
+    return this.request('/api/employees/profile-picture/presign', {
+      method: 'POST',
+      body: JSON.stringify({ contentType }),
+    });
+  }
+
+  async uploadProfilePicture(url: string, key: string) {
+    return this.request('/api/employees/profile-picture/upload', {
+      method: 'POST',
+      body: JSON.stringify({ url, key }),
+    });
+  }
+
+  // Check for missing onboarding data
+  async getMissingOnboardingData() {
+    return this.request('/api/onboarding/me/missing-data');
   }
 }
 

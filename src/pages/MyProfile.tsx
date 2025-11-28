@@ -34,11 +34,23 @@ import {
   UserCheck,
   Activity,
   Clock,
-  CalendarDays
+  CalendarDays,
+  CheckCircle2,
+  Camera
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Progress as ProgressBar } from '@/components/ui/progress';
 import { format, parseISO, isToday, isTomorrow, addDays, differenceInCalendarDays } from 'date-fns';
+import { MissingDataAlert } from '@/components/onboarding/MissingDataAlert';
+import { OnboardingStatusStepper } from '@/components/onboarding/OnboardingStatusStepper';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface EmployeeData {
   id: string;
@@ -54,6 +66,7 @@ interface EmployeeData {
     last_name?: string;
     email?: string;
     phone?: string;
+    profile_picture_url?: string;
   };
   reporting_manager?: {
     id?: string;
@@ -75,6 +88,7 @@ interface EmployeeData {
   onboarding_data?: {
     pan_number?: string;
     aadhar_number?: string;
+    passport_number?: string;
     bank_account_number?: string;
     bank_name?: string;
     bank_branch?: string;
@@ -91,6 +105,19 @@ interface EmployeeData {
     emergency_contact_phone?: string;
     emergency_contact_relation?: string;
     completed_at?: string;
+    // New extended fields
+    full_legal_name?: string;
+    date_of_birth?: string;
+    gender?: string;
+    nationality?: string;
+    personal_phone?: string;
+    personal_email?: string;
+    government_ids?: any;
+    tax_regime?: string;
+    dependents?: any[];
+    references?: any[];
+    uan_number?: string;
+    biometric_registration_status?: string;
   };
 }
 
@@ -141,6 +168,19 @@ export default function MyProfile() {
   const [isEditing, setIsEditing] = useState(false);
   const [upcomingShifts, setUpcomingShifts] = useState<any[]>([]);
   const [loadingShifts, setLoadingShifts] = useState(false);
+  const [onboardingProgress, setOnboardingProgress] = useState<any>(null);
+  const [loadingProgress, setLoadingProgress] = useState(false);
+  const [uploadingProfilePic, setUploadingProfilePic] = useState(false);
+  const [missingData, setMissingData] = useState<any>(null);
+  const [dismissedAlert, setDismissedAlert] = useState(false);
+  const [bankDialogOpen, setBankDialogOpen] = useState(false);
+  const [bankForm, setBankForm] = useState({
+    bankAccountNumber: '',
+    bankName: '',
+    bankBranch: '',
+    ifscCode: '',
+  });
+  const [savingBank, setSavingBank] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -155,6 +195,7 @@ export default function MyProfile() {
   const employeeParam = useMemo(() => {
     return new URLSearchParams(location.search).get('employee');
   }, [location.search]);
+  const isOwnProfile = !employeeParam;
 
   useEffect(() => {
     setActiveTab(tabParam || 'about');
@@ -178,10 +219,110 @@ export default function MyProfile() {
   useEffect(() => {
     if (employeeId) {
       fetchUpcomingShifts(employeeId);
+      fetchOnboardingProgress();
+      fetchMissingData();
     } else {
       setUpcomingShifts([]);
+      setOnboardingProgress(null);
+      setMissingData(null);
     }
   }, [employeeId]);
+
+  const fetchMissingData = async () => {
+    // Only check for own profile (not when viewing someone else's profile)
+    if (!isOwnProfile) return;
+    
+    try {
+      setLoadingProgress(true);
+      const data = await api.getMissingOnboardingData();
+      setMissingData(data);
+    } catch (error: any) {
+      console.error('Error fetching missing data:', error);
+      // Don't show error toast for this, it's not critical
+    } finally {
+      setLoadingProgress(false);
+    }
+  };
+
+  const handleProfilePictureUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please select an image file (JPG, PNG)',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      toast({
+        title: 'File too large',
+        description: 'Profile picture must be less than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUploadingProfilePic(true);
+    try {
+      // Step 1: Get presigned URL
+      const { url, key } = await api.getProfilePicturePresignedUrl(file.type);
+
+      // Step 2: Upload file directly to MinIO/S3
+      const uploadResponse = await fetch(url, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          'Content-Type': file.type,
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload file to storage');
+      }
+
+      // Step 3: Complete upload (save URL to database)
+      const result = await api.uploadProfilePicture(url, key);
+
+      // Update local state
+      if (employee) {
+        setEmployee({
+          ...employee,
+          profiles: {
+            ...employee.profiles,
+            profile_picture_url: result.profile_picture_url,
+          },
+        });
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Profile picture uploaded successfully',
+      });
+    } catch (error: any) {
+      console.error('Error uploading profile picture:', error);
+      toast({
+        title: 'Upload failed',
+        description: error.message || 'Failed to upload profile picture',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingProfilePic(false);
+    }
+  };
+
+  const fetchOnboardingProgress = async () => {
+    try {
+      setLoadingProgress(true);
+      const progress = await api.getOnboardingProgress();
+      setOnboardingProgress(progress);
+    } catch (error: any) {
+      console.error('Error fetching onboarding progress:', error);
+      // Don't show error if employee doesn't have onboarding data yet
+    } finally {
+      setLoadingProgress(false);
+    }
+  };
 
   const fetchUpcomingShifts = async (targetEmployeeId: string) => {
     if (!targetEmployeeId) return;
@@ -250,6 +391,77 @@ export default function MyProfile() {
       setEmployee(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleManageBankDetails = () => {
+    if (!employee) return;
+    setBankForm({
+      bankAccountNumber: employee.onboarding_data?.bank_account_number || '',
+      bankName: employee.onboarding_data?.bank_name || '',
+      bankBranch: employee.onboarding_data?.bank_branch || '',
+      ifscCode: employee.onboarding_data?.ifsc_code || '',
+    });
+    setBankDialogOpen(true);
+  };
+
+  const handleSaveBankDetails = async () => {
+    if (!employeeId) {
+      toast({
+        title: 'Unable to update',
+        description: 'Employee record is missing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!bankForm.bankAccountNumber || !bankForm.bankName || !bankForm.bankBranch || !bankForm.ifscCode) {
+      toast({
+        title: 'Missing information',
+        description: 'Please fill all bank fields before saving.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setSavingBank(true);
+      await api.updateBankDetails(employeeId, {
+        bankAccountNumber: bankForm.bankAccountNumber.trim(),
+        bankName: bankForm.bankName.trim(),
+        bankBranch: bankForm.bankBranch.trim(),
+        ifscCode: bankForm.ifscCode.trim(),
+      });
+
+      if (employee) {
+        setEmployee({
+          ...employee,
+          onboarding_data: {
+            ...employee.onboarding_data,
+            bank_account_number: bankForm.bankAccountNumber.trim(),
+            bank_name: bankForm.bankName.trim(),
+            bank_branch: bankForm.bankBranch.trim(),
+            ifsc_code: bankForm.ifscCode.trim(),
+          },
+        });
+      }
+
+      setBankDialogOpen(false);
+      toast({
+        title: 'Bank details updated',
+        description: 'Your salary payment information has been saved.',
+      });
+      fetchMissingData();
+      fetchOnboardingProgress();
+    } catch (error: any) {
+      console.error('Error saving bank details:', error);
+      toast({
+        title: 'Failed to save',
+        description: error.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingBank(false);
     }
   };
 
@@ -372,8 +584,8 @@ export default function MyProfile() {
   const canViewOnly = ['hr', 'ceo', 'director', 'admin'].includes(userRole || '');
   const isViewingAsManager = ['manager', 'hr', 'ceo', 'director', 'admin'].includes(userRole || '');
   
-  // Calculate onboarding progress
-  const onboardingProgress = calculateOnboardingProgress(employee?.onboarding_data);
+  // Calculate onboarding progress (for About tab - simple percentage)
+  const calculatedProgress = calculateOnboardingProgress(employee?.onboarding_data);
   const getOnboardingStatus = () => {
     if (!employee?.onboarding_status) return 'Not Started';
     switch (employee.onboarding_status) {
@@ -421,10 +633,33 @@ export default function MyProfile() {
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-start gap-6">
-              <Avatar className="h-24 w-24">
-                <AvatarImage src={undefined} />
-                <AvatarFallback className="text-2xl">{getInitials()}</AvatarFallback>
-              </Avatar>
+              <div className="relative group">
+                <Avatar className="h-24 w-24">
+                  <AvatarImage src={employee?.profiles?.profile_picture_url} />
+                  <AvatarFallback className="text-2xl">{getInitials()}</AvatarFallback>
+                </Avatar>
+                {canEditOwnProfile && !canViewOnly && (
+                  <label className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-opacity">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/jpg,image/png"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          handleProfilePictureUpload(file);
+                        }
+                      }}
+                      disabled={uploadingProfilePic}
+                    />
+                    {uploadingProfilePic ? (
+                      <div className="text-white text-sm">Uploading...</div>
+                    ) : (
+                      <Camera className="h-6 w-6 text-white" />
+                    )}
+                  </label>
+                )}
+              </div>
               <div className="flex-1">
                 <div className="flex items-center gap-4 mb-4">
                   <div>
@@ -547,6 +782,17 @@ export default function MyProfile() {
           </CardContent>
         </Card>
 
+        {/* Missing Data Alert */}
+        {isViewingOwnProfile && missingData?.has_missing_data && !dismissedAlert && (
+          <MissingDataAlert
+            missingFields={missingData.missing_fields || []}
+            missingDocuments={missingData.missing_documents || []}
+            hasMissingData={missingData.has_missing_data}
+            message={missingData.message}
+            onDismiss={() => setDismissedAlert(true)}
+          />
+        )}
+
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
           <TabsList>
@@ -569,10 +815,6 @@ export default function MyProfile() {
             <TabsTrigger value="shifts" disabled={!employeeId}>
               <CalendarDays className="mr-2 h-4 w-4" />
               My Shifts
-            </TabsTrigger>
-            <TabsTrigger value="timesheets" disabled={!employeeId}>
-              <Clock className="mr-2 h-4 w-4" />
-              Timesheets
             </TabsTrigger>
           </TabsList>
 
@@ -642,9 +884,9 @@ export default function MyProfile() {
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium">{getOnboardingStatus()}</span>
-                      <span className="text-sm text-muted-foreground">{onboardingProgress}%</span>
+                      <span className="text-sm text-muted-foreground">{calculatedProgress}%</span>
                     </div>
-                    <ProgressBar value={onboardingProgress} className="h-2" />
+                    <ProgressBar value={calculatedProgress} className="h-2" />
                   </div>
                   <Badge 
                     variant={
@@ -691,10 +933,17 @@ export default function MyProfile() {
               {employee?.onboarding_data && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CreditCard className="h-5 w-5" />
-                      Financial Information
-                    </CardTitle>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <CardTitle className="flex items-center gap-2">
+                        <CreditCard className="h-5 w-5" />
+                        Financial Information
+                      </CardTitle>
+                      {isOwnProfile && (
+                        <Button size="sm" variant="outline" onClick={handleManageBankDetails}>
+                          {employee.onboarding_data.bank_account_number ? 'Edit Bank Details' : 'Add Bank Details'}
+                        </Button>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
@@ -773,6 +1022,104 @@ export default function MyProfile() {
                             {isViewingAsManager ? maskNumber(employee.onboarding_data.emergency_contact_phone, 4) : employee.onboarding_data.emergency_contact_phone}
                           </p>
                         )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Extended Onboarding Information */}
+              {(employee.onboarding_data?.full_legal_name || 
+                employee.onboarding_data?.date_of_birth || 
+                employee.onboarding_data?.nationality || 
+                employee.onboarding_data?.personal_phone || 
+                employee.onboarding_data?.personal_email ||
+                employee.onboarding_data?.gender ||
+                employee.onboarding_data?.uan_number ||
+                employee.onboarding_data?.passport_number) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <UserCheck className="h-5 w-5" />
+                      Extended Personal Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      {employee.onboarding_data.full_legal_name && (
+                        <div>
+                          <Label className="text-muted-foreground">Full Legal Name</Label>
+                          <p className="font-medium">{employee.onboarding_data.full_legal_name}</p>
+                        </div>
+                      )}
+                      {employee.onboarding_data.date_of_birth && (
+                        <div>
+                          <Label className="text-muted-foreground">Date of Birth</Label>
+                          <p className="font-medium">{format(new Date(employee.onboarding_data.date_of_birth), 'MMM dd, yyyy')}</p>
+                        </div>
+                      )}
+                      {employee.onboarding_data.nationality && (
+                        <div>
+                          <Label className="text-muted-foreground">Nationality</Label>
+                          <p className="font-medium">{employee.onboarding_data.nationality}</p>
+                        </div>
+                      )}
+                      {employee.onboarding_data.gender && (
+                        <div>
+                          <Label className="text-muted-foreground">Gender</Label>
+                          <p className="font-medium capitalize">{employee.onboarding_data.gender.replace('_', ' ')}</p>
+                        </div>
+                      )}
+                      {employee.onboarding_data.personal_phone && (
+                        <div>
+                          <Label className="text-muted-foreground">Personal Phone</Label>
+                          <p className="font-medium">
+                            {isViewingAsManager ? maskNumber(employee.onboarding_data.personal_phone, 4) : employee.onboarding_data.personal_phone}
+                          </p>
+                        </div>
+                      )}
+                      {employee.onboarding_data.personal_email && (
+                        <div>
+                          <Label className="text-muted-foreground">Personal Email</Label>
+                          <p className="font-medium">{employee.onboarding_data.personal_email}</p>
+                        </div>
+                      )}
+                      {employee.onboarding_data.uan_number && (
+                        <div>
+                          <Label className="text-muted-foreground">UAN Number</Label>
+                          <p className="font-medium">
+                            {isViewingAsManager ? maskNumber(employee.onboarding_data.uan_number, 4) : employee.onboarding_data.uan_number}
+                          </p>
+                        </div>
+                      )}
+                      {employee.onboarding_data.passport_number && (
+                        <div>
+                          <Label className="text-muted-foreground">Passport Number</Label>
+                          <p className="font-medium">
+                            {isViewingAsManager ? maskNumber(employee.onboarding_data.passport_number, 4) : employee.onboarding_data.passport_number}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    {employee.onboarding_data.tax_regime && (
+                      <div className="pt-4 border-t">
+                        <Label className="text-muted-foreground">Tax Regime</Label>
+                        <p className="font-medium capitalize">{employee.onboarding_data.tax_regime}</p>
+                      </div>
+                    )}
+                    {employee.onboarding_data.dependents && Array.isArray(employee.onboarding_data.dependents) && employee.onboarding_data.dependents.length > 0 && (
+                      <div className="pt-4 border-t">
+                        <Label className="text-muted-foreground mb-2 block">Dependents</Label>
+                        <div className="space-y-2">
+                          {employee.onboarding_data.dependents.map((dep: any, idx: number) => (
+                            <div key={idx} className="p-2 border rounded">
+                              <p className="font-medium">{dep.name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {dep.relation} {dep.date_of_birth && `• DOB: ${format(new Date(dep.date_of_birth), 'MMM dd, yyyy')}`}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </CardContent>
@@ -925,41 +1272,155 @@ export default function MyProfile() {
             )}
           </TabsContent>
 
-          <TabsContent value="timesheets">
+          <TabsContent value="onboarding-progress">
             {employeeId ? (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Clock className="h-5 w-5" />
-                    My Timesheets
+                    <Activity className="h-5 w-5" />
+                    Onboarding Progress
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      View and manage your timesheets
-                    </p>
-                    <Button 
-                      onClick={() => window.location.href = '/timesheets'}
-                      variant="default"
-                      className="w-full sm:w-auto"
-                    >
-                      <Clock className="mr-2 h-4 w-4" />
-                      Go to Timesheets
-                    </Button>
-                  </div>
+                  {loadingProgress ? (
+                    <div className="text-center py-8 text-muted-foreground">Loading progress...</div>
+                  ) : onboardingProgress ? (
+                    <div className="space-y-6">
+                      {/* Progress Bar */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium">Overall Progress</span>
+                          <span className="text-sm text-muted-foreground">{onboardingProgress.progress_percentage}%</span>
+                        </div>
+                        <ProgressBar value={onboardingProgress.progress_percentage} className="h-3" />
+                      </div>
+
+                      <OnboardingStatusStepper
+                        currentStatus={onboardingProgress.current_status}
+                        completedSteps={(onboardingProgress.steps_completed || []).map((step: any) => step.step)}
+                      />
+
+                      {/* Current Status */}
+                      <div className="p-4 border rounded-lg">
+                        <p className="text-sm text-muted-foreground mb-1">Current Status</p>
+                        <p className="text-lg font-semibold">
+                          {onboardingProgress.current_status?.replace(/_/g, ' ') || 'Not Started'}
+                        </p>
+                        {onboardingProgress.next_step && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Next: {onboardingProgress.next_step.replace(/_/g, ' ')}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Background Check Status */}
+                      {onboardingProgress.background_check_status && (
+                        <div className="p-4 border rounded-lg">
+                          <p className="text-sm text-muted-foreground mb-1">Background Check</p>
+                          <Badge 
+                            variant={
+                              onboardingProgress.background_check_status === 'COMPLETED' ? 'default' :
+                              onboardingProgress.background_check_status === 'ON_HOLD' ? 'secondary' :
+                              'outline'
+                            }
+                          >
+                            {onboardingProgress.background_check_status.replace(/_/g, ' ')}
+                          </Badge>
+                        </div>
+                      )}
+
+                      {/* Steps History */}
+                      {onboardingProgress.steps_completed && onboardingProgress.steps_completed.length > 0 && (
+                        <div>
+                          <p className="text-sm font-medium mb-3">Completed Steps</p>
+                          <div className="space-y-2">
+                            {onboardingProgress.steps_completed.map((step: any, index: number) => (
+                              <div key={index} className="flex items-center gap-3 p-2 border rounded">
+                                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium">{step.step.replace(/_/g, ' ')}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {new Date(step.occurred_at).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Activity className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p className="text-sm">No onboarding progress found</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ) : (
               <Card>
                 <CardContent className="py-10 text-center text-muted-foreground">
-                  Timesheets are available only for employees with active records. Please contact HR if you need access.
+                  Onboarding progress is available only for employees with active records.
                 </CardContent>
               </Card>
             )}
           </TabsContent>
         </Tabs>
       </div>
+    <Dialog open={bankDialogOpen} onOpenChange={setBankDialogOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Bank Details</DialogTitle>
+          <DialogDescription>Provide accurate salary payout information.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="bankAccountNumberDialog">Account Number *</Label>
+            <Input
+              id="bankAccountNumberDialog"
+              value={bankForm.bankAccountNumber}
+              onChange={(e) => setBankForm((prev) => ({ ...prev, bankAccountNumber: e.target.value }))}
+              placeholder="Enter account number"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="bankNameDialog">Bank Name *</Label>
+            <Input
+              id="bankNameDialog"
+              value={bankForm.bankName}
+              onChange={(e) => setBankForm((prev) => ({ ...prev, bankName: e.target.value }))}
+              placeholder="e.g., ICICI Bank"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="bankBranchDialog">Branch *</Label>
+            <Input
+              id="bankBranchDialog"
+              value={bankForm.bankBranch}
+              onChange={(e) => setBankForm((prev) => ({ ...prev, bankBranch: e.target.value }))}
+              placeholder="Branch name or code"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="ifscDialog">IFSC Code *</Label>
+            <Input
+              id="ifscDialog"
+              value={bankForm.ifscCode}
+              onChange={(e) => setBankForm((prev) => ({ ...prev, ifscCode: e.target.value.toUpperCase() }))}
+              placeholder="e.g., ICIC0001234"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setBankDialogOpen(false)} disabled={savingBank}>
+            Cancel
+          </Button>
+          <Button onClick={handleSaveBankDetails} disabled={savingBank}>
+            {savingBank ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </AppLayout>
   );
 }

@@ -3,20 +3,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { z } from "zod";
 import { Progress } from "@/components/ui/progress";
-import { OnboardingDocsUploader } from "@/components/onboarding/OnboardingDocsUploader";
+import { OnboardingDocsUploader, VERIFICATION_DOC_TYPES } from "@/components/onboarding/OnboardingDocsUploader";
 import { Loader2 } from "lucide-react";
+import { OnboardingStatusStepper } from "@/components/onboarding/OnboardingStatusStepper";
 
 export const bankDetailsStatusSchema = z.enum(['pending', 'skipped']);
 
 const onboardingSchema = z
   .object({
+  // New required personal fields
+  fullLegalName: z.string().trim().min(1, "Required").max(200).optional(),
+  dateOfBirth: z.string().trim().optional(),
+  nationality: z.string().trim().min(1, "Required").optional(),
+  personalPhone: z.string().trim().min(10, "Invalid phone").max(15).optional(),
+  personalEmail: z.string().email("Invalid email").optional(),
+  // Emergency contact
   emergencyContactName: z.string().trim().min(1, "Required").max(100),
   emergencyContactPhone: z.string().trim().min(10, "Invalid phone").max(15),
   emergencyContactRelation: z.string().trim().min(1, "Required"),
@@ -49,6 +58,8 @@ const onboardingSchema = z
     .regex(/^\d{12}$/, { message: "UAN must be 12 digits" })
     .optional(),
   bankDetailsStatus: bankDetailsStatusSchema.default('pending'),
+  // New optional fields
+  taxRegime: z.enum(["old", "new"]).optional(),
 })
   .superRefine((data, ctx) => {
     if (data.bankDetailsStatus !== 'skipped') {
@@ -93,6 +104,13 @@ export default function Onboarding() {
   const [employeeId, setEmployeeId] = useState<string>("");
   
   const [formData, setFormData] = useState({
+    // New personal info fields
+    fullLegalName: "",
+    dateOfBirth: "",
+    nationality: "",
+    personalPhone: "",
+    personalEmail: "",
+    // Existing fields
     emergencyContactName: "",
     emergencyContactPhone: "",
     emergencyContactRelation: "",
@@ -118,18 +136,51 @@ export default function Onboarding() {
     gender: "" as "male" | "female" | "other" | "prefer_not_to_say" | "",
     uanNumber: "",
     bankDetailsStatus: 'pending' as z.infer<typeof bankDetailsStatusSchema>,
+    // New optional fields
+    taxRegime: "" as "old" | "new" | "",
+    dependents: [] as Array<{name: string; relation: string; date_of_birth: string; gender: string}>,
+    references: [] as Array<{name: string; phone: string; relation: string}>,
   });
 
-  const [documents, setDocuments] = useState<Array<{ id: string; document_type: string; file_name: string; uploaded_at: string }>>([]);
+  const [documents, setDocuments] = useState<Array<{ id: string; doc_type: string; file_name: string; uploaded_at: string; status?: string }>>([]);
   const [uploading, setUploading] = useState(false);
   const docsFlag = (import.meta.env.VITE_FEATURE_ONBOARDING_V2_DOCS || "true") !== "false";
 
   const [isUploading, setIsUploading] = useState(false);
   const [skipLoading, setSkipLoading] = useState(false);
+  const [statusProgress, setStatusProgress] = useState<any>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [bankEditMode, setBankEditMode] = useState(false);
+
+  const documentStatusRows = useMemo(() => {
+    return VERIFICATION_DOC_TYPES.map((docType) => {
+      const match = documents.find((doc) => doc.doc_type === docType.type);
+      return {
+        ...docType,
+        status: match?.status,
+        fileName: match?.file_name,
+        uploadedAt: match?.uploaded_at,
+      };
+    });
+  }, [documents]);
 
   useEffect(() => {
     fetchEmployeeId();
   }, [user, isUploading, location.pathname]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const requestedStep = Number(params.get('step'));
+    if (!Number.isNaN(requestedStep) && requestedStep >= 1 && requestedStep <= 5) {
+      setStep(requestedStep);
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    if (employeeId) {
+      loadExistingOnboardingData();
+    }
+  }, [employeeId]);
 
   const fetchEmployeeId = async () => {
     if (!user || isUploading) return; // Don't check status during upload
@@ -140,12 +191,6 @@ export default function Onboarding() {
       // employeeData should have id field from the API
       if (employeeData && employeeData.id) {
         setEmployeeId(employeeData.id);
-        // Only redirect if onboarding is completed AND we're not currently uploading
-        if (employeeData.onboarding_status === 'completed' && !isUploading) {
-          if (location.pathname !== '/onboarding/next-step') {
-            navigate('/onboarding/next-step');
-          }
-        }
       } else {
         console.warn('No employee record found for user');
       }
@@ -159,8 +204,81 @@ export default function Onboarding() {
     }
   };
 
+  const loadExistingOnboardingData = async () => {
+    if (!employeeId) return;
+
+    try {
+      const employee = await api.getEmployee(employeeId);
+      
+      if (employee?.onboarding_data) {
+        const data = employee.onboarding_data;
+        
+        // Populate form with existing data
+        setFormData({
+          // New personal info fields
+          fullLegalName: data.full_legal_name || "",
+          dateOfBirth: data.date_of_birth ? data.date_of_birth.split('T')[0] : "",
+          nationality: data.nationality || "",
+          personalPhone: data.personal_phone || "",
+          personalEmail: data.personal_email || "",
+          // Existing fields
+          emergencyContactName: data.emergency_contact_name || "",
+          emergencyContactPhone: data.emergency_contact_phone || "",
+          emergencyContactRelation: data.emergency_contact_relation || "",
+          permanentAddress: data.permanent_address || "",
+          permanentCity: data.permanent_city || "",
+          permanentState: data.permanent_state || "",
+          permanentPostalCode: data.permanent_postal_code || "",
+          currentAddress: data.current_address || "",
+          currentCity: data.current_city || "",
+          currentState: data.current_state || "",
+          currentPostalCode: data.current_postal_code || "",
+          // Keep old fields for backward compatibility
+          address: data.current_address || data.address || "",
+          city: data.current_city || data.city || "",
+          state: data.current_state || data.state || "",
+          postalCode: data.current_postal_code || data.postal_code || "",
+          bankAccountNumber: data.bank_account_number || "",
+          bankName: data.bank_name || "",
+          bankBranch: data.bank_branch || "",
+          ifscCode: data.ifsc_code || "",
+          panNumber: data.pan_number || "",
+          aadharNumber: data.aadhar_number || "",
+          passportNumber: data.passport_number || "",
+          gender: (data.gender as "male" | "female" | "other" | "prefer_not_to_say") || "",
+          uanNumber: data.uan_number || "",
+          bankDetailsStatus: data.bank_account_number ? 'pending' as const : 'skipped' as const,
+          // New optional fields
+          taxRegime: (data.tax_regime as "old" | "new") || "",
+          dependents: Array.isArray(data.dependents) ? data.dependents : [],
+          references: Array.isArray(data.references) ? data.references : [],
+        });
+        setBankEditMode(false);
+      }
+    } catch (error: any) {
+      console.error('Error loading existing onboarding data:', error);
+      // Don't show error toast - it's okay if there's no existing data
+    }
+  };
+
+  const refreshOnboardingStatus = async () => {
+    try {
+      setStatusLoading(true);
+      const progressData = await api.getOnboardingProgress();
+      setStatusProgress(progressData);
+    } catch (error) {
+      console.error('Error loading onboarding status:', error);
+    } finally {
+      setStatusLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshOnboardingStatus();
+  }, []);
+
   const handleNext = () => {
-    if (step < 4) setStep(step + 1);
+    if (step < 5) setStep(step + 1);
   };
 
   const handleBack = () => {
@@ -171,13 +289,33 @@ export default function Onboarding() {
     e.preventDefault();
     
     try {
-      const validated = onboardingSchema.parse(formData);
+      const sanitizedFormData = {
+        ...formData,
+        gender: formData.gender || undefined,
+        taxRegime: formData.taxRegime || undefined,
+        uanNumber: formData.uanNumber?.trim() ? formData.uanNumber.trim() : undefined,
+        passportNumber: formData.passportNumber?.trim() ? formData.passportNumber.trim() : undefined,
+        fullLegalName: formData.fullLegalName?.trim() || undefined,
+        nationality: formData.nationality?.trim() || undefined,
+        personalPhone: formData.personalPhone?.trim() || undefined,
+        personalEmail: formData.personalEmail?.trim() || undefined,
+        dateOfBirth: formData.dateOfBirth ? formData.dateOfBirth.split('T')[0] : undefined,
+      };
+
+      const validated = onboardingSchema.parse(sanitizedFormData);
       setLoading(true);
 
       // Submit onboarding data via API
       const shouldSendBankDetails = validated.bankDetailsStatus !== 'skipped';
 
       await api.submitOnboarding(employeeId, {
+        // New personal info fields
+        fullLegalName: validated.fullLegalName || null,
+        dateOfBirth: validated.dateOfBirth || null,
+        nationality: validated.nationality || null,
+        personalPhone: validated.personalPhone || null,
+        personalEmail: validated.personalEmail || null,
+        // Existing fields
         emergencyContactName: validated.emergencyContactName,
         emergencyContactPhone: validated.emergencyContactPhone,
         emergencyContactRelation: validated.emergencyContactRelation,
@@ -204,14 +342,17 @@ export default function Onboarding() {
         gender: validated.gender || null,
         uanNumber: validated.uanNumber || null,
         bankDetailsStatus: validated.bankDetailsStatus,
+        // New optional fields
+        taxRegime: validated.taxRegime || null,
+        dependents: formData.dependents || [],
+        references: formData.references || [],
       });
 
       toast({
         title: "Onboarding completed",
         description: "Welcome aboard! Redirecting to dashboard...",
       });
-
-      setTimeout(() => navigate('/'), 1500);
+      setTimeout(() => navigate('/'), 1200);
     } catch (error: any) {
       toast({
         title: "Error completing onboarding",
@@ -306,7 +447,8 @@ export default function Onboarding() {
       // Refresh documents list
       fetchDocuments();
       setStep(4);
-      navigate('/onboarding/next-step');
+      refreshOnboardingStatus();
+      setBankEditMode(false);
     } catch (error: any) {
       toast({
         title: "Upload failed",
@@ -346,6 +488,7 @@ export default function Onboarding() {
         description: "You can provide bank information later. HR will reach out if needed.",
       });
       setStep(3);
+      refreshOnboardingStatus();
     } catch (error: any) {
       toast({
         title: "Unable to skip bank details",
@@ -361,18 +504,14 @@ export default function Onboarding() {
     if (!employeeId) return;
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/onboarding/documents/${employeeId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-
-      const result = await response.json();
-      if (result.success && result.documents) {
+      // Use the API client method instead of direct fetch to ensure proper token handling
+      const result = await api.getOnboardingDocuments(employeeId);
+      if (result.documents) {
         setDocuments(result.documents);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching documents:', error);
+      // Don't show error toast for this - it's not critical if documents fail to load
     }
   };
 
@@ -382,21 +521,128 @@ export default function Onboarding() {
     }
   }, [employeeId]);
 
-  const progress = (step / 4) * 100;
+  const progress = (step / 5) * 100;
+  const completedStatusSteps = (statusProgress?.steps_completed || []).map((entry: any) => entry.step);
+  const isBankEditable = formData.bankDetailsStatus !== 'skipped' || bankEditMode;
+  const skipActionDisabled = skipLoading || (!bankEditMode && formData.bankDetailsStatus === 'skipped');
+
+  const renderDocStatusBadge = (status?: string) => {
+    if (!status) return <Badge variant="outline">Not uploaded</Badge>;
+    switch (status.toLowerCase()) {
+      case "approved":
+        return <Badge className="bg-emerald-100 text-emerald-900 border-none">Approved</Badge>;
+      case "rejected":
+        return <Badge variant="destructive">Rejected</Badge>;
+      case "pending":
+      case "uploaded":
+        return <Badge variant="outline">Pending review</Badge>;
+      default:
+        return <Badge variant="outline">{status.replace("_", " ")}</Badge>;
+    }
+  };
+
+  const handleEnableBankDetails = () => {
+    setBankEditMode(true);
+    setFormData((prev) => ({
+      ...prev,
+      bankDetailsStatus: 'pending',
+    }));
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-2xl">
-        <CardHeader>
-          <CardTitle>Complete Your Onboarding</CardTitle>
-          <CardDescription>Please fill in your details to complete the onboarding process</CardDescription>
-          <Progress value={progress} className="mt-4" />
-        </CardHeader>
+    <div className="min-h-screen bg-muted/20 py-10 px-4">
+      <div className="w-full max-w-5xl mx-auto">
+        <Card className="shadow-xl border bg-background">
+          <CardHeader className="space-y-6">
+            <div>
+              <p className="text-sm uppercase font-semibold text-primary tracking-wide">Onboarding Wizard</p>
+              <CardTitle className="text-2xl mt-2">Complete Your Onboarding</CardTitle>
+              <CardDescription>
+                Provide the required details below. Your progress is saved automatically and you can return anytime.
+              </CardDescription>
+            </div>
+            <div className="space-y-3">
+              {statusLoading && !statusProgress ? (
+                <p className="text-sm text-muted-foreground">Loading onboarding steps...</p>
+              ) : (
+                <OnboardingStatusStepper
+                  currentStatus={statusProgress?.current_status}
+                  completedSteps={completedStatusSteps}
+                />
+              )}
+              <div>
+                <div className="flex items-center justify-between text-sm mb-1">
+                  <span className="font-medium">Step {step} of 5</span>
+                  <span className="text-muted-foreground">{Math.round(progress)}% complete</span>
+                </div>
+                <Progress value={progress} />
+              </div>
+            </div>
+          </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             {step === 1 && (
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Emergency Contact</h3>
+                <h3 className="text-lg font-semibold">Personal & Contact Information</h3>
+                <div className="space-y-4 pt-4 border-t">
+                  <div className="space-y-2">
+                    <Label htmlFor="fullLegalName">Full Legal Name *</Label>
+                    <Input
+                      id="fullLegalName"
+                      value={formData.fullLegalName}
+                      onChange={(e) => setFormData({ ...formData, fullLegalName: e.target.value })}
+                      required
+                      placeholder="As per government ID"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dateOfBirth">Date of Birth *</Label>
+                      <Input
+                        id="dateOfBirth"
+                        type="date"
+                        value={formData.dateOfBirth}
+                        onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="nationality">Nationality *</Label>
+                      <Input
+                        id="nationality"
+                        value={formData.nationality}
+                        onChange={(e) => setFormData({ ...formData, nationality: e.target.value })}
+                        required
+                        placeholder="e.g., Indian, US Citizen"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="personalPhone">Personal Phone *</Label>
+                      <Input
+                        id="personalPhone"
+                        value={formData.personalPhone}
+                        onChange={(e) => setFormData({ ...formData, personalPhone: e.target.value })}
+                        required
+                        placeholder="10-digit mobile number"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="personalEmail">Personal Email *</Label>
+                      <Input
+                        id="personalEmail"
+                        type="email"
+                        value={formData.personalEmail}
+                        onChange={(e) => setFormData({ ...formData, personalEmail: e.target.value })}
+                        required
+                        placeholder="your.email@example.com"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-4 pt-4 border-t">
+                  <h4 className="text-md font-medium">Emergency Contact *</h4>
                 <div className="space-y-2">
                   <Label htmlFor="emergencyContactName">Contact Name *</Label>
                   <Input
@@ -425,6 +671,7 @@ export default function Onboarding() {
                       required
                     />
                   </div>
+                </div>
                 </div>
                 <div className="space-y-4 pt-4 border-t">
                   <h4 className="text-md font-medium">Personal Information</h4>
@@ -536,11 +783,23 @@ export default function Onboarding() {
 
             {step === 2 && (
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Bank Details</h3>
-                {formData.bankDetailsStatus === 'skipped' && (
-                  <p className="text-sm text-muted-foreground">
-                    You chose to skip bank details. HR will help you capture them later.
-                  </p>
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold">Bank Details</h3>
+                    <p className="text-sm text-muted-foreground">
+                      These details are required for salary disbursement. They stay encrypted and visible only to payroll.
+                    </p>
+                  </div>
+                  {formData.bankDetailsStatus === 'skipped' && !bankEditMode && (
+                    <Button size="sm" onClick={handleEnableBankDetails}>
+                      Provide bank details now
+                    </Button>
+                  )}
+                </div>
+                {formData.bankDetailsStatus === 'skipped' && !bankEditMode && (
+                  <div className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
+                    You chose to skip bank details earlier. Click “Provide bank details now” whenever you are ready.
+                  </div>
                 )}
                 <div className="space-y-2">
                   <Label htmlFor="bankAccountNumber">Account Number *</Label>
@@ -548,19 +807,19 @@ export default function Onboarding() {
                     id="bankAccountNumber"
                     value={formData.bankAccountNumber}
                     onChange={(e) => setFormData({ ...formData, bankAccountNumber: e.target.value })}
-                    required={formData.bankDetailsStatus !== 'skipped'}
-                    disabled={formData.bankDetailsStatus === 'skipped'}
+                    required={isBankEditable}
+                    disabled={!isBankEditable}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="bankName">Bank Name *</Label>
                     <Input
                       id="bankName"
                       value={formData.bankName}
                       onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
-                      required={formData.bankDetailsStatus !== 'skipped'}
-                      disabled={formData.bankDetailsStatus === 'skipped'}
+                      required={isBankEditable}
+                      disabled={!isBankEditable}
                     />
                   </div>
                   <div className="space-y-2">
@@ -569,8 +828,8 @@ export default function Onboarding() {
                       id="bankBranch"
                       value={formData.bankBranch}
                       onChange={(e) => setFormData({ ...formData, bankBranch: e.target.value })}
-                      required={formData.bankDetailsStatus !== 'skipped'}
-                      disabled={formData.bankDetailsStatus === 'skipped'}
+                      required={isBankEditable}
+                      disabled={!isBankEditable}
                     />
                   </div>
                 </div>
@@ -580,19 +839,28 @@ export default function Onboarding() {
                     id="ifscCode"
                     value={formData.ifscCode}
                     onChange={(e) => setFormData({ ...formData, ifscCode: e.target.value })}
-                    required={formData.bankDetailsStatus !== 'skipped'}
-                    disabled={formData.bankDetailsStatus === 'skipped'}
+                    required={isBankEditable}
+                    disabled={!isBankEditable}
                   />
                 </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={handleSkipBankDetails}
-                    disabled={skipLoading || formData.bankDetailsStatus === 'skipped'}
-                  >
-                    {formData.bankDetailsStatus === 'skipped' ? 'Bank details skipped' : skipLoading ? 'Skipping...' : 'Skip bank details'}
-                  </Button>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    Ensure IFSC and account number match your bank records to avoid salary delays.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleSkipBankDetails}
+                      disabled={skipActionDisabled}
+                    >
+                      {formData.bankDetailsStatus === 'skipped' && !bankEditMode
+                        ? 'Bank details skipped'
+                        : skipLoading
+                        ? 'Skipping...'
+                        : 'Skip for now'}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -660,7 +928,7 @@ export default function Onboarding() {
                     onRefresh={fetchDocuments}
                     onUploadStart={() => setIsUploading(true)}
                     onUploadEnd={() => setIsUploading(false)}
-                    onUploadSuccess={() => navigate('/onboarding/next-step')}
+                    onUploadSuccess={fetchDocuments}
                   />
                 ) : (
                   <>
@@ -738,7 +1006,7 @@ export default function Onboarding() {
                               <div>
                                 <p className="text-sm font-medium">{doc.file_name}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  {doc.document_type} • {new Date(doc.uploaded_at).toLocaleDateString()}
+                                  {doc.doc_type} • {new Date(doc.uploaded_at).toLocaleDateString()}
                                 </p>
                               </div>
                             </div>
@@ -751,13 +1019,60 @@ export default function Onboarding() {
               </div>
             )}
 
+            {step === 5 && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold">Review & Submit</h3>
+                <div className="space-y-4 p-4 border rounded-lg bg-muted/50">
+                  <div>
+                    <p className="text-sm font-medium mb-2">Personal Information</p>
+                    <div className="text-sm space-y-1 text-muted-foreground">
+                      {formData.fullLegalName && <p>Name: {formData.fullLegalName}</p>}
+                      {formData.dateOfBirth && <p>DOB: {formData.dateOfBirth}</p>}
+                      {formData.nationality && <p>Nationality: {formData.nationality}</p>}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium mb-2">Government IDs</p>
+                    <div className="text-sm space-y-1 text-muted-foreground">
+                      {formData.panNumber && <p>PAN: {formData.panNumber}</p>}
+                      {formData.aadharNumber && <p>Aadhaar: {formData.aadharNumber}</p>}
+                      {formData.passportNumber && <p>Passport: {formData.passportNumber}</p>}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium mb-2">Documents</p>
+                    <div className="rounded-lg border divide-y bg-background">
+                      {documentStatusRows.map((doc) => (
+                        <div key={doc.type} className="flex items-center justify-between px-3 py-2 text-sm">
+                          <div className="flex flex-col">
+                            <span className="font-medium">{doc.label}</span>
+                            {doc.fileName && (
+                              <span className="text-xs text-muted-foreground truncate max-w-[220px]">
+                                {doc.fileName}
+                              </span>
+                            )}
+                          </div>
+                          {renderDocStatusBadge(doc.status)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <p className="text-sm text-muted-foreground">
+                    Please review all information before submitting. You can go back to make changes.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-4 pt-4">
               {step > 1 && (
                 <Button type="button" variant="outline" onClick={handleBack}>
                   Back
                 </Button>
               )}
-              {step < 4 ? (
+              {step < 5 ? (
                 <Button type="button" onClick={handleNext}>
                   Next
                 </Button>
@@ -771,5 +1086,6 @@ export default function Onboarding() {
         </CardContent>
       </Card>
     </div>
+  </div>
   );
 }

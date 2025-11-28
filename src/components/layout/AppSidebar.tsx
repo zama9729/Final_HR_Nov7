@@ -72,6 +72,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "My Profile", url: "/my/profile", icon: Users },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "My Shifts", url: "/my/profile?tab=shifts", icon: CalendarClock },
+        { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Leave Requests", url: "/leaves", icon: Calendar },
         { title: "Request Resignation", url: "/offboarding/new", icon: LogOut },
         { title: "Documents", url: "/documents", icon: Inbox },
@@ -115,6 +116,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
+        { title: "Background Checks", url: "/background-checks", icon: UserCheck },
       ],
     },
     {
@@ -162,6 +164,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
+        { title: "Background Checks", url: "/background-checks", icon: UserCheck },
       ],
     },
     {
@@ -366,9 +369,6 @@ export function AppSidebar() {
     if (item.roles && (!userRole || !item.roles.includes(userRole))) {
       return false;
     }
-    // Always show timesheets for admin/hr/ceo/director/manager roles, regardless of capture method
-    const canManageTimesheets = ['admin', 'hr', 'ceo', 'director', 'manager'].includes(userRole || '');
-    if (item.feature === 'timesheets' && !isTimesheetMode && !canManageTimesheets) return false;
     if (item.feature === 'clock' && !isClockMode) return false;
     if (item.sso && !payrollIntegrationEnabled) return false;
     return true;

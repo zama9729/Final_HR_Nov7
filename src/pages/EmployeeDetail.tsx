@@ -480,9 +480,9 @@ export default function EmployeeDetail() {
                   <FileText className="mr-2 h-4 w-4" />
                   Documents
                 </TabsTrigger>
-                <TabsTrigger value="checks">
+                <TabsTrigger value="background-check">
                   <UserCheck className="mr-2 h-4 w-4" />
-                  Background
+                  Background Check
                 </TabsTrigger>
                 <TabsTrigger value="probation">
                   <Activity className="mr-2 h-4 w-4" />
@@ -800,8 +800,8 @@ export default function EmployeeDetail() {
               <TabsContent value="documents">
                 <DocumentReviewPanel employeeId={employee.id} />
               </TabsContent>
-              <TabsContent value="checks">
-                <BackgroundCheckPanel employeeId={employee.id} />
+              <TabsContent value="background-check">
+                {employee?.id && <BackgroundCheckPanel employeeId={employee.id} />}
               </TabsContent>
               <TabsContent value="probation">
                 <ProbationPanel employeeId={employee.id} canEdit={isHrUser} />

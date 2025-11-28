@@ -62,7 +62,6 @@ import OffboardingNew from "./pages/OffboardingNew";
 import OffboardingQueue from "./pages/OffboardingQueue";
 import OffboardingDetail from "./pages/OffboardingDetail";
 import OffboardingPolicies from "./pages/OffboardingPolicies";
-import OnboardingEnhanced from "./pages/OnboardingEnhanced";
 import PoliciesManagement from "./pages/PoliciesManagement";
 import PolicyEditor from "./pages/PolicyEditor";
 import PromotionCycles from "./pages/PromotionCycles";
@@ -154,7 +153,6 @@ const App = () => (
             <Route path="/offboarding/:id" element={<ProtectedRoute><OffboardingDetail /></ProtectedRoute>} />
             
             {/* Multi-tenant routes */}
-            <Route path="/onboarding/enhanced" element={<ProtectedRoute><OnboardingEnhanced /></ProtectedRoute>} />
             <Route path="/policies/management" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><PoliciesManagement /></ProtectedRoute>} />
             <Route path="/policies/editor/:id" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><PolicyEditor /></ProtectedRoute>} />
             <Route path="/promotion/cycles" element={<ProtectedRoute><PromotionCycles /></ProtectedRoute>} />

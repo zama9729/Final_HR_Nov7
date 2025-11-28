@@ -7,7 +7,7 @@ import { createPool, query as dbQuery } from './db/pool.js';
 import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
 import profilesRoutes from './routes/profiles.js';
-import onboardingRoutes from './routes/onboarding.js';
+import onboardingRoutes, { ensureDocumentInfra } from './routes/onboarding.js';
 import onboardingTrackerRoutes from './routes/onboarding-tracker.js';
 import organizationsRoutes from './routes/organizations.js';
 import statsRoutes from './routes/stats.js';
@@ -59,6 +59,7 @@ import schedulingRoutes from './routes/scheduling.js';
 import rosterRoutes from './routes/roster.js';
 import probationRoutes from './routes/probation.js';
 import documentUploadRoutes from './routes/document-upload.js';
+import backgroundCheckRoutes from './routes/background-check.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs } from './services/cron.js';
 import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
@@ -123,6 +124,10 @@ const deriveReceiptsMountPath = () => {
 const receiptsMountPath = deriveReceiptsMountPath();
 app.use(receiptsMountPath, express.static(receiptsDirectory));
 
+ensureDocumentInfra()
+  .then(() => console.log('✅ Onboarding document infrastructure ready'))
+  .catch((error) => console.error('Failed to ensure onboarding document infrastructure:', error));
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -147,6 +152,7 @@ app.use('/api/workflows', authenticateToken, setTenantContext, workflowsRoutes);
 
 // Onboarding routes (no auth required for some endpoints)
 app.use('/api/onboarding', onboardingRoutes);
+app.use('/api/onboarding', backgroundCheckRoutes); // Background check routes under onboarding
 app.use('/api/onboarding/docs', documentUploadRoutes);
 app.use('/api/onboarding-tracker', onboardingTrackerRoutes);
 app.use('/api/appraisal-cycles', appraisalCycleRoutes);
@@ -281,6 +287,32 @@ createPool().then(async () => {
     console.warn('⚠️  Please manually run the migration to add onboarding columns');
   }
   
+  // Initialize MinIO buckets
+  try {
+    const { ensureBucketExists, getStorageProvider, getOnboardingBucket, isS3Available } = await import('./services/storage.js');
+    const storageProvider = getStorageProvider();
+    
+    if (storageProvider === 's3' && isS3Available()) {
+      const bucketName = getOnboardingBucket();
+      console.log(`\n[MinIO] Initializing bucket: ${bucketName}`);
+      console.log(`[MinIO] Endpoint: ${process.env.MINIO_ENDPOINT || process.env.AWS_S3_ENDPOINT || 'not set'}`);
+      await ensureBucketExists(bucketName);
+      console.log(`✅ MinIO bucket '${bucketName}' is ready\n`);
+    } else {
+      console.log('\n⚠️  MinIO/S3 storage is not configured. Document uploads will use local storage.');
+      console.log('   To enable MinIO, ensure these environment variables are set:');
+      console.log('   - MINIO_ENABLED=true');
+      console.log('   - MINIO_ENDPOINT=localhost (or minio for Docker)');
+      console.log('   - MINIO_ACCESS_KEY=minioadmin');
+      console.log('   - MINIO_SECRET_KEY=minioadmin123');
+      console.log('   - MINIO_BUCKET_ONBOARDING=hr-onboarding-docs\n');
+    }
+  } catch (error) {
+    console.error('\n⚠️  Error initializing MinIO buckets:', error.message);
+    console.error('   Document uploads may not work until MinIO is properly configured');
+    console.error('   Run: node server/scripts/init-minio.js to diagnose the issue\n');
+  }
+
   // Ensure attendance tables exist
   try {
     const tableCheck = await dbQuery(`
