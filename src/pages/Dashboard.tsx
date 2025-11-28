@@ -583,7 +583,7 @@ export default function Dashboard() {
                       : 'No shifts scheduled'}
                   </p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar')}>
+                <Button variant="ghost" size="sm" onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/calendar')}>
                   View schedule
                 </Button>
               </div>
@@ -662,7 +662,7 @@ export default function Dashboard() {
                   <div className="text-sm text-muted-foreground">No upcoming shifts scheduled</div>
                 )}
                 <Button
-                  onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar')}
+                  onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/calendar')}
                   className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)]"
                 >
                   {isEmployee ? 'View My Shifts' : 'View Calendar'}

@@ -570,6 +570,10 @@ export default function MyProfile() {
               <CalendarDays className="mr-2 h-4 w-4" />
               My Shifts
             </TabsTrigger>
+            <TabsTrigger value="timesheets" disabled={!employeeId}>
+              <Clock className="mr-2 h-4 w-4" />
+              Timesheets
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="about">
@@ -916,6 +920,40 @@ export default function MyProfile() {
               <Card>
                 <CardContent className="py-10 text-center text-muted-foreground">
                   Shifts are available only for employees with active records. Please contact HR if you need access.
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="timesheets">
+            {employeeId ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="h-5 w-5" />
+                    My Timesheets
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      View and manage your timesheets
+                    </p>
+                    <Button 
+                      onClick={() => window.location.href = '/timesheets'}
+                      variant="default"
+                      className="w-full sm:w-auto"
+                    >
+                      <Clock className="mr-2 h-4 w-4" />
+                      Go to Timesheets
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="py-10 text-center text-muted-foreground">
+                  Timesheets are available only for employees with active records. Please contact HR if you need access.
                 </CardContent>
               </Card>
             )}

@@ -31,7 +31,10 @@ import {
   Award,
   Puzzle,
   Briefcase,
-  User
+  User,
+  Clock,
+  FileText,
+  UserCheck
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -467,6 +470,10 @@ export default function EmployeeDetail() {
               <Briefcase className="mr-2 h-4 w-4" />
               Past Projects
             </TabsTrigger>
+            <TabsTrigger value="timesheets">
+              <Clock className="mr-2 h-4 w-4" />
+              Timesheets
+            </TabsTrigger>
             {isHrUser && (
               <>
                 <TabsTrigger value="documents">
@@ -749,6 +756,45 @@ export default function EmployeeDetail() {
               />
             )}
           </TabsContent>
+
+          <TabsContent value="timesheets">
+            {id && canView && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="h-5 w-5" />
+                    Timesheets
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      View and manage timesheets for {employee?.profiles?.first_name} {employee?.profiles?.last_name}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button 
+                        onClick={() => window.open(`/timesheets?employee=${id}`, '_blank')}
+                        variant="default"
+                      >
+                        <Clock className="mr-2 h-4 w-4" />
+                        View Employee Timesheets
+                      </Button>
+                      {isHrUser && (
+                        <Button 
+                          onClick={() => window.open('/timesheet-approvals', '_blank')}
+                          variant="outline"
+                        >
+                          <FileText className="mr-2 h-4 w-4" />
+                          View All Approvals
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
           {isHrUser && employee?.id && (
             <>
               <TabsContent value="documents">
