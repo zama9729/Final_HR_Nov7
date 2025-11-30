@@ -22,6 +22,7 @@ import {
   Receipt,
   Upload,
   ChevronDown,
+  Briefcase,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -80,12 +81,18 @@ const roleNavItems: Record<string, NavGroup[]> = {
       ],
     },
     {
+      id: "employee-payroll",
+      label: "Payroll",
+      items: [
+        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
+      ],
+    },
+    {
       id: "employee-compliance",
       label: "Compliance",
       items: [
         { title: "Tax Declaration", url: "/tax/declaration", icon: Receipt },
         { title: "Form 16", url: "/reports/form16", icon: Receipt },
-        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
       ],
     },
     {
@@ -110,6 +117,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "My Profile", url: "/my/profile", icon: Users },
         { title: "Employees", url: "/employees", icon: Users },
+        { title: "Teams", url: "/teams", icon: Building2 },
+        { title: "Projects", url: "/projects", icon: Briefcase },
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
@@ -131,12 +140,18 @@ const roleNavItems: Record<string, NavGroup[]> = {
       ],
     },
     {
+      id: "admin-payroll",
+      label: "Payroll",
+      items: [
+        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
+      ],
+    },
+    {
       id: "admin-compliance",
       label: "Compliance",
       items: [
         { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
         { title: "Form 16", url: "/reports/form16", icon: Receipt },
-        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
         { title: "Attendance Upload", url: "/attendance/upload", icon: Upload },
         { title: "Upload History", url: "/attendance/history", icon: History },
       ],
@@ -158,6 +173,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "My Profile", url: "/my/profile", icon: Users },
         { title: "Employees", url: "/employees", icon: Users },
+        { title: "Teams", url: "/teams", icon: Building2 },
+        { title: "Projects", url: "/projects", icon: Briefcase },
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
@@ -188,6 +205,12 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Upload History", url: "/attendance/history", icon: History },
         { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
         { title: "Form 16", url: "/reports/form16", icon: Receipt },
+      ],
+    },
+    {
+      id: "hr-payroll",
+      label: "Payroll",
+      items: [
         { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
       ],
     },
@@ -208,6 +231,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
       label: "People Operations",
       items: [
         { title: "Employees", url: "/employees", icon: Users },
+        { title: "Teams", url: "/teams", icon: Building2 },
+        { title: "Projects", url: "/projects", icon: Briefcase },
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
@@ -237,8 +262,59 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Upload History", url: "/attendance/history", icon: History },
         { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
         { title: "Form 16", url: "/reports/form16", icon: Receipt },
-        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
         { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+      ],
+    },
+    {
+      id: "ceo-payroll",
+      label: "Payroll",
+      items: [
+        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
+      ],
+    },
+  ],
+  manager: [
+    {
+      id: "manager-overview",
+      label: "Overview",
+      items: [
+        { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+        { title: "Analytics", url: "/analytics", icon: BarChart3 },
+        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+      ],
+    },
+    {
+      id: "manager-people",
+      label: "People Operations",
+      items: [
+        { title: "My Profile", url: "/my/profile", icon: Users },
+        { title: "Employees", url: "/employees", icon: Users },
+        { title: "Org Chart", url: "/org-chart", icon: Network },
+      ],
+    },
+    {
+      id: "manager-attendance",
+      label: "Attendance & Leave",
+      items: [
+        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
+        { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
+        { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
+        { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
+      ],
+    },
+    {
+      id: "manager-payroll",
+      label: "Payroll",
+      items: [
+        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
+      ],
+    },
+    {
+      id: "manager-compliance",
+      label: "Compliance",
+      items: [
+        { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
+        { title: "Form 16", url: "/reports/form16", icon: Receipt },
       ],
     },
   ],
@@ -256,7 +332,7 @@ const roleAlias: Record<string, keyof typeof roleNavItems> = {
   hr: "hr",
   ceo: "ceo",
   director: "hr",
-  manager: "admin",
+  manager: "manager",
   accountant: "admin",
   employee: "employee",
   super_user: "super_user",

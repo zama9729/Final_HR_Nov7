@@ -5,7 +5,7 @@ import { queryWithOrg } from '../db/pool.js';
 
 const router = express.Router();
 
-router.use(authenticateToken, requireRole('admin', 'hr', 'ceo'), setTenantContext, (req, res, next) => {
+router.use(authenticateToken, requireRole('admin', 'hr', 'ceo', 'manager'), setTenantContext, (req, res, next) => {
   if (!req.orgId) {
     return res.status(400).json({ error: 'Organization context missing' });
   }

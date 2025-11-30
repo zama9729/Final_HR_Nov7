@@ -48,6 +48,7 @@ import { format, differenceInCalendarDays } from 'date-fns';
 import { DocumentReviewPanel } from '@/components/hr/DocumentReviewPanel';
 import { BackgroundCheckPanel } from '@/components/hr/BackgroundCheckPanel';
 import { ProbationPanel } from '@/components/hr/ProbationPanel';
+import { TeamReportingSection } from '@/components/TeamReportingSection';
 
 interface EmployeeData {
   id: string;
@@ -545,6 +546,9 @@ export default function EmployeeDetail() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Team & Reporting Section */}
+              <TeamReportingSection employeeId={employee.id} />
 
               {/* Onboarding Progress */}
               <Card>

@@ -335,6 +335,12 @@ class ApiClient {
     });
   }
 
+  async clearAllNotifications() {
+    return this.request('/api/notifications/clear', {
+      method: 'POST',
+    });
+  }
+
   // Organization setup
   async getSetupStatus() {
     return this.request('/api/setup/status');
@@ -899,9 +905,14 @@ class ApiClient {
 
   async createProject(data: {
     name: string;
+    code?: string;
+    description?: string;
     start_date?: string;
     end_date?: string;
-    required_skills?: string[];
+    project_manager_id?: string;
+    team_id?: string;
+    status?: 'PLANNED' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED';
+    required_skills?: Array<{ name: string; min_level: number }>;
     required_certifications?: string[];
     priority?: number;
     expected_allocation_percent?: number;
@@ -915,9 +926,14 @@ class ApiClient {
 
   async updateProject(id: string, data: {
     name?: string;
+    code?: string;
+    description?: string;
     start_date?: string;
     end_date?: string;
-    required_skills?: string[];
+    project_manager_id?: string | null;
+    team_id?: string | null;
+    status?: 'PLANNED' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED';
+    required_skills?: Array<{ name: string; min_level: number }>;
     required_certifications?: string[];
     priority?: number;
     expected_allocation_percent?: number;
@@ -1940,6 +1956,132 @@ class ApiClient {
     });
   }
 
+  // Unified Policy Management APIs
+  async getUnifiedPolicies(params?: { category?: string; status?: string; search?: string }) {
+    const query = new URLSearchParams();
+    if (params?.category) query.append('category', params.category);
+    if (params?.status) query.append('status', params.status);
+    if (params?.search) query.append('search', params.search);
+    return this.request(`/api/unified-policies?${query.toString()}`);
+  }
+
+  async getUnifiedPolicy(id: string) {
+    return this.request(`/api/unified-policies/${id}`);
+  }
+
+  async createUnifiedPolicy(data: {
+    category: 'LEAVE' | 'OFFBOARDING' | 'GENERAL';
+    title: string;
+    short_description?: string;
+    content_html: string;
+    content_markdown?: string;
+    effective_from?: string;
+    effective_to?: string;
+  }) {
+    return this.request('/api/unified-policies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateUnifiedPolicy(id: string, data: {
+    title?: string;
+    short_description?: string;
+    content_html?: string;
+    content_markdown?: string;
+    effective_from?: string;
+    effective_to?: string;
+    status?: 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'ARCHIVED';
+  }) {
+    return this.request(`/api/unified-policies/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async publishUnifiedPolicy(id: string, changelog_text?: string) {
+    return this.request(`/api/unified-policies/${id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ changelog_text }),
+    });
+  }
+
+  async archiveUnifiedPolicy(id: string) {
+    return this.request(`/api/unified-policies/${id}/archive`, {
+      method: 'POST',
+    });
+  }
+
+  async getUnifiedPolicyVersions(id: string) {
+    return this.request(`/api/unified-policies/${id}/versions`);
+  }
+
+  async getUnifiedPolicyVersion(id: string, version: number) {
+    return this.request(`/api/unified-policies/${id}/versions/${version}`);
+  }
+
+  async downloadUnifiedPolicyPDF(id: string, version: number) {
+    const response = await fetch(`${this.baseURL}/api/unified-policies/${id}/versions/${version}/download`, {
+      headers: {
+        'Authorization': `Bearer ${this._token}`,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+      throw new Error(error.error || 'Failed to download PDF');
+    }
+
+    // Check if response is JSON (presigned URL) or PDF blob
+    const contentType = response.headers.get('content-type');
+    
+    if (contentType?.includes('application/json')) {
+      // It's a presigned URL
+      const data = await response.json();
+      if (data.downloadUrl) {
+        // Open presigned URL in new tab
+        window.open(data.downloadUrl, '_blank');
+        return;
+      }
+    }
+    
+    // It's a PDF blob
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `policy-${id}-v${version}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  }
+
+  // Employee policy APIs
+  async getMyPolicies(params?: { category?: string; search?: string }) {
+    const query = new URLSearchParams();
+    if (params?.category) query.append('category', params.category);
+    if (params?.search) query.append('search', params.search);
+    return this.request(`/api/unified-policies/me/policies?${query.toString()}`);
+  }
+
+  async getMyPolicy(id: string) {
+    return this.request(`/api/unified-policies/me/policies/${id}`);
+  }
+
+  // RAG ingestion
+  async reindexPoliciesForRAG() {
+    return this.request('/api/unified-policies/rag/reindex', {
+      method: 'POST',
+    });
+  }
+
+  async ingestPolicyForRAG(id: string) {
+    return this.request(`/api/unified-policies/${id}/rag/ingest`, {
+      method: 'POST',
+    });
+  }
+
   async uploadProfilePicture(url: string, key: string) {
     return this.request('/api/employees/profile-picture/upload', {
       method: 'POST',
@@ -1950,6 +2092,174 @@ class ApiClient {
   // Check for missing onboarding data
   async getMissingOnboardingData() {
     return this.request('/api/onboarding/me/missing-data');
+  }
+
+  // Teams Management APIs
+  async getTeams(params?: { type?: 'FUNCTIONAL' | 'PROJECT'; search?: string; active?: boolean }) {
+    const query = new URLSearchParams();
+    if (params?.type) query.append('type', params.type);
+    if (params?.search) query.append('search', params.search);
+    if (params?.active !== undefined) query.append('active', String(params.active));
+    const response = await this.request(`/api/teams?${query.toString()}`);
+    return response.teams || [];
+  }
+
+  async getTeam(id: string) {
+    return this.request(`/api/teams/${id}`);
+  }
+
+  async createTeam(data: {
+    name: string;
+    code?: string;
+    description?: string;
+    team_type?: 'FUNCTIONAL' | 'PROJECT';
+    parent_team_id?: string;
+    owner_manager_id?: string;
+  }) {
+    return this.request('/api/teams', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTeam(id: string, data: {
+    name?: string;
+    code?: string;
+    description?: string;
+    parent_team_id?: string;
+    owner_manager_id?: string;
+    is_active?: boolean;
+  }) {
+    return this.request(`/api/teams/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async activateTeam(id: string) {
+    return this.request(`/api/teams/${id}/activate`, {
+      method: 'POST',
+    });
+  }
+
+  async deactivateTeam(id: string) {
+    return this.request(`/api/teams/${id}/deactivate`, {
+      method: 'POST',
+    });
+  }
+
+  async getTeamMembers(teamId: string) {
+    const response = await this.request(`/api/teams/${teamId}/members`);
+    return response.members || [];
+  }
+
+  async addTeamMember(teamId: string, data: {
+    employee_id: string;
+    role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
+    is_primary?: boolean;
+    start_date?: string;
+  }) {
+    return this.request(`/api/teams/${teamId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTeamMembership(teamId: string, memberId: string, data: {
+    role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
+    is_primary?: boolean;
+    end_date?: string;
+  }) {
+    return this.request(`/api/teams/${teamId}/members/${memberId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Reporting Lines APIs
+  async getEmployeeReportingLines(employeeId: string) {
+    const response = await this.request(`/api/reporting-lines/employee/${employeeId}`);
+    return response.reporting_lines || [];
+  }
+
+  async getManagerDirectReports(managerId: string, relationshipType?: string) {
+    const query = relationshipType ? `?relationship_type=${relationshipType}` : '';
+    const response = await this.request(`/api/reporting-lines/manager/${managerId}${query}`);
+    return response.direct_reports || [];
+  }
+
+  async setPrimaryManager(data: {
+    employee_id: string;
+    manager_id: string;
+    start_date?: string;
+  }) {
+    return this.request('/api/reporting-lines/set-primary-manager', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async addSecondaryManager(data: {
+    employee_id: string;
+    manager_id: string;
+    team_id?: string;
+    start_date?: string;
+  }) {
+    return this.request('/api/reporting-lines/add-secondary-manager', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeManager(data: {
+    reporting_line_id: string;
+    end_date?: string;
+  }) {
+    return this.request('/api/reporting-lines/remove-manager', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Enhanced Projects APIs
+  async getProjects(params?: { status?: string; search?: string }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.append('status', params.status);
+    if (params?.search) query.append('search', params.search);
+    const response = await this.request(`/api/v1/projects?${query.toString()}`);
+    return response.projects || [];
+  }
+
+
+  async getProjectMembers(projectId: string) {
+    const response = await this.request(`/api/v1/projects/${projectId}/members`);
+    return response.members || [];
+  }
+
+  async createProjectAllocation(projectId: string, data: {
+    employee_id: string;
+    allocation_type?: 'FULL_TIME' | 'PART_TIME' | 'AD_HOC';
+    percent_allocation?: number;
+    start_date?: string;
+    end_date?: string;
+    role_on_project?: string;
+  }) {
+    return this.request(`/api/v1/projects/${projectId}/allocations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProjectAllocation(projectId: string, allocId: string, data: {
+    allocation_type?: 'FULL_TIME' | 'PART_TIME' | 'AD_HOC';
+    percent_allocation?: number;
+    end_date?: string;
+    role_on_project?: string;
+  }) {
+    return this.request(`/api/v1/projects/${projectId}/allocations/${allocId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
   }
 }
 

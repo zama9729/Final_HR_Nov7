@@ -358,8 +358,14 @@ export default function EnhancedOrgChart() {
         departments: data?.departments || [],
         teams: data?.teams || [],
       });
-    } catch (error) {
-      console.error("Failed to load branches", error);
+    } catch (error: any) {
+      // Silently handle permission errors - managers may not have access to branches
+      if (error?.message?.includes('permission') || error?.message?.includes('403')) {
+        console.log('Branch access not available for this role');
+        setHierarchy({ branches: [], departments: [], teams: [] });
+      } else {
+        console.error("Failed to load branches", error);
+      }
     }
   };
 

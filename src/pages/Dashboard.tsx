@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
 import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
 import { useClockResultToast } from "@/components/attendance/ClockResultToast";
+import confetti from "canvas-confetti";
 
 interface DashboardStats {
   timesheetHours: number;
@@ -69,6 +70,8 @@ export default function Dashboard() {
   const [pendingClockAction, setPendingClockAction] = useState<'IN' | 'OUT' | null>(null);
   const [showClockConsent, setShowClockConsent] = useState(false);
   const [workDuration, setWorkDuration] = useState('0h 00m');
+  const [isBirthday, setIsBirthday] = useState(false);
+  const [employeeData, setEmployeeData] = useState<any>(null);
   const presenceIndicators: Record<string, string> = {
     online: "bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.7)]",
     away: "bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.7)]",
@@ -86,6 +89,7 @@ export default function Dashboard() {
     fetchDashboardStats();
     fetchPresenceStatus();
     fetchClockStatus();
+    fetchEmployeeDataForBirthday();
   }, [user]);
 
   useEffect(() => {
@@ -263,8 +267,75 @@ export default function Dashboard() {
     }
   };
 
+  const fetchEmployeeDataForBirthday = async () => {
+    if (!user) return;
+
+    try {
+      const employeeIdResult = await api.getEmployeeId();
+      if (employeeIdResult?.id) {
+        const employee = await api.getEmployee(employeeIdResult.id);
+        setEmployeeData(employee);
+        
+        // Check if today is birthday
+        if (employee?.onboarding_data?.date_of_birth) {
+          const dob = parseISO(employee.onboarding_data.date_of_birth);
+          const today = new Date();
+          const isTodayBirthday = dob.getDate() === today.getDate() && 
+                                  dob.getMonth() === today.getMonth();
+          
+          setIsBirthday(isTodayBirthday);
+          
+          // Trigger confetti every time on birthday (on each visit/refresh)
+          if (isTodayBirthday) {
+            // Small delay to ensure component is rendered, then trigger confetti
+            setTimeout(() => {
+              triggerConfetti();
+            }, 500);
+          }
+        }
+      }
+    } catch (error) {
+      // Silently fail - employee data might not be available
+      console.log('Could not fetch employee data for birthday check:', error);
+    }
+  };
+
+  const triggerConfetti = () => {
+    const duration = 3000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+
+    function randomInRange(min: number, max: number) {
+      return Math.random() * (max - min) + min;
+    }
+
+    const interval: any = setInterval(function() {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+      
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }
+      });
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }
+      });
+    }, 250);
+  };
+
   const getFirstName = () => {
     const metadata = (user as any)?.user_metadata;
+    if (employeeData?.profiles?.first_name) {
+      return employeeData.profiles.first_name;
+    }
     return metadata?.first_name || user?.email?.split('@')[0] || 'User';
   };
 
@@ -517,10 +588,19 @@ export default function Dashboard() {
     <AppLayout>
       <div className="space-y-6 p-6">
         {/* Welcome Section */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-2">Welcome back, {getFirstName()}!</h1>
+        <div className="mb-6 relative">
+          {isBirthday && (
+            <div className="absolute -top-4 -left-4 -right-4 -bottom-4 pointer-events-none">
+              {/* Confetti container - confetti is triggered via canvas-confetti */}
+            </div>
+          )}
+          <h1 className={`text-3xl font-bold mb-2 ${isBirthday ? 'text-primary animate-pulse' : ''}`}>
+            {isBirthday ? `🎉 Happy Birthday, ${getFirstName()}! 🎉` : `Welcome back, ${getFirstName()}!`}
+          </h1>
           <p className="text-muted-foreground">
-            You are {presenceStatus === 'online' ? 'online' : presenceStatus.replace('_', ' ')}
+            {isBirthday 
+              ? "Wishing you a wonderful day filled with joy and celebration!" 
+              : `You are ${presenceStatus === 'online' ? 'online' : presenceStatus.replace('_', ' ')}`}
           </p>
         </div>
 

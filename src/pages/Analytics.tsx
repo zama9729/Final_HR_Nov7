@@ -195,8 +195,14 @@ export default function Analytics() {
       if (!selectedBranchId && formatted.length) {
         setSelectedBranchId(formatted[0].id);
       }
-    } catch (error) {
-      console.error("Branch hierarchy error", error);
+    } catch (error: any) {
+      // Silently handle permission errors - managers may not have access to branches
+      if (error?.message?.includes('permission') || error?.message?.includes('403')) {
+        console.log('Branch access not available for this role');
+        setBranches([]);
+      } else {
+        console.error("Branch hierarchy error", error);
+      }
     }
   };
 

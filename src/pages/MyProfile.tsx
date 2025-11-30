@@ -28,7 +28,6 @@ import {
   Save,
   X,
   Info,
-  FileText,
   CreditCard,
   Home,
   UserCheck,
