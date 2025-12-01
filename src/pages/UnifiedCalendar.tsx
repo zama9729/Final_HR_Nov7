@@ -83,6 +83,7 @@ type CalendarData = {
 export default function UnifiedCalendar() {
   const { toast } = useToast();
   const { userRole } = useAuth();
+  const normalizedRole = (userRole || '').toLowerCase();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [calendarData, setCalendarData] = useState<CalendarData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -104,8 +105,8 @@ export default function UnifiedCalendar() {
   const orgFullAccessRoles = ["hr", "ceo", "director", "admin", "manager"];
   // Roles that can toggle between "My Calendar" and "Organization" views in the UI
   const orgToggleRoles = ["hr", "ceo", "director", "admin", "manager"];
-  const isFullOrgAccess = orgFullAccessRoles.includes(userRole || '');
-  const canToggleOrganization = orgToggleRoles.includes(userRole || '');
+  const isFullOrgAccess = orgFullAccessRoles.includes(normalizedRole);
+  const canToggleOrganization = orgToggleRoles.includes(normalizedRole);
   const [viewLevel, setViewLevel] = useState<'employee' | 'organization'>('employee');
 
   useEffect(() => {

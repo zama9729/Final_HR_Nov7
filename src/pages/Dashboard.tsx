@@ -2,15 +2,18 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity } from "lucide-react";
-import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay } from "date-fns";
+import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2 } from "lucide-react";
+import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay, isSameDay } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
+import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
+import { useClockResultToast } from "@/components/attendance/ClockResultToast";
+import confetti from "canvas-confetti";
 
 interface DashboardStats {
   timesheetHours: number;
@@ -28,10 +31,27 @@ interface UpcomingShift {
   shift_type: string;
 }
 
+interface ClockSession {
+  id: string;
+  clock_in_at: string;
+  clock_out_at: string | null;
+  duration_minutes: number | null;
+  work_type?: string | null;
+}
+
+interface ClockStatusResponse {
+  capture_method?: string;
+  is_clock_mode?: boolean;
+  is_clocked_in: boolean;
+  open_session: ClockSession | null;
+  last_event?: { event_type: string; raw_timestamp: string } | null;
+}
+
 export default function Dashboard() {
   const { user, userRole } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { showSuccess, showError } = useClockResultToast();
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
     timesheetHours: 0,
@@ -44,11 +64,32 @@ export default function Dashboard() {
   const [loadingShifts, setLoadingShifts] = useState(false);
   const [attendanceTrends, setAttendanceTrends] = useState<Array<{ date: string; hours: number }>>([]);
   const [loadingTrends, setLoadingTrends] = useState(false);
+  const [clockStatus, setClockStatus] = useState<ClockStatusResponse | null>(null);
+  const [clockStatusLoading, setClockStatusLoading] = useState(false);
+  const [clockActionLoading, setClockActionLoading] = useState(false);
+  const [pendingClockAction, setPendingClockAction] = useState<'IN' | 'OUT' | null>(null);
+  const [showClockConsent, setShowClockConsent] = useState(false);
+  const [workDuration, setWorkDuration] = useState('0h 00m');
+  const [isBirthday, setIsBirthday] = useState(false);
+  const [employeeData, setEmployeeData] = useState<any>(null);
+  const presenceIndicators: Record<string, string> = {
+    online: "bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.7)]",
+    away: "bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.7)]",
+    break: "bg-red-400 shadow-[0_0_12px_rgba(248,113,113,0.7)]",
+    out_of_office: "bg-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.7)]",
+    default: "bg-slate-400 shadow-[0_0_10px_rgba(148,163,184,0.6)]",
+  };
+  const presenceLabel = useMemo(
+    () => presenceStatus.replace('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+    [presenceStatus]
+  );
 
   useEffect(() => {
     checkOnboardingStatus();
     fetchDashboardStats();
     fetchPresenceStatus();
+    fetchClockStatus();
+    fetchEmployeeDataForBirthday();
   }, [user]);
 
   useEffect(() => {
@@ -60,6 +101,25 @@ export default function Dashboard() {
       setAttendanceTrends([]);
     }
   }, [userRole]);
+
+  useEffect(() => {
+    if (!clockStatus?.is_clocked_in || !clockStatus.open_session?.clock_in_at) {
+      setWorkDuration('0h 00m');
+      return;
+    }
+
+    const computeDuration = () => {
+      const start = new Date(clockStatus.open_session!.clock_in_at).getTime();
+      const diffMs = Date.now() - start;
+      const hours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+      const minutes = Math.max(0, Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60)));
+      setWorkDuration(`${hours}h ${minutes.toString().padStart(2, '0')}m`);
+    };
+
+    computeDuration();
+    const interval = window.setInterval(computeDuration, 60000);
+    return () => window.clearInterval(interval);
+  }, [clockStatus?.is_clocked_in, clockStatus?.open_session?.clock_in_at]);
 
   const fetchDashboardStats = async () => {
     if (!user) return;
@@ -167,6 +227,24 @@ export default function Dashboard() {
     }
   };
 
+  const fetchClockStatus = async () => {
+    if (!user) {
+      setClockStatus(null);
+      return;
+    }
+
+    try {
+      setClockStatusLoading(true);
+      const status = await api.getClockStatus();
+      setClockStatus(status);
+    } catch (error) {
+      console.error('Error fetching clock status:', error);
+      setClockStatus(null);
+    } finally {
+      setClockStatusLoading(false);
+    }
+  };
+
   const checkOnboardingStatus = async () => {
     if (!user || userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') {
       setIsLoading(false);
@@ -189,8 +267,75 @@ export default function Dashboard() {
     }
   };
 
+  const fetchEmployeeDataForBirthday = async () => {
+    if (!user) return;
+
+    try {
+      const employeeIdResult = await api.getEmployeeId();
+      if (employeeIdResult?.id) {
+        const employee = await api.getEmployee(employeeIdResult.id);
+        setEmployeeData(employee);
+        
+        // Check if today is birthday
+        if (employee?.onboarding_data?.date_of_birth) {
+          const dob = parseISO(employee.onboarding_data.date_of_birth);
+          const today = new Date();
+          const isTodayBirthday = dob.getDate() === today.getDate() && 
+                                  dob.getMonth() === today.getMonth();
+          
+          setIsBirthday(isTodayBirthday);
+          
+          // Trigger confetti every time on birthday (on each visit/refresh)
+          if (isTodayBirthday) {
+            // Small delay to ensure component is rendered, then trigger confetti
+            setTimeout(() => {
+              triggerConfetti();
+            }, 500);
+          }
+        }
+      }
+    } catch (error) {
+      // Silently fail - employee data might not be available
+      console.log('Could not fetch employee data for birthday check:', error);
+    }
+  };
+
+  const triggerConfetti = () => {
+    const duration = 3000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+
+    function randomInRange(min: number, max: number) {
+      return Math.random() * (max - min) + min;
+    }
+
+    const interval: any = setInterval(function() {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+      
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }
+      });
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }
+      });
+    }, 250);
+  };
+
   const getFirstName = () => {
     const metadata = (user as any)?.user_metadata;
+    if (employeeData?.profiles?.first_name) {
+      return employeeData.profiles.first_name;
+    }
     return metadata?.first_name || user?.email?.split('@')[0] || 'User';
   };
 
@@ -204,7 +349,6 @@ export default function Dashboard() {
   };
 
   const isEmployee = userRole === 'employee';
-  const showTimesheetCard = !isEmployee;
 
   const handleSubmitTimesheet = () => {
     navigate('/timesheets');
@@ -223,6 +367,9 @@ export default function Dashboard() {
     const hour12 = hour % 12 || 12;
     return `${hour12}:${minutes} ${ampm}`;
   };
+
+  const formatClockTime = (value?: string | null) =>
+    value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
 
   const getShiftDateLabel = (dateStr: string) => {
     const date = parseISO(dateStr);
@@ -360,6 +507,62 @@ export default function Dashboard() {
     }
   };
 
+  const isClockFeatureEnabled = clockStatus?.is_clock_mode ?? true;
+
+  const handleClockButtonClick = () => {
+    if (!isClockFeatureEnabled) {
+      toast({
+        title: "Clock unavailable",
+        description: "Your organization uses timesheets instead of clock-in/out.",
+      });
+      return;
+    }
+    const action = clockStatus?.is_clocked_in ? 'OUT' : 'IN';
+    setPendingClockAction(action);
+    setShowClockConsent(true);
+  };
+
+  const handleClockModalClose = () => {
+    setShowClockConsent(false);
+    setPendingClockAction(null);
+  };
+
+  const handleClockConsentConfirm = async (data: {
+    lat?: number;
+    lon?: number;
+    address_text: string;
+    capture_method: 'geo' | 'manual' | 'kiosk' | 'unknown';
+    consent: boolean;
+  }) => {
+    if (!pendingClockAction) return;
+
+    setClockActionLoading(true);
+    try {
+      const result = await api.clock({
+        action: pendingClockAction,
+        ts: new Date().toISOString(),
+        lat: data.lat,
+        lon: data.lon,
+        address_text: data.address_text,
+        capture_method: data.capture_method,
+        consent: data.consent,
+      });
+
+      showSuccess({
+        action: pendingClockAction,
+        workType: (result?.work_type as 'WFO' | 'WFH') || 'WFH',
+        address: data.address_text,
+        timestamp: new Date().toISOString(),
+      });
+
+      await fetchClockStatus();
+    } catch (error: any) {
+      showError(error?.message || "Unable to record attendance");
+    } finally {
+      setClockActionLoading(false);
+      handleClockModalClose();
+    }
+  };
 
   if (isLoading) {
     return (
@@ -385,92 +588,147 @@ export default function Dashboard() {
     <AppLayout>
       <div className="space-y-6 p-6">
         {/* Welcome Section */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-2">Welcome back, {getFirstName()}!</h1>
+        <div className="mb-6 relative">
+          {isBirthday && (
+            <div className="absolute -top-4 -left-4 -right-4 -bottom-4 pointer-events-none">
+              {/* Confetti container - confetti is triggered via canvas-confetti */}
+            </div>
+          )}
+          <h1 className={`text-3xl font-bold mb-2 ${isBirthday ? 'text-primary animate-pulse' : ''}`}>
+            {isBirthday ? `🎉 Happy Birthday, ${getFirstName()}! 🎉` : `Welcome back, ${getFirstName()}!`}
+          </h1>
           <p className="text-muted-foreground">
-            You are {presenceStatus === 'online' ? 'online' : presenceStatus.replace('_', ' ')}
+            {isBirthday 
+              ? "Wishing you a wonderful day filled with joy and celebration!" 
+              : `You are ${presenceStatus === 'online' ? 'online' : presenceStatus.replace('_', ' ')}`}
           </p>
         </div>
 
-        {/* Main Stats Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {/* Timesheet Card */}
-          {showTimesheetCard && (
-            <Card className="shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Timesheet</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-4xl font-bold mb-4">{stats.timesheetHours}</div>
-                <Button 
-                  onClick={handleSubmitTimesheet}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  Submit
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Leave Balance Card */}
-          <Card className="shadow-sm hover:shadow-md transition-shadow">
+        {/* Today Summary & Quick Actions */}
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="shadow-lg border border-white/60 dark:border-slate-800/70 bg-white/80 dark:bg-slate-900/70 backdrop-blur-lg">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Leave Balance</CardTitle>
+              <CardTitle className="text-lg font-semibold">Today Summary / Quick Actions</CardTitle>
+              <p className="text-sm text-muted-foreground">Stay on top of your day</p>
             </CardHeader>
-            <CardContent>
-              <div className="text-4xl font-bold mb-4">{stats.leaveBalance}</div>
-              <Button 
-                onClick={handleApplyLeave}
-                variant="outline"
-                className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950 font-semibold"
-              >
-                Apply
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Next Holiday Card */}
-          <Card className="shadow-sm hover:shadow-md transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Next Holiday</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {stats.nextHoliday ? (
-                <>
-                  <div className="text-3xl font-bold mb-1">
-                    {formatHolidayDate(stats.nextHoliday.date)}
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Presence</p>
+                  <div className="flex items-center gap-2 text-base font-semibold">
+                    <span className={`h-2.5 w-2.5 rounded-full ${presenceIndicators[presenceStatus] || presenceIndicators.default}`} />
+                    {presenceLabel}
                   </div>
-                  <p className="text-sm text-muted-foreground mb-4">{stats.nextHoliday.name}</p>
-                </>
-              ) : (
-                <>
-                  <div className="text-3xl font-bold mb-1">No upcoming</div>
-                  <p className="text-sm text-muted-foreground mb-4">holiday</p>
-                </>
-              )}
+                </div>
+                <div className="text-right">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Work Hours</p>
+                  <p className="text-xl font-semibold">{clockStatus?.is_clocked_in ? workDuration : '—'}</p>
+                  <p className="text-xs text-muted-foreground">{clockStatus?.is_clocked_in ? 'in progress' : 'off the clock'}</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-blue-200/60 dark:border-blue-500/30 bg-blue-50/80 dark:bg-blue-500/10 p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                    {clockStatus?.is_clocked_in ? 'Clocked in since' : 'You are off the clock'}
+                  </p>
+                  <p className="text-lg font-semibold text-slate-900 dark:text-white">
+                    {clockStatus?.is_clocked_in
+                      ? formatClockTime(clockStatus.open_session?.clock_in_at)
+                      : clockStatusLoading ? 'Checking…' : 'Not started'}
+                  </p>
+                </div>
+                <Button
+                  onClick={handleClockButtonClick}
+                  disabled={clockActionLoading || clockStatusLoading || !isClockFeatureEnabled}
+                  className="min-w-[110px] bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {clockActionLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Working…
+                    </>
+                  ) : (
+                    (clockStatus?.is_clocked_in ? 'Clock Out' : 'Clock In')
+                  )}
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Next shift</p>
+                  <p className="text-sm font-semibold">
+                    {nextShift
+                      ? `${getShiftDateLabel(nextShift.shift_date)}, ${formatShiftTime(nextShift.start_time)}`
+                      : 'No shifts scheduled'}
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/calendar')}>
+                  View schedule
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="shadow-lg border border-white/60 dark:border-slate-800/70 bg-white/80 dark:bg-slate-900/70 backdrop-blur-lg">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-semibold">Leave & Holiday Snapshot</CardTitle>
+              <p className="text-sm text-muted-foreground">Plan time off with confidence</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-2xl border border-emerald-200/60 dark:border-emerald-500/30 bg-emerald-50/80 dark:bg-emerald-500/10 p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-200">Leave balance</p>
+                  <p className="text-3xl font-bold text-slate-900 dark:text-white">{stats.leaveBalance} days</p>
+                  <p className="text-xs text-muted-foreground">available right now</p>
+                </div>
+                <Button
+                  onClick={handleApplyLeave}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white min-w-[120px]"
+                >
+                  Apply leave
+                </Button>
+              </div>
+              <div className="rounded-2xl border border-sky-200/60 dark:border-sky-500/30 bg-sky-50/80 dark:bg-sky-500/10 p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-sky-600 dark:text-sky-200">Upcoming holiday</p>
+                  {stats.nextHoliday ? (
+                    <>
+                      <p className="text-lg font-semibold text-slate-900 dark:text-white">{stats.nextHoliday.name}</p>
+                      <p className="text-sm text-muted-foreground">{formatHolidayDate(stats.nextHoliday.date)}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-lg font-semibold text-slate-900 dark:text-white">No holiday announced</p>
+                      <p className="text-sm text-muted-foreground">We&apos;ll update you soon</p>
+                    </>
+                  )}
+                </div>
+                <CalendarDays className="h-10 w-10 text-sky-500 dark:text-sky-300 drop-shadow-[0_8px_24px_rgba(14,165,233,0.35)]" />
+              </div>
             </CardContent>
           </Card>
 
-          {/* Shifts Card */}
-          <Card className="shadow-sm hover:shadow-md transition-shadow dark:border-slate-800 dark:bg-slate-900">
+          <Card className="shadow-lg border border-white/60 dark:border-slate-800/70 bg-white/80 dark:bg-slate-900/70 backdrop-blur-lg">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {isEmployee ? 'My Shifts' : 'Shift Schedule'}
-              </CardTitle>
+              <CardTitle className="text-lg font-semibold">{isEmployee ? 'My Shifts' : 'Shift Schedule'}</CardTitle>
+              <p className="text-sm text-muted-foreground">Stay aligned with upcoming shifts</p>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 {loadingShifts ? (
-                  <div className="text-lg text-muted-foreground">Loading next shift…</div>
+                  <div className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading next shift…
+                  </div>
                 ) : nextShift ? (
-                  <div className={`relative rounded-2xl border ${shiftVisual?.border} bg-white dark:bg-slate-900 shadow-inner p-4 pl-14`}>
+                  <div className={`relative rounded-2xl border ${shiftVisual?.border} bg-white/90 dark:bg-slate-900/80 shadow-inner p-4 pl-14`}>
                     <div className={`absolute -top-3 -left-2 h-12 w-12 rounded-full ${shiftVisual?.badgeBg} flex items-center justify-center shadow`}>
                       {shiftVisual?.icon}
                     </div>
                     <div className={`text-2xl font-bold ${shiftVisual?.textColor}`}>
                       {shiftVisual?.label}
                     </div>
-                    <p className="text-sm font-semibold text-slate-800">
+                    <p className="text-sm font-semibold text-slate-800 dark:text-white">
                       {getShiftDateLabel(nextShift.shift_date)}
                     </p>
                     <p className="text-xs text-muted-foreground mb-2">
@@ -484,9 +742,8 @@ export default function Dashboard() {
                   <div className="text-sm text-muted-foreground">No upcoming shifts scheduled</div>
                 )}
                 <Button
-                  onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/scheduling/calendar')}
-                  variant="outline"
-                  className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950 font-semibold"
+                  onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/calendar')}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)]"
                 >
                   {isEmployee ? 'View My Shifts' : 'View Calendar'}
                 </Button>
@@ -588,6 +845,12 @@ export default function Dashboard() {
           <CalendarPanel />
         </div>
       </div>
+      <AddressConsentModal
+        open={showClockConsent}
+        onClose={handleClockModalClose}
+        onConfirm={handleClockConsentConfirm}
+        action={pendingClockAction || 'IN'}
+      />
     </AppLayout>
   );
 }

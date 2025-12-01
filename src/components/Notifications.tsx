@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Bell } from "lucide-react";
+import { Bell, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 
 interface Notification {
   id: string;
@@ -26,6 +27,7 @@ export function Notifications() {
   const [unreadCount, setUnreadCount] = useState(0);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!user) return;
@@ -73,10 +75,33 @@ export function Notifications() {
     }
   };
 
+  const handleClearAll = async () => {
+    try {
+      await api.clearAllNotifications();
+      // Refresh notifications to get updated state from server
+      await fetchNotifications();
+      toast({
+        title: "Notifications cleared",
+        description: "All notifications have been marked as read.",
+      });
+    } catch (error) {
+      console.error('Error clearing notifications:', error);
+      toast({
+        title: "Error",
+        description: "Failed to clear notifications",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:text-sky-300 dark:hover:text-sky-200 dark:hover:bg-slate-800/60 transition-colors"
+        >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <Badge
@@ -90,7 +115,20 @@ export function Notifications() {
       </PopoverTrigger>
       <PopoverContent className="w-80" align="end">
         <div className="space-y-2">
-          <h3 className="font-semibold text-sm">Notifications</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-sm">Notifications</h3>
+            {unreadCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearAll}
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3 w-3 mr-1" />
+                Clear
+              </Button>
+            )}
+          </div>
           {notifications.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
               No notifications

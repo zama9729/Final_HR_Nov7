@@ -320,6 +320,19 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'No organization found' });
     }
 
+    // Check if profile_picture_url column exists
+    const columnCheck = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_name = 'profiles' AND column_name = 'profile_picture_url'`
+    );
+    const hasProfilePictureColumn = columnCheck.rows.length > 0;
+
+    // Build profiles JSON conditionally based on column existence
+    const profilePictureField = hasProfilePictureColumn 
+      ? `'profile_picture_url', p.profile_picture_url`
+      : `'profile_picture_url', NULL::text`;
+
     const result = await query(
       `SELECT 
         e.*,
@@ -327,7 +340,8 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
           'first_name', p.first_name,
           'last_name', p.last_name,
           'email', p.email,
-          'phone', p.phone
+          'phone', p.phone,
+          ${profilePictureField}
         ) as profiles,
         ${assignmentSelectFragment}
       FROM employees e
@@ -341,6 +355,127 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching org chart:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Profile picture upload endpoint
+router.post('/profile-picture/upload', authenticateToken, async (req, res) => {
+  try {
+    const { url, key } = req.body;
+    const userId = req.user.id;
+
+    if (!url || !key) {
+      return res.status(400).json({ error: 'url and key are required' });
+    }
+
+    // Get user's tenant_id for RLS
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [userId]
+    );
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Verify the key belongs to this user's tenant (RLS check)
+    const keyPrefix = tenantId ? `tenants/${tenantId}/profile-pictures/${userId}` : `profile-pictures/${userId}`;
+    if (!key.startsWith(keyPrefix)) {
+      return res.status(403).json({ error: 'Unauthorized: Invalid file path' });
+    }
+
+    // Check if profile_picture_url column exists
+    const columnCheck = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_name = 'profiles' AND column_name = 'profile_picture_url'`
+    );
+    
+    if (columnCheck.rows.length === 0) {
+      return res.status(400).json({ 
+        error: 'Profile picture feature not available. Please run the database migration first.',
+        migration_required: true 
+      });
+    }
+
+    // Construct public URL (use presigned URL or public bucket URL)
+    const minioPublicUrl = process.env.MINIO_PUBLIC_URL || process.env.MINIO_ENDPOINT?.replace('minio:', 'localhost:') || 'http://localhost:9000';
+    const bucket = process.env.MINIO_BUCKET_ONBOARDING || process.env.DOCS_STORAGE_BUCKET || 'hr-onboarding-docs';
+    const publicUrl = `${minioPublicUrl}/${bucket}/${key}`;
+
+    // Update profile with picture URL
+    await query(
+      'UPDATE profiles SET profile_picture_url = $1, updated_at = now() WHERE id = $2',
+      [publicUrl, userId]
+    );
+
+    res.json({ 
+      success: true, 
+      profile_picture_url: publicUrl,
+      message: 'Profile picture uploaded successfully' 
+    });
+  } catch (error) {
+    console.error('Error uploading profile picture:', error);
+    res.status(500).json({ error: error.message || 'Failed to upload profile picture' });
+  }
+});
+
+// Get presigned URL for profile picture upload
+router.post('/profile-picture/presign', authenticateToken, async (req, res) => {
+  try {
+    const { contentType } = req.body;
+    const userId = req.user.id;
+
+    if (!contentType || !contentType.startsWith('image/')) {
+      return res.status(400).json({ error: 'Invalid content type. Only images are allowed.' });
+    }
+
+    // Get user's tenant_id for RLS
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [userId]
+    );
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Import storage functions
+    const { getPresignedPutUrl, getStorageProvider } = await import('../services/storage.js');
+    
+    // Check if S3/MinIO is available
+    const storageProvider = getStorageProvider();
+    if (storageProvider !== 's3') {
+      return res.status(400).json({ 
+        error: 'S3/MinIO storage is not configured. Please configure MinIO environment variables to enable profile picture uploads.',
+        storage_provider: storageProvider,
+        requires_s3: true,
+        message: 'MinIO is required for profile picture uploads. Please set MINIO_ENABLED=true and configure MinIO credentials.'
+      });
+    }
+    
+    // Generate object key with tenant isolation (RLS)
+    const ext = contentType === 'image/jpeg' ? 'jpg' : contentType === 'image/png' ? 'png' : 'jpg';
+    const fileName = `${Date.now()}_${crypto.randomUUID()}.${ext}`;
+    const objectKey = `tenants/${tenantId}/profile-pictures/${userId}/${fileName}`;
+
+    // Generate presigned URL (5 minute expiry)
+    const url = await getPresignedPutUrl({
+      objectKey,
+      contentType,
+      expiresIn: 300, // 5 minutes
+    });
+
+    res.json({
+      url,
+      key: objectKey,
+      expiresIn: 300,
+    });
+  } catch (error) {
+    console.error('Error generating presigned URL for profile picture:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate upload URL' });
   }
 });
 
@@ -380,12 +515,20 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
     
     // Check if verified_by column exists
-    const columnCheck = await query(
+    const verifiedByCheck = await query(
       `SELECT column_name 
        FROM information_schema.columns 
        WHERE table_name = 'employees' AND column_name = 'verified_by'`
     );
-    const hasVerifiedBy = columnCheck.rows.length > 0;
+    const hasVerifiedBy = verifiedByCheck.rows.length > 0;
+
+    // Check if profile_picture_url column exists
+    const profilePicCheck = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_name = 'profiles' AND column_name = 'profile_picture_url'`
+    );
+    const hasProfilePictureColumn = profilePicCheck.rows.length > 0;
 
     // Build query conditionally based on column existence
     const verifiedByJoin = hasVerifiedBy 
@@ -399,6 +542,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
         ) as verified_by_profile`
       : `NULL::jsonb as verified_by_profile`;
 
+    // Build profiles JSON conditionally based on column existence
+    const profilePictureField = hasProfilePictureColumn 
+      ? `'profile_picture_url', p.profile_picture_url`
+      : `'profile_picture_url', NULL::text`;
+
     // Get employee with profile data, reporting manager info, and organization info
     const employeeResult = await query(
       `SELECT 
@@ -407,7 +555,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
           'first_name', p.first_name,
           'last_name', p.last_name,
           'email', p.email,
-          'phone', p.phone
+          'phone', p.phone,
+          ${profilePictureField}
         ) as profiles,
         json_build_object(
           'id', mgr_e.id,

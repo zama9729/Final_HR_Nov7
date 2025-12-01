@@ -1,4 +1,4 @@
-import { Bell, Search, User, LogOut, Circle, Moon, Sun } from "lucide-react";
+import { Search, User, LogOut, Circle, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,10 +29,12 @@ export function TopBar() {
   const { toast } = useToast();
   const [presenceStatus, setPresenceStatus] = useState<string>('online');
   const { theme, toggleTheme } = useTheme();
+  const [organization, setOrganization] = useState<{ name: string; logo_url: string | null } | null>(null);
 
   useEffect(() => {
     if (user) {
       fetchPresenceStatus();
+      fetchOrganization();
     }
   }, [user]);
 
@@ -65,6 +67,28 @@ export function TopBar() {
     }
   };
 
+  const fetchOrganization = async () => {
+    try {
+      const org = await api.getOrganization();
+      if (org) {
+        setOrganization(org);
+      }
+    } catch (error) {
+      console.error("Error fetching organization:", error);
+    }
+  };
+
+  const getLogoText = () => {
+    if (organization?.name) {
+      const words = organization.name.split(" ");
+      if (words.length >= 2) {
+        return (words[0][0] + words[1][0]).toUpperCase();
+      }
+      return organization.name.substring(0, 2).toUpperCase();
+    }
+    return "NE";
+  };
+
   const handleLogout = () => {
     logout();
     navigate('/auth/login');
@@ -78,9 +102,24 @@ export function TopBar() {
     switch (status) {
       case 'online': return 'text-green-500';
       case 'away': return 'text-yellow-500';
-      case 'break': return 'text-orange-500';
+      case 'break': return 'text-red-500';
       case 'out_of_office': return 'text-blue-500';
       default: return 'text-gray-500';
+    }
+  };
+
+  const getPresenceDotGlow = (status: string) => {
+    switch (status) {
+      case 'online':
+        return 'bg-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.9)]';
+      case 'away':
+        return 'bg-yellow-300 shadow-[0_0_14px_rgba(253,224,71,0.9)]';
+      case 'break':
+        return 'bg-red-400 shadow-[0_0_14px_rgba(248,113,113,0.9)]';
+      case 'out_of_office':
+        return 'bg-sky-400 shadow-[0_0_14px_rgba(56,189,248,0.9)]';
+      default:
+        return 'bg-slate-400 shadow-[0_0_10px_rgba(148,163,184,0.6)]';
     }
   };
 
@@ -102,19 +141,39 @@ export function TopBar() {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-white dark:bg-slate-900 shadow-sm dark:border-slate-800 h-16">
+    <header className="sticky top-0 z-40 h-16 border-b border-white/40 dark:border-slate-900/60 bg-gradient-to-r from-white/70 via-white/45 to-white/30 dark:from-slate-950/70 dark:via-slate-900/55 dark:to-slate-900/40 backdrop-blur-[22px] supports-[backdrop-filter]:bg-white/10 shadow-[0_24px_80px_rgba(15,23,42,0.28)]">
       <div className="flex h-16 items-center justify-between px-4 lg:px-6 gap-4">
-        <div className="flex items-center gap-4">
-          <SidebarTrigger className="-ml-2" />
+        <div className="flex items-center gap-3">
+          <SidebarTrigger className="-ml-2 text-blue-500 drop-shadow-[0_0_12px_rgba(56,189,248,0.65)] dark:text-sky-300 dark:drop-shadow-[0_0_14px_rgba(14,165,233,0.75)] hover:text-blue-600 hover:bg-blue-50 dark:hover:text-sky-200 dark:hover:bg-slate-900/50 border border-transparent hover:border-blue-200/70 dark:hover:border-sky-600/60 rounded-full transition-all" />
+          <div className="flex items-center gap-3 px-1">
+            <div className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center">
+              {organization?.logo_url ? (
+                <img
+                  src={organization.logo_url}
+                  alt={organization.name || "Organization"}
+                  className="max-h-10 w-auto object-contain drop-shadow-[0_6px_25px_rgba(15,23,42,0.45)]"
+                />
+              ) : (
+                <span className="px-2 text-base font-semibold text-slate-900 dark:text-white drop-shadow-[0_6px_20px_rgba(15,23,42,0.45)]">
+                  {getLogoText()}
+                </span>
+              )}
+            </div>
+            {organization?.name && (
+              <div className="leading-tight hidden sm:block text-slate-900 dark:text-white drop-shadow-[0_4px_12px_rgba(15,23,42,0.35)]">
+                <p className="text-sm font-semibold tracking-tight">{organization.name}</p>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="flex-1 max-w-xl mx-auto">
+        <div className="flex-1 max-w-2xl mx-auto w-full">
           <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-cyan-500 drop-shadow-[0_0_12px_rgba(6,182,212,0.6)] dark:text-sky-300 dark:drop-shadow-[0_0_14px_rgba(14,165,233,0.65)]" />
             <Input
               type="search"
-              placeholder="Search..."
-              className="pl-10 h-10 w-full bg-gray-50 border-gray-200 text-sm focus-visible:ring-blue-500 rounded-xl dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100"
+              placeholder="Search people, workflows, insights..."
+              className="pl-10 h-10 w-full rounded-2xl border border-white/40 bg-white/22 text-sm shadow-[inset_0_2px_25px_rgba(15,23,42,0.18)] placeholder:text-slate-500 focus-visible:ring-2 focus-visible:ring-blue-400 supports-[backdrop-filter]:bg-white/12 dark:bg-slate-900/35 dark:border-white/15 dark:placeholder:text-slate-300"
             />
           </div>
         </div>
@@ -122,30 +181,26 @@ export function TopBar() {
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
-            className="h-10 w-10 p-0 rounded-full border border-transparent hover:border-blue-200 dark:hover:border-slate-600"
+            className="h-10 w-10 p-0 rounded-full border border-transparent hover:border-blue-300 dark:hover:border-slate-600 hover:bg-blue-50 dark:hover:bg-slate-800/60 hover:text-blue-600 transition-all"
             onClick={toggleTheme}
             aria-label="Toggle theme"
           >
             {theme === "dark" ? (
-              <Sun className="h-5 w-5 text-amber-300" />
+              <Sun className="h-5 w-5 text-amber-200 drop-shadow-[0_0_15px_rgba(251,191,36,0.9)]" />
             ) : (
-              <Moon className="h-5 w-5 text-slate-600" />
+              <Moon className="h-5 w-5 text-sky-400 drop-shadow-[0_0_15px_rgba(14,165,233,0.85)]" />
             )}
           </Button>
 
-          <div className="relative">
+          <div className="relative rounded-full border border-white/30 dark:border-slate-700/70 shadow-[0_0_20px_rgba(59,130,246,0.35)] transition-colors hover:border-blue-400">
             <Notifications />
           </div>
 
           {/* Presence Status Bell */}
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" className="relative h-10 w-10 p-0 hover:bg-gray-50 dark:hover:bg-slate-800">
-                <Bell className="h-5 w-5 text-gray-600 dark:text-gray-200" />
-                <Circle
-                  className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 ${getPresenceColor(presenceStatus)}`}
-                  fill="currentColor"
-                />
+              <Button variant="ghost" className="relative h-10 w-10 p-0 hover:bg-blue-50 dark:hover:bg-slate-800/60 hover:text-blue-600 flex items-center justify-center transition-colors">
+                <span className={`h-3 w-3 rounded-full border border-white/50 dark:border-white/20 ${getPresenceDotGlow(presenceStatus)}`} />
               </Button>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-56 p-2">
@@ -158,13 +213,10 @@ export function TopBar() {
                     onClick={() => handlePresenceChange(status)}
                     className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${presenceStatus === status
                         ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200'
-                        : 'hover:bg-gray-50 text-gray-700 dark:hover:bg-slate-800 dark:text-slate-200'
+                        : 'hover:bg-blue-50 text-gray-700 dark:hover:bg-slate-800 dark:text-slate-200'
                       }`}
                   >
-                    <Circle
-                      className={`h-2.5 w-2.5 ${getPresenceColor(status)}`}
-                      fill="currentColor"
-                    />
+                    <span className={`h-2.5 w-2.5 rounded-full border border-white/40 dark:border-white/20 ${getPresenceDotGlow(status)}`} />
                     <span>{getPresenceLabel(status)}</span>
                     {presenceStatus === status && (
                       <span className="ml-auto text-xs text-blue-600">✓</span>
@@ -178,9 +230,9 @@ export function TopBar() {
           {/* Profile with Role */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="gap-2 h-10 px-2 hover:bg-gray-50 dark:hover:bg-slate-800">
-                <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center">
-                  <User className="h-5 w-5 text-gray-600 dark:text-gray-200" />
+              <Button variant="ghost" className="gap-2 h-10 px-2 hover:bg-blue-50 dark:hover:bg-slate-800/60 hover:text-blue-600 transition-colors">
+                <div className="h-8 w-8 rounded-full bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-200 flex items-center justify-center shadow-[0_0_18px_rgba(59,130,246,0.45)]">
+                  <User className="h-5 w-5 text-blue-500 dark:text-sky-300 drop-shadow-[0_0_12px_rgba(59,130,246,0.65)]" />
                 </div>
                 <span className="hidden lg:inline-block text-sm font-medium text-gray-700 dark:text-gray-200">
                   {getRoleLabel(userRole)}
@@ -190,11 +242,17 @@ export function TopBar() {
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuLabel className="text-sm font-semibold">My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigate('/my/profile')} className="text-sm">
+              <DropdownMenuItem
+                onClick={() => navigate('/my/profile')}
+                className="text-sm text-slate-700 dark:text-slate-100 transition-colors data-[highlighted]:bg-blue-100 data-[highlighted]:text-blue-900 dark:data-[highlighted]:bg-sky-500/30 dark:data-[highlighted]:text-white"
+              >
                 <User className="mr-2 h-4 w-4" />
                 Profile
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleLogout} className="text-sm">
+              <DropdownMenuItem
+                onClick={handleLogout}
+                className="text-sm text-slate-700 dark:text-slate-100 transition-colors data-[highlighted]:bg-blue-100 data-[highlighted]:text-blue-900 dark:data-[highlighted]:bg-sky-500/30 dark:data-[highlighted]:text-white"
+              >
                 <LogOut className="mr-2 h-4 w-4" />
                 Log out
               </DropdownMenuItem>

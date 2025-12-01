@@ -49,6 +49,15 @@ const ensureDocumentInfra = async () => {
   `);
 
   await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'document_status_enum') THEN
+        CREATE TYPE document_status_enum AS ENUM ('uploaded', 'pending', 'approved', 'rejected', 'hold', 'resubmission_requested', 'quarantined');
+      END IF;
+    END$$;
+  `);
+
+  await query(`
     ALTER TABLE onboarding_documents
       ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
       ADD COLUMN IF NOT EXISTS candidate_id UUID,
@@ -67,7 +76,8 @@ const ensureDocumentInfra = async () => {
       ADD COLUMN IF NOT EXISTS doc_source TEXT DEFAULT 'candidate',
       ADD COLUMN IF NOT EXISTS quarantine_reason TEXT,
       ADD COLUMN IF NOT EXISTS audit_hash TEXT,
-      ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+      ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS is_required BOOLEAN DEFAULT true
   `);
 
   await query(`
@@ -84,6 +94,271 @@ const ensureDocumentInfra = async () => {
       created_at TIMESTAMPTZ DEFAULT now()
     )
   `);
+
+  // Ensure background_checks table exists before creating background_check_documents
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'background_check_kind_enum') THEN
+        CREATE TYPE background_check_kind_enum AS ENUM ('prehire','rehire','periodic');
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'background_check_status_enum') THEN
+        CREATE TYPE background_check_status_enum AS ENUM ('pending','in_progress','vendor_delay','completed_green','completed_amber','completed_red','cancelled');
+      END IF;
+    END$$;
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS background_checks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+      candidate_id UUID,
+      employee_id UUID REFERENCES employees(id),
+      type background_check_kind_enum NOT NULL DEFAULT 'prehire',
+      status background_check_status_enum NOT NULL DEFAULT 'pending',
+      vendor_id UUID,
+      consent_snapshot JSONB DEFAULT '{}'::jsonb,
+      request_payload JSONB DEFAULT '{}'::jsonb,
+      result_summary JSONB DEFAULT '{}'::jsonb,
+      raw_report_url TEXT,
+      retention_until DATE,
+      initiated_by UUID REFERENCES profiles(id),
+      created_at TIMESTAMPTZ DEFAULT now(),
+      completed_at TIMESTAMPTZ
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS background_check_documents (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      background_check_id UUID NOT NULL REFERENCES background_checks(id) ON DELETE CASCADE,
+      document_id UUID NOT NULL REFERENCES onboarding_documents(id) ON DELETE CASCADE,
+      is_required BOOLEAN DEFAULT true,
+      verification_status TEXT DEFAULT 'PENDING',
+      hr_comment TEXT,
+      is_validated BOOLEAN DEFAULT false,
+      decision TEXT DEFAULT 'pending',
+      notes TEXT,
+      verified_by UUID REFERENCES profiles(id),
+      verified_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+
+  await query(`
+    ALTER TABLE background_check_documents
+      ADD COLUMN IF NOT EXISTS document_id UUID,
+      ADD COLUMN IF NOT EXISTS is_required BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT 'PENDING',
+      ADD COLUMN IF NOT EXISTS hr_comment TEXT,
+      ADD COLUMN IF NOT EXISTS is_validated BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS decision TEXT DEFAULT 'pending',
+      ADD COLUMN IF NOT EXISTS notes TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+  `);
+  
+  // Handle migration from onboarding_document_id to document_id if column exists
+  await query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'background_check_documents' 
+        AND column_name = 'onboarding_document_id'
+      ) THEN
+        ALTER TABLE background_check_documents
+          ALTER COLUMN onboarding_document_id DROP NOT NULL;
+        
+        UPDATE background_check_documents
+        SET document_id = onboarding_document_id
+        WHERE document_id IS NULL AND onboarding_document_id IS NOT NULL;
+        
+        UPDATE background_check_documents
+        SET onboarding_document_id = document_id
+        WHERE onboarding_document_id IS NULL AND document_id IS NOT NULL;
+      END IF;
+    END$$;
+  `);
+
+  await query(`
+    UPDATE background_check_documents
+    SET verification_status = UPPER(decision)
+    WHERE decision IS NOT NULL AND (verification_status IS NULL OR verification_status = '')
+  `);
+
+  // Final migration update if onboarding_document_id column exists
+  await query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'background_check_documents' 
+        AND column_name = 'onboarding_document_id'
+      ) THEN
+        UPDATE background_check_documents
+        SET document_id = onboarding_document_id
+        WHERE document_id IS NULL AND onboarding_document_id IS NOT NULL;
+      END IF;
+    END$$;
+  `);
+
+  await query(`
+    ALTER TABLE background_check_documents
+      ALTER COLUMN document_id SET NOT NULL
+  `);
+
+  await query(`
+    DO $$
+    BEGIN
+      BEGIN
+        ALTER TABLE background_check_documents
+          DROP CONSTRAINT IF EXISTS background_check_documents_background_check_id_onboarding_d_key;
+      EXCEPTION WHEN undefined_object THEN
+        NULL;
+      END;
+    END$$;
+  `);
+
+  await query(`
+    DO $$
+    BEGIN
+      BEGIN
+        ALTER TABLE background_check_documents
+          ADD CONSTRAINT background_check_documents_unique_doc UNIQUE (background_check_id, document_id);
+      EXCEPTION
+        WHEN duplicate_object THEN NULL;
+        WHEN duplicate_table THEN NULL;
+      END;
+    END$$;
+  `);
+
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'background_check_documents_verification_status_check'
+      ) THEN
+        ALTER TABLE background_check_documents
+          ADD CONSTRAINT background_check_documents_verification_status_check
+          CHECK (UPPER(verification_status) IN ('PENDING','APPROVED','HOLD','REJECTED'));
+      END IF;
+    END$$;
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_background_check_documents_document_id
+      ON background_check_documents(document_id);
+  `);
+
+  await query(`
+    CREATE OR REPLACE FUNCTION auto_create_background_check()
+    RETURNS TRIGGER AS $$
+    DECLARE
+        v_employee_id UUID;
+        v_tenant_id UUID;
+        v_bg_check_id UUID;
+    BEGIN
+        v_employee_id := COALESCE(NEW.employee_id, NEW.candidate_id);
+
+        IF v_employee_id IS NULL THEN
+            RETURN NEW;
+        END IF;
+
+        SELECT tenant_id INTO v_tenant_id
+        FROM employees
+        WHERE id = v_employee_id;
+
+        IF v_tenant_id IS NULL THEN
+            RETURN NEW;
+        END IF;
+
+        SELECT id INTO v_bg_check_id
+        FROM background_checks
+        WHERE employee_id = v_employee_id;
+
+        IF v_bg_check_id IS NULL THEN
+            INSERT INTO background_checks (employee_id, tenant_id, status)
+            VALUES (v_employee_id, v_tenant_id, 'pending')
+            RETURNING id INTO v_bg_check_id;
+        END IF;
+
+        IF NEW.document_type IN ('RESUME','ID_PROOF','PAN','AADHAAR','AADHAR','PASSPORT','EDUCATION_CERT','EXPERIENCE_LETTER','ADDRESS_PROOF','BANK_STATEMENT','SIGNED_CONTRACT','BG_CHECK_DOC') THEN
+            INSERT INTO background_check_documents (background_check_id, document_id, onboarding_document_id, is_required, verification_status, decision)
+            VALUES (v_bg_check_id, NEW.id, NEW.id, COALESCE(NEW.is_required, true), 'PENDING', 'pending')
+            ON CONFLICT (background_check_id, document_id) DO NOTHING;
+        END IF;
+
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  await query(`
+    ALTER TABLE background_checks
+      ADD COLUMN IF NOT EXISTS completed_by UUID REFERENCES profiles(id)
+  `);
+
+  await query(`
+    DROP TRIGGER IF EXISTS trigger_auto_create_background_check ON onboarding_documents;
+    CREATE TRIGGER trigger_auto_create_background_check
+      AFTER INSERT ON onboarding_documents
+      FOR EACH ROW
+      EXECUTE FUNCTION auto_create_background_check();
+  `);
+};
+
+const ensureOnboardingBankColumns = async () => {
+  await query(`
+    CREATE TABLE IF NOT EXISTS onboarding_data (
+      employee_id UUID PRIMARY KEY REFERENCES employees(id) ON DELETE CASCADE
+    )
+  `);
+
+  await query(`
+    ALTER TABLE onboarding_data
+      ADD COLUMN IF NOT EXISTS bank_details_status TEXT DEFAULT 'pending',
+      ADD COLUMN IF NOT EXISTS bank_account_number TEXT,
+      ADD COLUMN IF NOT EXISTS bank_name TEXT,
+      ADD COLUMN IF NOT EXISTS bank_branch TEXT,
+      ADD COLUMN IF NOT EXISTS ifsc_code TEXT,
+      ADD COLUMN IF NOT EXISTS full_legal_name TEXT,
+      ADD COLUMN IF NOT EXISTS date_of_birth DATE,
+      ADD COLUMN IF NOT EXISTS gender TEXT,
+      ADD COLUMN IF NOT EXISTS nationality TEXT,
+      ADD COLUMN IF NOT EXISTS personal_phone TEXT,
+      ADD COLUMN IF NOT EXISTS personal_email TEXT,
+      ADD COLUMN IF NOT EXISTS government_ids JSONB DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS tax_details JSONB DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS tax_regime TEXT,
+      ADD COLUMN IF NOT EXISTS dependents JSONB DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS "references" JSONB DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS biometric_registration_status TEXT DEFAULT 'PENDING',
+      ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
+  `);
+
+  await query(`
+    ALTER TABLE employees
+      ADD COLUMN IF NOT EXISTS onboarding_status_extended TEXT,
+      ADD COLUMN IF NOT EXISTS uan_number TEXT
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS onboarding_steps_history (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      step TEXT NOT NULL,
+      step_status TEXT DEFAULT 'completed',
+      occurred_at TIMESTAMPTZ DEFAULT now(),
+      actor_type TEXT NOT NULL,
+      actor_id UUID REFERENCES profiles(id),
+      notes TEXT,
+      metadata JSONB DEFAULT '{}'::jsonb
+    )
+  `);
+
 };
 
 const getTenantIdForUser = async (userId) => {
@@ -349,10 +624,11 @@ const listDocumentsForCandidate = async ({ req, candidateId, filters }) => {
     'SELECT id, user_id, tenant_id FROM employees WHERE id = $1',
     [candidateId]
   );
+  const targetEmployee = employeeResult.rows[0];
 
   if (employeeResult.rows.length === 0) {
     const docTenant = await query(
-      `SELECT tenant_id FROM onboarding_documents WHERE candidate_id = $1 LIMIT 1`,
+      `SELECT tenant_id FROM onboarding_documents WHERE (candidate_id = $1 OR employee_id = $1) LIMIT 1`,
       [candidateId]
     );
     if (docTenant.rows.length === 0) {
@@ -376,8 +652,17 @@ const listDocumentsForCandidate = async ({ req, candidateId, filters }) => {
     [req.user.id]
   );
   const isSelf = myEmployee.rows[0]?.id === candidateId;
+  const isOwnerByEmployeeRecord = targetEmployee?.user_id === req.user.id;
+  
+  // Also check if user uploaded the documents (for onboarding flow)
+  const userUploadedDocs = await query(
+    `SELECT COUNT(*) as count FROM onboarding_documents 
+     WHERE (employee_id = $1 OR candidate_id = $1) AND uploaded_by = $2`,
+    [candidateId, req.user.id]
+  );
+  const hasUploadedDocs = parseInt(userUploadedDocs.rows[0]?.count || '0') > 0;
 
-  if (!isHr && !isSelf) {
+  if (!isHr && !isSelf && !hasUploadedDocs && !isOwnerByEmployeeRecord) {
     const err = new Error('Insufficient permissions');
     err.status = 403;
     throw err;
@@ -454,6 +739,7 @@ const ALLOWED_MIME_TYPES = {
 };
 
 const DOCUMENT_TYPE_CATALOG = {
+  RESUME: { label: 'Resume', sensitive: false },
   ID_PROOF: { label: 'ID Proof', sensitive: true },
   ADDRESS_PROOF: { label: 'Address Proof', sensitive: true },
   EDUCATION_CERT: { label: 'Education Certificate', sensitive: false },
@@ -686,6 +972,8 @@ router.post('/submit', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Employee ID required' });
     }
 
+    await ensureOnboardingBankColumns();
+
     // Get tenant_id from user's profile
     const profileResult = await query(
       'SELECT tenant_id FROM profiles WHERE id = $1',
@@ -715,7 +1003,27 @@ router.post('/submit', authenticateToken, async (req, res) => {
     await query('BEGIN');
 
     try {
-      // Insert or update onboarding data (without gender and tenant_id)
+      // Prepare government_ids JSONB
+      const governmentIds = {};
+      if (onboardingData.panNumber) governmentIds.pan = onboardingData.panNumber;
+      if (onboardingData.aadharNumber) governmentIds.aadhaar = onboardingData.aadharNumber;
+      if (onboardingData.passportNumber) governmentIds.passport = onboardingData.passportNumber;
+      
+      // Prepare tax_details JSONB
+      const taxDetails = onboardingData.taxDetails || {};
+      if (onboardingData.taxRegime) taxDetails.regime = onboardingData.taxRegime;
+      
+      // Prepare dependents JSONB array
+      const dependents = Array.isArray(onboardingData.dependents) 
+        ? onboardingData.dependents 
+        : (onboardingData.dependents ? JSON.parse(onboardingData.dependents) : []);
+      
+      // Prepare references JSONB array
+      const references = Array.isArray(onboardingData.references)
+        ? onboardingData.references
+        : (onboardingData.references ? JSON.parse(onboardingData.references) : []);
+
+      // Insert or update onboarding data with all new fields
       await query(
         `INSERT INTO onboarding_data (
           employee_id, emergency_contact_name, emergency_contact_phone,
@@ -723,9 +1031,17 @@ router.post('/submit', authenticateToken, async (req, res) => {
           permanent_address, permanent_city, permanent_state, permanent_postal_code,
           current_address, current_city, current_state, current_postal_code,
           bank_account_number, bank_name, bank_branch, ifsc_code,
-          pan_number, aadhar_number, passport_number, uan_number, bank_details_status, completed_at
+          pan_number, aadhar_number, passport_number, uan_number, bank_details_status,
+          full_legal_name, date_of_birth, gender, nationality,
+          personal_phone, personal_email, government_ids, tax_details, tax_regime,
+          dependents, "references", biometric_registration_status,
+          completed_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, now())
+        VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+          $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+          $31, $32::jsonb, $33::jsonb, $34, $35::jsonb, $36::jsonb, $37, now()
+        )
         ON CONFLICT (employee_id) 
         DO UPDATE SET
           emergency_contact_name = $2,
@@ -752,6 +1068,18 @@ router.post('/submit', authenticateToken, async (req, res) => {
           passport_number = $23,
           uan_number = $24,
           bank_details_status = $25,
+          full_legal_name = COALESCE($26, onboarding_data.full_legal_name),
+          date_of_birth = COALESCE($27, onboarding_data.date_of_birth),
+          gender = COALESCE($28, onboarding_data.gender),
+          nationality = COALESCE($29, onboarding_data.nationality),
+          personal_phone = COALESCE($30, onboarding_data.personal_phone),
+          personal_email = COALESCE($31, onboarding_data.personal_email),
+          government_ids = COALESCE($32::jsonb, onboarding_data.government_ids),
+          tax_details = COALESCE($33::jsonb, onboarding_data.tax_details),
+          tax_regime = COALESCE($34, onboarding_data.tax_regime),
+          dependents = COALESCE($35::jsonb, onboarding_data.dependents),
+          "references" = COALESCE($36::jsonb, onboarding_data."references"),
+          biometric_registration_status = COALESCE($37, onboarding_data.biometric_registration_status),
           completed_at = now(),
           updated_at = now()`,
         [
@@ -779,7 +1107,19 @@ router.post('/submit', authenticateToken, async (req, res) => {
           onboardingData.aadharNumber,
           onboardingData.passportNumber || null,
           uanNumber,
-          bankDetailsStatus
+          bankDetailsStatus,
+          onboardingData.fullLegalName || null,
+          onboardingData.dateOfBirth || null,
+          onboardingData.gender || null,
+          onboardingData.nationality || null,
+          onboardingData.personalPhone || null,
+          onboardingData.personalEmail || null,
+          JSON.stringify(governmentIds),
+          JSON.stringify(taxDetails),
+          onboardingData.taxRegime || null,
+          JSON.stringify(dependents),
+          JSON.stringify(references),
+          onboardingData.biometricRegistrationStatus || 'PENDING'
         ]
       );
 
@@ -830,12 +1170,60 @@ router.post('/submit', authenticateToken, async (req, res) => {
         );
       }
 
+      // Record onboarding step completion
+      await query(
+        `INSERT INTO onboarding_steps_history (employee_id, step, step_status, actor_type, actor_id, notes)
+         SELECT $1, 'DOCUMENTS_UPLOADED', 'completed', 'candidate', $2, 'Onboarding form submitted'
+         WHERE NOT EXISTS (
+           SELECT 1 FROM onboarding_steps_history WHERE employee_id = $1 AND step = 'DOCUMENTS_UPLOADED'
+         )`,
+        [employeeId, req.user.id]
+      ).catch(err => console.warn('Failed to record step history:', err));
+
       // Update employee onboarding status
       await query(
         `UPDATE employees
-         SET onboarding_status = 'completed', must_change_password = false, updated_at = now()
+         SET onboarding_status = 'completed',
+             onboarding_status_extended = CASE 
+               WHEN onboarding_status_extended IS NULL THEN 'DOCUMENTS_UPLOADED'
+               WHEN onboarding_status_extended = 'STARTED' THEN 'DOCUMENTS_UPLOADED'
+               ELSE onboarding_status_extended
+             END,
+             must_change_password = false,
+             updated_at = now()
          WHERE id = $1`,
         [employeeId]
+      );
+
+      // Check if background check should be initiated
+      const docCountResult = await query(
+        `SELECT COUNT(*) as count
+         FROM onboarding_documents
+         WHERE (employee_id = $1 OR candidate_id = $1)
+         AND document_type IN ('RESUME','ID_PROOF','PAN','AADHAAR','AADHAR','PASSPORT','EDUCATION_CERT','EXPERIENCE_LETTER')`,
+        [employeeId]
+      );
+      
+      const docCount = parseInt(docCountResult.rows[0]?.count || '0');
+      if (docCount > 0) {
+        // Update status to BG_CHECK_PENDING if documents are uploaded
+        await query(
+          `UPDATE employees
+           SET onboarding_status_extended = 'BG_CHECK_PENDING'
+           WHERE id = $1
+           AND onboarding_status_extended = 'DOCUMENTS_UPLOADED'`,
+          [employeeId]
+        );
+      }
+
+      // Ensure background check record exists for HR visibility
+      await query(
+        `INSERT INTO background_checks (employee_id, tenant_id, status)
+         SELECT $1, $2, 'pending'
+         WHERE NOT EXISTS (
+           SELECT 1 FROM background_checks WHERE employee_id = $1
+         )`,
+        [employeeId, tenantId]
       );
 
       await query('COMMIT');
@@ -878,6 +1266,8 @@ router.post('/bank-details/skip', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
+    await ensureOnboardingBankColumns();
+
     await query(
       `INSERT INTO onboarding_data (employee_id, bank_details_status, bank_account_number, bank_name, bank_branch, ifsc_code)
        VALUES ($1, $2, NULL, NULL, NULL, NULL)
@@ -896,6 +1286,65 @@ router.post('/bank-details/skip', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error skipping bank details:', error);
     res.status(500).json({ error: error.message || 'Failed to skip bank details' });
+  }
+});
+
+router.post('/bank-details/update', authenticateToken, async (req, res) => {
+  try {
+    const { employeeId, bankAccountNumber, bankName, bankBranch, ifscCode } = req.body;
+
+    if (!employeeId || !bankAccountNumber || !bankName || !bankBranch || !ifscCode) {
+      return res.status(400).json({ error: 'Employee ID and all bank fields are required' });
+    }
+
+    const empResult = await query(
+      'SELECT id, user_id, tenant_id FROM employees WHERE id = $1',
+      [employeeId]
+    );
+    if (empResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const employee = empResult.rows[0];
+    const isOwner = employee.user_id === req.user.id;
+    let authorized = isOwner;
+
+    if (!authorized) {
+      const roles = await getUserRoles(req.user.id);
+      authorized = isHrRole(roles);
+    }
+
+    if (!authorized) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    await ensureOnboardingBankColumns();
+
+    await query(
+      `INSERT INTO onboarding_data (
+        employee_id,
+        bank_account_number,
+        bank_name,
+        bank_branch,
+        ifsc_code,
+        bank_details_status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (employee_id)
+      DO UPDATE SET
+        bank_account_number = $2,
+        bank_name = $3,
+        bank_branch = $4,
+        ifsc_code = $5,
+        bank_details_status = $6,
+        updated_at = now()`,
+      [employeeId, bankAccountNumber, bankName, bankBranch, ifscCode, BANK_DETAILS_STATUS.PENDING]
+    );
+
+    res.json({ success: true, status: BANK_DETAILS_STATUS.PENDING });
+  } catch (error) {
+    console.error('Error updating bank details:', error);
+    res.status(500).json({ error: error.message || 'Failed to update bank details' });
   }
 });
 
@@ -1180,13 +1629,20 @@ router.get('/documents/:documentId/download', authenticateToken, async (req, res
     const roles = await getUserRoles(req.user.id);
     const isHr = isHrRole(roles);
 
-    if (!isHr && document.employee_user_id !== req.user.id) {
+    // Allow access if: HR, employee owner, or user who uploaded the document
+    const isOwner = document.employee_user_id === req.user.id;
+    const isUploader = document.uploaded_by === req.user.id;
+
+    if (!isHr && !isOwner && !isUploader) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
     let streamResult;
     try {
-      const key = document.storage_key || document.file_path;
+      const key = document.storage_key || document.object_key || document.file_path;
+      if (!key) {
+        return res.status(404).json({ error: 'Document storage key not found' });
+      }
       streamResult = await getDocumentStream(key);
     } catch (error) {
       console.error('Failed to load document from storage', error);
@@ -1209,4 +1665,168 @@ router.get('/documents/:documentId/download', authenticateToken, async (req, res
   }
 });
 
+// GET /api/onboarding/me/progress
+// Get onboarding progress for current user
+// Check for missing onboarding data
+router.get('/me/missing-data', authenticateToken, async (req, res) => {
+  try {
+    // Get employee ID
+    const empResult = await query(
+      'SELECT id FROM employees WHERE user_id = $1',
+      [req.user.id]
+    );
+
+    if (empResult.rows.length === 0) {
+      return res.json({ missing_fields: [], has_missing_data: false });
+    }
+
+    const employeeId = empResult.rows[0].id;
+
+    // Get onboarding data
+    const onboardingResult = await query(
+      'SELECT * FROM onboarding_data WHERE employee_id = $1',
+      [employeeId]
+    );
+
+    if (onboardingResult.rows.length === 0) {
+      return res.json({
+        missing_fields: ['all'],
+        has_missing_data: true,
+        message: 'Please complete your onboarding form',
+      });
+    }
+
+    const data = onboardingResult.rows[0];
+    const missingFields = [];
+
+    // Required fields check
+    if (!data.full_legal_name) missingFields.push('full_legal_name');
+    if (!data.date_of_birth) missingFields.push('date_of_birth');
+    if (!data.nationality) missingFields.push('nationality');
+    if (!data.personal_phone) missingFields.push('personal_phone');
+    if (!data.personal_email) missingFields.push('personal_email');
+    if (!data.pan_number) missingFields.push('pan_number');
+    if (!data.aadhar_number) missingFields.push('aadhar_number');
+    if (!data.permanent_address) missingFields.push('permanent_address');
+    if (!data.current_address) missingFields.push('current_address');
+    if (!data.emergency_contact_name) missingFields.push('emergency_contact_name');
+    if (!data.emergency_contact_phone) missingFields.push('emergency_contact_phone');
+
+    // Check for required documents
+    const docsResult = await query(
+      `SELECT document_type, COUNT(*) as count 
+       FROM onboarding_documents 
+       WHERE employee_id = $1 AND status != 'rejected'
+       GROUP BY document_type`,
+      [employeeId]
+    );
+
+    const uploadedDocTypes = docsResult.rows.map(r => r.document_type);
+    const requiredDocs = ['RESUME', 'EDUCATION_CERT', 'EXPERIENCE_LETTER', 'ID_PROOF'];
+    const missingDocs = requiredDocs.filter(doc => !uploadedDocTypes.includes(doc));
+
+    return res.json({
+      missing_fields: missingFields,
+      missing_documents: missingDocs,
+      has_missing_data: missingFields.length > 0 || missingDocs.length > 0,
+      message: missingFields.length > 0 || missingDocs.length > 0
+        ? 'Please complete missing onboarding information and upload required documents'
+        : null,
+    });
+  } catch (error) {
+    console.error('Error checking missing onboarding data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/me/progress', authenticateToken, async (req, res) => {
+  try {
+    // Check if onboarding_status_extended column exists
+    const columnCheck = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_name = 'employees' AND column_name = 'onboarding_status_extended'`
+    );
+    const hasExtendedStatus = columnCheck.rows.length > 0;
+
+    // Build query conditionally based on column existence
+    const statusColumns = hasExtendedStatus
+      ? 'id, onboarding_status, onboarding_status_extended'
+      : 'id, onboarding_status';
+
+    // Get employee ID for current user
+    const empResult = await query(
+      `SELECT ${statusColumns} FROM employees WHERE user_id = $1`,
+      [req.user.id]
+    );
+
+    if (empResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const employee = empResult.rows[0];
+    const onboardingStatus = hasExtendedStatus 
+      ? (employee.onboarding_status_extended || employee.onboarding_status)
+      : employee.onboarding_status;
+
+    // Get onboarding steps history (if table exists)
+    let stepsResult = { rows: [] };
+    try {
+      const tableCheck = await query(
+        `SELECT table_name 
+         FROM information_schema.tables 
+         WHERE table_name = 'onboarding_steps_history'`
+      );
+      if (tableCheck.rows.length > 0) {
+        stepsResult = await query(
+          `SELECT step, step_status, occurred_at, actor_type, notes
+           FROM onboarding_steps_history
+           WHERE employee_id = $1
+           ORDER BY occurred_at ASC`,
+          [employee.id]
+        );
+      }
+    } catch (error) {
+      console.warn('onboarding_steps_history table not available:', error.message);
+    }
+
+    // Get background check status (if table exists)
+    let bgCheckStatus = null;
+    try {
+      const tableCheck = await query(
+        `SELECT table_name 
+         FROM information_schema.tables 
+         WHERE table_name = 'background_checks'`
+      );
+      if (tableCheck.rows.length > 0) {
+        const bgCheckResult = await query(
+          'SELECT status FROM background_checks WHERE employee_id = $1',
+          [employee.id]
+        );
+        bgCheckStatus = bgCheckResult.rows[0]?.status || null;
+      }
+    } catch (error) {
+      console.warn('background_checks table not available:', error.message);
+    }
+
+    // Calculate progress percentage
+    const steps = ['STARTED', 'PASSWORD_SETUP', 'DOCUMENTS_UPLOADED', 'FIRST_LOGIN', 'BG_CHECK_COMPLETED', 'ONBOARDING_COMPLETED'];
+    const currentStepIndex = steps.indexOf(onboardingStatus) >= 0 ? steps.indexOf(onboardingStatus) : 0;
+    const progress = ((currentStepIndex + 1) / steps.length) * 100;
+
+    res.json({
+      employee_id: employee.id,
+      current_status: onboardingStatus,
+      progress_percentage: Math.round(progress),
+      background_check_status: bgCheckStatus,
+      steps_completed: stepsResult.rows,
+      next_step: currentStepIndex < steps.length - 1 ? steps[currentStepIndex + 1] : null,
+    });
+  } catch (error) {
+    console.error('Error fetching onboarding progress:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch onboarding progress' });
+  }
+});
+
+export { ensureDocumentInfra };
 export default router;

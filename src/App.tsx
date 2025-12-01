@@ -62,9 +62,14 @@ import OffboardingNew from "./pages/OffboardingNew";
 import OffboardingQueue from "./pages/OffboardingQueue";
 import OffboardingDetail from "./pages/OffboardingDetail";
 import OffboardingPolicies from "./pages/OffboardingPolicies";
-import OnboardingEnhanced from "./pages/OnboardingEnhanced";
 import PoliciesManagement from "./pages/PoliciesManagement";
 import PolicyEditor from "./pages/PolicyEditor";
+import UnifiedPolicyManagement from "./pages/UnifiedPolicyManagement";
+import PolicyLibrary from "./pages/PolicyLibrary";
+import Teams from "./pages/Teams";
+import TeamDetail from "./pages/TeamDetail";
+import Projects from "./pages/Projects";
+import ProjectDetail from "./pages/ProjectDetail";
 import PromotionCycles from "./pages/PromotionCycles";
 import TaxDeclaration from "./pages/TaxDeclaration";
 import TaxDeclarationReview from "./pages/TaxDeclarationReview";
@@ -111,10 +116,10 @@ const App = () => (
             <Route path="/workflows/:id/edit" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><WorkflowEditor /></ProtectedRoute>} />
             <Route path="/policies" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><LeavePolicies /></ProtectedRoute>} />
             <Route path="/holidays" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><HolidayManagement /></ProtectedRoute>} />
-            <Route path="/analytics" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><Analytics /></ProtectedRoute>} />
-            <Route path="/employee-stats" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><EmployeeStats /></ProtectedRoute>} />
+            <Route path="/analytics" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'manager']}><Analytics /></ProtectedRoute>} />
+            <Route path="/employee-stats" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'manager']}><EmployeeStats /></ProtectedRoute>} />
             <Route path="/audit-logs" element={<ProtectedRoute allowedRoles={['ceo', 'hr']}><AuditLogs /></ProtectedRoute>} />
-            <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><CEODashboard /></ProtectedRoute>} />
+            <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin','manager']}><CEODashboard /></ProtectedRoute>} />
             <Route path="/projects/new" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectNew /></ProtectedRoute>} />
             <Route path="/projects/:id/suggestions" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectSuggestions /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute><UnifiedCalendar /></ProtectedRoute>} />
@@ -134,15 +139,14 @@ const App = () => (
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
             <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><ShiftManagement /></ProtectedRoute>} />
             <Route path="/scheduling" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><StaffScheduling /></ProtectedRoute>} />
-            <Route path="/scheduling/calendar" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'manager']}><UnifiedCalendar /></ProtectedRoute>} />
             <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
             <Route path="/rag/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><RAGDocumentUpload /></ProtectedRoute>} />
             <Route path="/attendance/clock" element={<ProtectedRoute><ClockInOut /></ProtectedRoute>} />
             <Route path="/hr/profile-requests" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><HrProfileRequests /></ProtectedRoute>} />
             <Route path="/attendance/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><AttendanceUpload /></ProtectedRoute>} />
             <Route path="/attendance/history" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><AttendanceUploadHistory /></ProtectedRoute>} />
-            <Route path="/analytics/attendance" element={<ProtectedRoute allowedRoles={['ceo', 'hr', 'director', 'admin']}><AttendanceAnalytics /></ProtectedRoute>} />
-            <Route path="/payroll" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin']}><Payroll /></ProtectedRoute>} />
+            <Route path="/analytics/attendance" element={<ProtectedRoute allowedRoles={['ceo', 'hr', 'director', 'admin', 'manager']}><AttendanceAnalytics /></ProtectedRoute>} />
+            <Route path="/payroll" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin', 'manager']}><Payroll /></ProtectedRoute>} />
             <Route path="/tax/declaration" element={<ProtectedRoute><TaxDeclaration /></ProtectedRoute>} />
             <Route path="/tax/declarations/review" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><TaxDeclarationReview /></ProtectedRoute>} />
             <Route path="/reports/form16" element={<ProtectedRoute><Form16 /></ProtectedRoute>} />
@@ -155,10 +159,17 @@ const App = () => (
             <Route path="/offboarding/:id" element={<ProtectedRoute><OffboardingDetail /></ProtectedRoute>} />
             
             {/* Multi-tenant routes */}
-            <Route path="/onboarding/enhanced" element={<ProtectedRoute><OnboardingEnhanced /></ProtectedRoute>} />
             <Route path="/policies/management" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><PoliciesManagement /></ProtectedRoute>} />
             <Route path="/policies/editor/:id" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><PolicyEditor /></ProtectedRoute>} />
+            <Route path="/policies/unified" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><UnifiedPolicyManagement /></ProtectedRoute>} />
+            <Route path="/policies/library" element={<ProtectedRoute><PolicyLibrary /></ProtectedRoute>} />
             <Route path="/promotion/cycles" element={<ProtectedRoute><PromotionCycles /></ProtectedRoute>} />
+            
+            {/* Teams & Projects routes */}
+            <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
+            <Route path="/teams/:id" element={<ProtectedRoute><TeamDetail /></ProtectedRoute>} />
+            <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
+            <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
             
             {/* Redirects */}
             <Route path="/" element={<Navigate to="/dashboard" />} />

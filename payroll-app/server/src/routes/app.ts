@@ -5,6 +5,8 @@ import PDFDocument from "pdfkit";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import reimbursementsRouter from "./reimbursements.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
@@ -26,6 +28,14 @@ const proofUpload = multer({
   storage: proofStorage,
   limits: {
     fileSize: Number(process.env.PAYROLL_PROOF_MAX_SIZE || 5 * 1024 * 1024), // default 5MB
+  },
+});
+
+// Multer for bulk salary import
+const salaryImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max
   },
 });
 
@@ -2166,6 +2176,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
       da,
       lta,
       bonus,
+      cca,
+      conveyance,
+      medical_allowance,
       pf_contribution,
       esi_contribution
     } = req.body;
@@ -2181,10 +2194,10 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
     const result = await query(
       `INSERT INTO compensation_structures (
         tenant_id, employee_id, effective_from, ctc, basic_salary, 
-        hra, special_allowance, da, lta, bonus, pf_contribution, esi_contribution,
-        created_by
+        hra, special_allowance, da, lta, bonus, cca, conveyance, medical_allowance,
+        pf_contribution, esi_contribution, created_by
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
       )
       ON CONFLICT (employee_id, effective_from)
       DO UPDATE SET
@@ -2195,6 +2208,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         da = EXCLUDED.da,
         lta = EXCLUDED.lta,
         bonus = EXCLUDED.bonus,
+        cca = EXCLUDED.cca,
+        conveyance = EXCLUDED.conveyance,
+        medical_allowance = EXCLUDED.medical_allowance,
         pf_contribution = EXCLUDED.pf_contribution,
         esi_contribution = EXCLUDED.esi_contribution,
         created_by = COALESCE(compensation_structures.created_by, EXCLUDED.created_by),
@@ -2211,6 +2227,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         da || 0,
         lta || 0,
         bonus || 0,
+        cca || 0,
+        conveyance || 0,
+        medical_allowance || 0,
         pf_contribution || 0,
         esi_contribution || 0,
         hrUserId || null // created_by (HR profile ID); allow null if not mapped
@@ -2222,6 +2241,279 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
   } catch (e: any) {
     console.error("Error adding compensation:", e);
     res.status(500).json({ error: e.message || "Failed to add compensation" });
+  }
+});
+
+// Bulk Salary Structure Import Endpoint
+appRouter.post("/imports/bulk-salary-structure", requireAuth, salaryImportUpload.single("file"), async (req, res) => {
+  try {
+    const userId = (req as any).userId as string;
+    const tenantId = (req as any).tenantId as string;
+    
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Check permissions (HR/admin only)
+    const userResult = await query(
+      `SELECT payroll_role FROM users WHERE id = $1 AND org_id = $2`,
+      [userId, tenantId]
+    );
+    
+    if (!userResult.rows[0] || userResult.rows[0].payroll_role !== 'payroll_admin') {
+      return res.status(403).json({ 
+        error: 'Insufficient permissions',
+        message: 'Only HR can import salary structures'
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const file = req.file;
+    const fileExt = path.extname(file.originalname).toLowerCase().slice(1);
+    
+    let rows: any[] = [];
+
+    // Parse file based on extension
+    if (fileExt === 'csv') {
+      // Parse CSV
+      const csvContent = file.buffer.toString('utf8');
+      const lines = csvContent.split('\n').filter(line => line.trim());
+      if (lines.length < 2) {
+        return res.status(400).json({ error: "CSV file must have at least a header row and one data row" });
+      }
+      
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const employeeIdIndex = headers.findIndex(h => h === 'employee id' || h === 'employee_id');
+      
+      if (employeeIdIndex === -1) {
+        return res.status(400).json({ error: "CSV must contain 'Employee ID' column" });
+      }
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        const row: any = {};
+        headers.forEach((header, idx) => {
+          row[header] = values[idx] || '';
+        });
+        rows.push(row);
+      }
+    } else if (['xlsx', 'xls'].includes(fileExt)) {
+      // Parse Excel
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet, { defval: null, raw: false });
+      
+      if (data.length === 0) {
+        return res.status(400).json({ error: "Excel file is empty" });
+      }
+
+      // Normalize headers (convert to lowercase, replace spaces with underscores)
+      const firstRow = data[0] as any;
+      const headers = Object.keys(firstRow).map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+      
+      const employeeIdHeader = headers.find(h => h === 'employee_id' || h === 'employeeid');
+      if (!employeeIdHeader) {
+        return res.status(400).json({ error: "Excel must contain 'Employee ID' column" });
+      }
+
+      // Transform data with normalized headers
+      rows = data.map((row: any) => {
+        const normalized: any = {};
+        Object.keys(row).forEach((key, idx) => {
+          normalized[headers[idx]] = row[key];
+        });
+        return normalized;
+      });
+    } else {
+      return res.status(400).json({ error: "Unsupported file format. Please upload CSV or Excel (.xlsx, .xls)" });
+    }
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: "No data rows found in file" });
+    }
+
+    // Get all column headers (excluding Employee ID)
+    const firstRow = rows[0];
+    const componentHeaders = Object.keys(firstRow).filter(
+      key => key.toLowerCase() !== 'employee_id' && key.toLowerCase() !== 'employee id'
+    );
+
+    // Map component names to their database column names
+    const componentMap: Record<string, string> = {
+      'basic': 'basic_salary',
+      'basic_salary': 'basic_salary',
+      'hra': 'hra',
+      'house_rent_allowance': 'hra',
+      'special_allowance': 'special_allowance',
+      'da': 'da',
+      'dearness_allowance': 'da',
+      'lta': 'lta',
+      'leave_travel_allowance': 'lta',
+      'bonus': 'bonus',
+      'cca': 'cca',
+      'city_compensatory_allowance': 'cca',
+      'conveyance': 'conveyance',
+      'conveyance_allowance': 'conveyance',
+      'medical_allowance': 'medical_allowance',
+      'medical': 'medical_allowance',
+      'pf': 'pf_contribution',
+      'pf_contribution': 'pf_contribution',
+      'esi': 'esi_contribution',
+      'esi_contribution': 'esi_contribution',
+    };
+
+    // Normalize component header names
+    const normalizeComponentName = (name: string): string => {
+      return name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    };
+
+    const report = {
+      processed: 0,
+      updated: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    // Process each row
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const employeeId = (row['employee_id'] || row['employee id'] || '').toString().trim();
+      
+      if (!employeeId) {
+        report.failed++;
+        report.errors.push(`Row ${i + 2}: Missing Employee ID`);
+        continue;
+      }
+
+      try {
+        // Find employee by employee_id
+        const employeeResult = await query(
+          `SELECT id FROM employees WHERE employee_code = $1 AND tenant_id = $2`,
+          [employeeId, tenantId]
+        );
+
+        if (employeeResult.rows.length === 0) {
+          report.failed++;
+          report.errors.push(`Row ${i + 2}: Employee ID "${employeeId}" not found`);
+          continue;
+        }
+
+        const employeeDbId = employeeResult.rows[0].id;
+
+        // Get current date for effective_from (or use a default)
+        const effectiveFrom = new Date().toISOString().split('T')[0];
+
+        // Build update object with all components
+        const updateData: any = {
+          effective_from: effectiveFrom,
+        };
+
+        // Process each component column
+        for (const header of componentHeaders) {
+          const normalizedHeader = normalizeComponentName(header);
+          const dbColumn = componentMap[normalizedHeader];
+          
+          if (dbColumn) {
+            const value = parseFloat(row[header] || '0');
+            if (!isNaN(value) && value >= 0) {
+              updateData[dbColumn] = value;
+            }
+          }
+        }
+
+        // Calculate CTC if not provided (sum of all components * 12)
+        if (!updateData.ctc) {
+          const monthlyTotal = 
+            (updateData.basic_salary || 0) +
+            (updateData.hra || 0) +
+            (updateData.special_allowance || 0) +
+            (updateData.da || 0) +
+            (updateData.lta || 0) +
+            (updateData.bonus || 0) +
+            (updateData.cca || 0) +
+            (updateData.conveyance || 0) +
+            (updateData.medical_allowance || 0);
+          updateData.ctc = monthlyTotal * 12;
+        }
+
+        // Ensure required fields
+        if (!updateData.basic_salary) {
+          updateData.basic_salary = 0;
+        }
+
+        // Delete existing compensation for this employee and effective date, then insert new
+        await query('BEGIN');
+        
+        try {
+          // Delete existing structure
+          await query(
+            `DELETE FROM compensation_structures 
+             WHERE employee_id = $1 AND tenant_id = $2 AND effective_from = $3`,
+            [employeeDbId, tenantId, effectiveFrom]
+          );
+
+          // Insert new structure
+          await query(
+            `INSERT INTO compensation_structures (
+              tenant_id, employee_id, effective_from, ctc, basic_salary,
+              hra, special_allowance, da, lta, bonus, cca, conveyance, medical_allowance,
+              pf_contribution, esi_contribution, created_by
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+            )`,
+            [
+              tenantId,
+              employeeDbId,
+              effectiveFrom,
+              updateData.ctc || 0,
+              updateData.basic_salary || 0,
+              updateData.hra || 0,
+              updateData.special_allowance || 0,
+              updateData.da || 0,
+              updateData.lta || 0,
+              updateData.bonus || 0,
+              updateData.cca || 0,
+              updateData.conveyance || 0,
+              updateData.medical_allowance || 0,
+              updateData.pf_contribution || 0,
+              updateData.esi_contribution || 0,
+              userId
+            ]
+          );
+
+          await query('COMMIT');
+          report.updated++;
+          report.processed++;
+        } catch (dbError: any) {
+          await query('ROLLBACK');
+          throw dbError;
+        }
+      } catch (error: any) {
+        report.failed++;
+        report.errors.push(`Row ${i + 2}: ${error.message || 'Unknown error'}`);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Bulk import completed. Updated ${report.updated} employee(s).`,
+      report: {
+        total: rows.length,
+        updated: report.updated,
+        failed: report.failed,
+        errors: report.errors.slice(0, 50), // Limit errors to first 50
+      },
+    });
+  } catch (error: any) {
+    console.error("Error in bulk salary import:", error);
+    res.status(500).json({ 
+      error: error.message || "Failed to import salary structures",
+      details: error.stack 
+    });
   }
 });
 
@@ -2792,6 +3084,352 @@ appRouter.get("/payroll-cycles/:cycleId/payslips", requireAuth, async (req, res)
   } catch (e: any) {
     console.error("Error fetching payslips for cycle:", e);
     res.status(500).json({ error: e.message || "Failed to fetch payslips" });
+  }
+});
+
+// Helper function to get payroll items for bank transfer (from payroll_items or calculated from preview)
+async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string, cycle: any) {
+  // First, try to get from payroll_items table (if already processed)
+  const existingItemsResult = await query(
+    `
+    SELECT 
+      e.employee_id as employee_code,
+      COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as employee_name,
+      COALESCE(od.bank_account_number, e.bank_account_number, 'N/A') as bank_account_number,
+      COALESCE(od.ifsc_code, e.bank_ifsc_code, 'N/A') as bank_ifsc_code,
+      COALESCE(od.bank_name, e.bank_name, 'N/A') as bank_name,
+      pi.net_salary
+    FROM payroll_items pi
+    JOIN employees e ON e.id = pi.employee_id
+    JOIN profiles p ON p.id = e.user_id
+    LEFT JOIN onboarding_data od ON od.employee_id = e.id
+    WHERE pi.payroll_cycle_id = $1 
+      AND pi.tenant_id = $2
+      AND pi.net_salary > 0
+    ORDER BY e.employee_id ASC
+    `,
+    [cycleId, tenantId]
+  );
+
+  // If items exist, return them
+  if (existingItemsResult.rows.length > 0) {
+    return existingItemsResult.rows;
+  }
+
+  // Otherwise, calculate from preview logic (before processing) - reuse the preview endpoint logic
+  const payrollMonth = cycle.month;
+  const payrollYear = cycle.year;
+  const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
+
+  // Get payroll settings
+  const settingsResult = await query(
+    "SELECT * FROM payroll_settings WHERE tenant_id = $1",
+    [tenantId]
+  );
+  
+  const settings = settingsResult.rows[0] || {
+    pf_rate: 12.00,
+    esi_rate: 3.25,
+    pt_rate: 200.00,
+    tds_threshold: 250000.00,
+  };
+
+  // Get all active employees who were employed by the payroll month
+  const employeesResult = await query(
+    `SELECT employee_id, full_name, email, employee_code
+     FROM payroll_employee_view
+     WHERE org_id = $1
+       AND employment_status = 'active'
+       AND (date_of_joining IS NULL OR date_of_joining <= $2)
+     ORDER BY date_of_joining ASC`,
+    [tenantId, payrollMonthEnd.toISOString()]
+  );
+
+  const employees = employeesResult.rows;
+  const calculatedItems: any[] = [];
+
+  const incentivesResult = await query(
+    `SELECT employee_id, amount
+     FROM payroll_incentives
+     WHERE tenant_id = $1
+       AND payroll_cycle_id = $2`,
+    [tenantId, cycleId]
+  );
+  const incentiveMap = new Map<string, number>();
+  incentivesResult.rows.forEach((row) => {
+    incentiveMap.set(row.employee_id, Number(row.amount || 0));
+  });
+
+  // Calculate salary for each employee (same logic as preview endpoint)
+  for (const employee of employees) {
+    // Get the latest compensation structure effective for the payroll month
+    const compResult = await query(
+      `SELECT * FROM compensation_structures
+       WHERE employee_id = $1 
+         AND tenant_id = $2
+         AND effective_from <= $3
+       ORDER BY effective_from DESC
+       LIMIT 1`,
+      [employee.employee_id, tenantId, payrollMonthEnd.toISOString()]
+    );
+
+    if (compResult.rows.length === 0) {
+      continue;
+    }
+
+    const compensation = compResult.rows[0];
+    
+    // All amounts are monthly
+    const monthlyBasic = Number(compensation.basic_salary) || 0;
+    const monthlyHRA = Number(compensation.hra) || 0;
+    const monthlySpecialAllowance = Number(compensation.special_allowance) || 0;
+    const monthlyDA = Number(compensation.da) || 0;
+    const monthlyLTA = Number(compensation.lta) || 0;
+    const monthlyBonus = Number(compensation.bonus) || 0;
+
+    // Gross salary = sum of all monthly earnings
+    const grossSalary = monthlyBasic + monthlyHRA + monthlySpecialAllowance + monthlyDA + monthlyLTA + monthlyBonus;
+
+    // Calculate LOP days and paid days for this month
+    const { lopDays, paidDays, totalWorkingDays } = await calculateLopAndPaidDays(
+      tenantId,
+      employee.employee_id,
+      payrollMonth,
+      payrollYear
+    );
+
+    // Adjust gross salary based on paid days (proportional deduction for LOP)
+    const dailyRate = grossSalary / totalWorkingDays;
+    const adjustedGrossSalary = dailyRate * paidDays;
+
+    // Recalculate components proportionally
+    const adjustmentRatio = paidDays / totalWorkingDays;
+    const adjustedBasic = monthlyBasic * adjustmentRatio;
+    const adjustedHRA = monthlyHRA * adjustmentRatio;
+    const adjustedSpecialAllowance = monthlySpecialAllowance * adjustmentRatio;
+    const adjustedDA = monthlyDA * adjustmentRatio;
+    const adjustedLTA = monthlyLTA * adjustmentRatio;
+    const adjustedBonus = monthlyBonus * adjustmentRatio;
+
+    // Calculate deductions based on adjusted gross
+    const pfWageCeiling = 15000;
+    const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+    const pfDeduction = (pfBasis * Number(settings.pf_rate)) / 100;
+    const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
+    const ptDeduction = Number(settings.pt_rate) || 200;
+    
+    const incentiveAmount = incentiveMap.get(employee.employee_id) || 0;
+    const grossWithIncentive = adjustedGrossSalary + incentiveAmount;
+    const annualIncome = grossWithIncentive * 12;
+    let tdsDeduction = 0;
+    if (annualIncome > Number(settings.tds_threshold)) {
+      const excessAmount = annualIncome - Number(settings.tds_threshold);
+      tdsDeduction = (excessAmount * 5) / 100 / 12;
+    }
+
+    const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
+    const netSalary = grossWithIncentive - totalDeductions;
+
+    if (netSalary <= 0) continue;
+
+    // Get bank details from onboarding_data (HR portal) or employees table as fallback
+    const employeeDetailsResult = await query(
+      `SELECT 
+        e.id,
+        e.employee_id,
+        COALESCE(od.bank_account_number, e.bank_account_number, 'N/A') as bank_account_number,
+        COALESCE(od.ifsc_code, e.bank_ifsc_code, 'N/A') as bank_ifsc_code,
+        COALESCE(od.bank_name, e.bank_name, 'N/A') as bank_name,
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as employee_name
+      FROM employees e
+      JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN onboarding_data od ON od.employee_id = e.id
+      WHERE e.id = $1 AND e.tenant_id = $2`,
+      [employee.employee_id, tenantId]
+    );
+
+    const empDetails = employeeDetailsResult.rows[0];
+    if (!empDetails) continue;
+
+    calculatedItems.push({
+      employee_code: employee.employee_code || empDetails.employee_id || 'N/A',
+      employee_name: empDetails.employee_name || employee.full_name || 'N/A',
+      bank_account_number: empDetails.bank_account_number || 'N/A',
+      bank_ifsc_code: empDetails.bank_ifsc_code || 'N/A',
+      bank_name: empDetails.bank_name || 'N/A',
+      net_salary: netSalary,
+    });
+  }
+
+  return calculatedItems;
+}
+
+// Get bank transfer preview data (JSON) for payroll cycle
+appRouter.get("/payroll-cycles/:cycleId/export/bank-transfer/preview", requireAuth, async (req, res) => {
+  try {
+    const tenantId = (req as any).tenantId as string;
+    const { cycleId } = req.params;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Get payroll cycle to verify it belongs to tenant
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Get payroll items (from payroll_items or calculated)
+    const payrollItems = await getPayrollItemsForBankTransfer(cycleId, tenantId, cycle);
+
+    // Format payment date
+    const paymentDate = cycle.payday 
+      ? new Date(cycle.payday).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : new Date(cycle.year, cycle.month, 0).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    const previewData = payrollItems.map((row: any) => ({
+      employee_code: row.employee_code || 'N/A',
+      employee_name: row.employee_name || 'N/A',
+      bank_account_number: row.bank_account_number || 'N/A',
+      bank_ifsc_code: row.bank_ifsc_code || 'N/A',
+      bank_name: row.bank_name || 'N/A',
+      net_salary: parseFloat(row.net_salary) || 0,
+      payment_date: paymentDate,
+    }));
+
+    return res.json({
+      cycle: {
+        id: cycle.id,
+        month: cycle.month,
+        year: cycle.year,
+        status: cycle.status,
+        payday: cycle.payday,
+      },
+      payment_date: paymentDate,
+      items: previewData,
+      total_employees: previewData.length,
+      total_amount: previewData.reduce((sum, item) => sum + item.net_salary, 0),
+    });
+  } catch (e: any) {
+    console.error("Error fetching bank transfer preview:", e);
+    res.status(500).json({ error: e.message || "Failed to fetch bank transfer preview" });
+  }
+});
+
+// Export bank transfer file for payroll cycle
+appRouter.get("/payroll-cycles/:cycleId/export/bank-transfer", requireAuth, async (req, res) => {
+  try {
+    const tenantId = (req as any).tenantId as string;
+    const { cycleId } = req.params;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Get payroll cycle to verify it belongs to tenant
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Get payroll items (from payroll_items or calculated from preview)
+    const payrollItems = await getPayrollItemsForBankTransfer(cycleId, tenantId, cycle);
+
+    if (payrollItems.length === 0) {
+      return res.status(404).json({ error: "No payroll items found for this cycle" });
+    }
+
+    // Debug: Log first item to verify bank details are present
+    if (payrollItems.length > 0) {
+      console.log('[BANK EXPORT] Sample item:', {
+        employee_code: payrollItems[0].employee_code,
+        bank_account_number: payrollItems[0].bank_account_number,
+        bank_ifsc_code: payrollItems[0].bank_ifsc_code,
+        bank_name: payrollItems[0].bank_name,
+      });
+    }
+
+    // Create Excel workbook
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Bank Transfer');
+
+    // Set column headers
+    worksheet.columns = [
+      { header: 'Employee Code', key: 'employee_code', width: 15 },
+      { header: 'Employee Name', key: 'employee_name', width: 30 },
+      { header: 'Bank Account Number', key: 'bank_account_number', width: 20 },
+      { header: 'IFSC Code', key: 'bank_ifsc_code', width: 15 },
+      { header: 'Bank Name', key: 'bank_name', width: 20 },
+      { header: 'Net Salary', key: 'net_salary', width: 15 },
+      { header: 'Payment Date', key: 'payment_date', width: 15 },
+    ];
+
+    // Style header row
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0E0E0' }
+    };
+
+    // Format payment date
+    const paymentDate = cycle.payday 
+      ? new Date(cycle.payday).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : new Date(cycle.year, cycle.month, 0).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    // Add data rows
+    payrollItems.forEach((row: any) => {
+      // Convert net_salary from main currency unit (already in main unit, not cents)
+      const netSalary = parseFloat(row.net_salary) || 0;
+      
+      // Ensure all bank details are properly extracted
+      const bankAccountNumber = row.bank_account_number || 'N/A';
+      const bankIfscCode = row.bank_ifsc_code || 'N/A';
+      const bankName = row.bank_name || 'N/A';
+      
+      worksheet.addRow({
+        employee_code: row.employee_code || 'N/A',
+        employee_name: row.employee_name || 'N/A',
+        bank_account_number: bankAccountNumber,
+        bank_ifsc_code: bankIfscCode,
+        bank_name: bankName,
+        net_salary: netSalary,
+        payment_date: paymentDate,
+      });
+    });
+
+    // Format Net Salary column as currency
+    worksheet.getColumn('net_salary').numFmt = '#,##0.00';
+    worksheet.getColumn('net_salary').alignment = { horizontal: 'right' };
+
+    // Generate filename
+    const monthName = new Date(cycle.year, cycle.month - 1).toLocaleString('default', { month: 'short' });
+    const filename = `Salary_Payout_${monthName}_${cycle.year}_${cycleId.substring(0, 8)}.xlsx`;
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Write workbook to response
+    await workbook.xlsx.write(res);
+    res.end();
+
+  } catch (e: any) {
+    console.error("Error exporting bank transfer file:", e);
+    res.status(500).json({ error: e.message || "Failed to export bank transfer file" });
   }
 });
 

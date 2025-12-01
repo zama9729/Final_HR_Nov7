@@ -9,7 +9,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { User, Briefcase, Clock, FileText, DollarSign, Calendar } from "lucide-react";
+import { User, Briefcase, Clock, DollarSign, Calendar } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface EmployeeStat {

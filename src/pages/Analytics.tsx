@@ -1,504 +1,578 @@
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import { Users, Briefcase, Calendar, TrendingUp, CheckCircle, Clock, XCircle, BarChart3, Activity } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useMemo, useState } from "react";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { Download, Filter, RefreshCw, Users, CalendarDays, Briefcase, UserSquare, MapPin } from "lucide-react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
 
-// Modern color palette inspired by ADP
-const COLORS = [
-  "#6366f1", // Indigo
-  "#8b5cf6", // Purple
-  "#ec4899", // Pink
-  "#f59e0b", // Amber
-  "#10b981", // Emerald
-  "#06b6d4", // Cyan
-  "#3b82f6", // Blue
-  "#ef4444", // Red
-];
+// Fix for default marker icon in React-Leaflet
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+});
 
-const DONUT_COLORS = [
-  { fill: "#6366f1", stroke: "#4f46e5" },
-  { fill: "#8b5cf6", stroke: "#7c3aed" },
-  { fill: "#ec4899", stroke: "#db2777" },
-  { fill: "#f59e0b", stroke: "#d97706" },
-  { fill: "#10b981", stroke: "#059669" },
-  { fill: "#06b6d4", stroke: "#0891b2" },
-  { fill: "#3b82f6", stroke: "#2563eb" },
-  { fill: "#ef4444", stroke: "#dc2626" },
-];
+// Component to handle map resize
+function MapResizeHandler() {
+  const map = useMap();
+  useEffect(() => {
+    const handleResize = () => {
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 150);
+    };
+    
+    // Initial resize
+    handleResize();
+    
+    // Listen for window resize
+    window.addEventListener('resize', handleResize);
+    
+    // Use ResizeObserver to detect container size changes (e.g., sidebar toggle)
+    const container = map.getContainer().parentElement;
+    if (container) {
+      const resizeObserver = new ResizeObserver(() => {
+        handleResize();
+      });
+      resizeObserver.observe(container);
+      
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        resizeObserver.disconnect();
+      };
+    }
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [map]);
+  return null;
+}
 
-// Custom tooltip component
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
+type DistributionDatum = { name: string; value: number };
+
+interface BranchMarker {
+  id: string;
+  name: string;
+  city?: string;
+  country?: string;
+  employees?: number;
+  teams?: number;
+  lat: number;
+  lon: number;
+}
+
+interface PositionedBranch extends BranchMarker {
+  position: { left: number; top: number };
+}
+
+const SLICE_COLORS = ["#6366F1", "#A855F7", "#F472B6", "#FBBF24", "#34D399", "#38BDF8", "#F97316", "#F43F5E"];
+
+const buildDonutTooltip =
+  (total: number) =>
+  ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const entry = payload[0];
+    const percent = total > 0 ? ((entry.value / total) * 100).toFixed(1) : "0.0";
     return (
-      <div className="bg-card border border-border rounded-lg shadow-lg p-3">
-        <p className="font-semibold mb-2">{label}</p>
-        {payload.map((entry: any, index: number) => (
-          <p key={index} className="text-sm" style={{ color: entry.color }}>
-            {entry.name}: <span className="font-medium">{entry.value}</span>
-          </p>
-        ))}
+      <div className="rounded-2xl border border-slate-200/50 dark:border-white/15 bg-white/95 dark:bg-[#071226]/90 px-4 py-3 text-xs text-slate-900 dark:text-slate-100 shadow-2xl backdrop-blur">
+        <p className="text-sm font-semibold">{entry.name}</p>
+        <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+          {entry.value} people • {percent}%
+        </p>
       </div>
     );
-  }
-  return null;
-};
+  };
 
-// Custom label for donut chart
-const renderLabel = (entry: any, total: number) => {
-  const percent = total > 0 ? ((entry.value / total) * 100).toFixed(0) : 0;
-  if (parseFloat(percent) < 5) return ""; // Don't show label for small slices
-  return `${percent}%`;
+const projectCoordinates = (lat: number, lon: number) => {
+  const x = ((lon + 180) / 360) * 100;
+  const y = ((90 - lat) / 180) * 100;
+  return {
+    left: Math.min(95, Math.max(5, x)),
+    top: Math.min(95, Math.max(5, y)),
+  };
 };
 
 export default function Analytics() {
-  const [employeeGrowth, setEmployeeGrowth] = useState<Array<{ month: string; count: number }>>([]);
-  const [departmentData, setDepartmentData] = useState<Array<{ name: string; value: number }>>([]);
-  const [leaveData, setLeaveData] = useState<Array<{ month: string; approved: number; pending: number; rejected: number }>>([]);
-  const [attendanceData, setAttendanceData] = useState<Array<{ month: string; avg_hours: number; active_employees: number }>>([]);
-  const [projectUtilization, setProjectUtilization] = useState<Array<any>>([]);
-  const [topSkills, setTopSkills] = useState<Array<any>>([]);
-  const [overall, setOverall] = useState<any>({});
+  const [departmentData, setDepartmentData] = useState<DistributionDatum[]>([]);
+  const [skillsData, setSkillsData] = useState<DistributionDatum[]>([]);
+  const [overall, setOverall] = useState<Record<string, number>>({});
+  const [branches, setBranches] = useState<BranchMarker[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  const [hoverBranchId, setHoverBranchId] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
-    fetchAnalyticsData();
+    (async () => {
+      setLoading(true);
+      await initialize();
+      setLoading(false);
+    })();
   }, []);
 
-  const fetchAnalyticsData = async () => {
+  // Force map re-render when branches are loaded
+  const [mapKey, setMapKey] = useState(0);
+  useEffect(() => {
+    if (branches.length > 0) {
+      setMapKey((prev) => prev + 1);
+    }
+  }, [branches.length]);
+
+  const initialize = async () => {
+    await Promise.all([loadAnalyticsData(), loadBranches()]);
+  };
+
+  const loadAnalyticsData = async () => {
     try {
-      const resp = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/analytics`,
-        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
-      );
-      
-      if (!resp.ok) {
-        throw new Error('Failed to fetch analytics');
-      }
-      
+      const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/analytics`, {
+        headers: { Authorization: `Bearer ${api.token || localStorage.getItem("auth_token")}` },
+      });
+      if (!resp.ok) throw new Error("Failed to load analytics");
       const data = await resp.json();
       
-      setEmployeeGrowth((data.employeeGrowth || []).map((row: any) => ({ month: row.month, count: parseInt(row.count) || 0 })));
-      setDepartmentData((data.departmentData || []).map((row: any) => ({ name: row.name, value: parseInt(row.value) || 0 })));
-      setLeaveData((data.leaveData || []).map((row: any) => ({
-        month: row.month,
-        approved: parseInt(row.approved) || 0,
-        pending: parseInt(row.pending) || 0,
-        rejected: parseInt(row.rejected) || 0
-      })));
-      setAttendanceData((data.attendanceData || []).map((row: any) => ({
-        month: row.month,
-        avg_hours: parseFloat(row.avg_hours) || 0,
-        active_employees: parseInt(row.active_employees) || 0
-      })));
-      setProjectUtilization(data.projectUtilization || []);
-      setTopSkills((data.topSkills || []).map((row: any) => ({
+      // Parse overall stats - ensure numbers are properly converted
+      const overallData = data.overall || {};
+      const parsedOverall: Record<string, number> = {};
+      for (const [key, value] of Object.entries(overallData)) {
+        parsedOverall[key] = typeof value === 'string' ? Number.parseInt(value, 10) || 0 : Number(value) || 0;
+      }
+      setOverall(parsedOverall);
+
+      const department = (data.departmentData || []).map((row: any) => ({
         name: row.name,
-        count: parseInt(row.count) || 0,
-        avg_level: parseFloat(row.avg_level) || 0
-      })));
-      setOverall(data.overall || {});
+        value: Number.parseInt(String(row.value), 10) || 0,
+      }));
+      setDepartmentData(department);
+
+      const skills = (data.topSkills || [])
+        .slice(0, 8)
+        .map((row: any) => ({ name: row.name, value: Number.parseInt(String(row.count), 10) || 0 }));
+      setSkillsData(skills);
     } catch (error) {
-      console.error('Error fetching analytics:', error);
-    } finally {
-      setLoading(false);
+      console.error("Analytics error", error);
     }
   };
+
+  const loadBranches = async () => {
+    try {
+      const data = await api.getBranchHierarchy();
+      const formatted: BranchMarker[] = (data?.branches || [])
+        .map((branch: any) => {
+          const metadata = branch.metadata || {};
+          const geo = metadata.geofence || metadata.coordinates || {};
+          const lat =
+            Number.parseFloat(
+              geo.lat ?? geo.latitude ?? branch.latitude ?? branch.lat ?? geo.center_lat ?? metadata.lat ?? "",
+            ) ?? NaN;
+          const lon =
+            Number.parseFloat(
+              geo.lon ?? geo.lng ?? geo.longitude ?? branch.longitude ?? branch.lon ?? geo.center_lon ?? metadata.lon ?? "",
+            ) ?? NaN;
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            return null;
+          }
+          return {
+            id: branch.id || branch.branch_id || branch.name,
+            name: branch.name || branch.label || "Branch",
+            city: branch.city || metadata.address?.city || metadata.city,
+            country: branch.country || metadata.address?.country || metadata.country,
+            employees: Number(branch.employee_count) || Number(metadata.headcount) || 0,
+            teams: Number(branch.team_count) || Number(metadata.team_count) || 0,
+            lat,
+            lon,
+          };
+        })
+        .filter(Boolean) as BranchMarker[];
+
+      setBranches(formatted);
+      if (!selectedBranchId && formatted.length) {
+        setSelectedBranchId(formatted[0].id);
+      }
+    } catch (error: any) {
+      // Silently handle permission errors - managers may not have access to branches
+      if (error?.message?.includes('permission') || error?.message?.includes('403')) {
+        console.log('Branch access not available for this role');
+        setBranches([]);
+      } else {
+        console.error("Branch hierarchy error", error);
+      }
+    }
+  };
+
+  const handleExport = () => {
+    const snapshot = {
+      generated_at: new Date().toISOString(),
+      overview: overall,
+      departments: departmentData,
+      skills: skillsData,
+      branches,
+    };
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `analytics-${new Date().toISOString()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Export ready", description: "Analytics snapshot has been downloaded." });
+  };
+
+  const handleFilter = () =>
+    toast({
+      title: "Filter panel",
+      description: "Advanced analytics filters are in progress. Stay tuned!",
+    });
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await initialize();
+    setIsRefreshing(false);
+    toast({ title: "Analytics refreshed", description: "Latest KPIs, charts, and locations are up to date." });
+  };
+
+  // All hooks must be called before any early returns
+  const formatNumber = (value: number) => new Intl.NumberFormat("en-US").format(value ?? 0);
+
+  const departmentTotal = useMemo(
+    () => departmentData.reduce((sum, item) => sum + (item.value || 0), 0),
+    [departmentData],
+  );
+  const skillTotal = useMemo(() => skillsData.reduce((sum, item) => sum + (item.value || 0), 0), [skillsData]);
+
+  const positionedBranches: PositionedBranch[] = useMemo(
+    () => branches.map((branch) => ({ ...branch, position: projectCoordinates(branch.lat, branch.lon) })),
+    [branches],
+  );
+
+  const totalEmployees = Number(overall.total_employees) || 0;
+  const employeesOnLeave = Number(overall.employees_on_leave) || Number(overall.pending_leaves) || 0;
+  const projectCount = Number(overall.project_count) || Number(overall.active_projects) || 0;
+  const managerCount = Number(overall.manager_count) || Number(overall.total_managers) || 0;
 
   if (loading) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="animate-pulse text-muted-foreground">Loading analytics...</div>
+        <div className="flex min-h-[500px] items-center justify-center bg-slate-50 dark:bg-[#050d1b] text-slate-600 dark:text-slate-300">
+          <span className="animate-pulse text-sm tracking-wide">Loading analytics intelligence…</span>
         </div>
       </AppLayout>
     );
   }
 
-  const totalEmployees = overall.total_employees || 0;
-  const activeProjects = overall.active_projects || 0;
-  const pendingLeaves = overall.pending_leaves || 0;
-  const activeAssignments = overall.active_assignments || 0;
+  const selectedBranch =
+    positionedBranches.find((branch) => branch.id === selectedBranchId) || positionedBranches[0] || null;
+
+  const activeTooltipBranch =
+    positionedBranches.find((branch) => branch.id === (hoverBranchId || selectedBranch?.id)) || null;
+
+  const summaryHighlights = [
+    {
+      label: "Total teams",
+      value: formatNumber(overall.total_teams ?? branches.reduce((acc, branch) => acc + (branch.teams ?? 0), 0)),
+    },
+    { label: "Active projects", value: formatNumber(projectCount) },
+    { label: "Office locations", value: formatNumber(positionedBranches.length) },
+  ];
+
+  const kpiCards = [
+    {
+      id: "employees",
+      label: "Total Employees",
+      value: formatNumber(totalEmployees),
+      subtitle: "Across all locations",
+      icon: Users,
+      orb: "from-indigo-400 via-indigo-500 to-indigo-700",
+      glow: "shadow-[0_20px_60px_rgba(99,102,241,0.45)]",
+    },
+    {
+      id: "leave",
+      label: "Employees on Leave",
+      value: formatNumber(employeesOnLeave),
+      subtitle: "Today’s out-of-office",
+      icon: CalendarDays,
+      orb: "from-amber-300 via-amber-400 to-orange-500",
+      glow: "shadow-[0_20px_60px_rgba(251,191,36,0.45)]",
+    },
+    {
+      id: "projects",
+      label: "Project Count",
+      value: formatNumber(projectCount),
+      subtitle: "Active initiatives",
+      icon: Briefcase,
+      orb: "from-emerald-300 via-emerald-400 to-teal-500",
+      glow: "shadow-[0_20px_60px_rgba(16,185,129,0.45)]",
+    },
+    {
+      id: "managers",
+      label: "Manager Count",
+      value: formatNumber(managerCount),
+      subtitle: "People leaders",
+      icon: UserSquare,
+      orb: "from-fuchsia-400 via-purple-500 to-indigo-500",
+      glow: "shadow-[0_20px_60px_rgba(168,85,247,0.45)]",
+    },
+  ];
+
+  const quickActions = [
+    { id: "export", icon: Download, label: "Export", action: handleExport },
+    { id: "filter", icon: Filter, label: "Filter", action: handleFilter },
+    { id: "refresh", icon: RefreshCw, label: "Refresh", action: handleRefresh, loading: isRefreshing },
+  ];
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
+      <div className="min-h-[calc(100vh-4rem)] space-y-8 bg-gradient-to-b from-slate-50 via-blue-50/30 to-slate-100 dark:from-[#050d1a] dark:via-[#0b1f33] dark:to-[#071425] px-3 py-6 text-slate-900 dark:text-slate-100 sm:px-6 lg:px-10">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Analytics Dashboard</h1>
-            <p className="text-muted-foreground mt-1">Comprehensive insights and trends across your organization</p>
+            <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Executive analytics</p>
+            <h1 className="mt-2 text-3xl font-bold leading-tight text-slate-900 dark:text-white">Intelligence & Insights</h1>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Real-time visibility across people, skills, locations, and capacity.
+            </p>
           </div>
-        </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {quickActions.map(({ id, icon: Icon, label, action, loading: loadingAction }) => (
+              <Button
+                key={id}
+                className="min-w-[110px] bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={action}
+                disabled={loadingAction}
+              >
+                <Icon className={`mr-2 h-4 w-4 ${loadingAction ? "animate-spin" : ""}`} />
+                {label}
+              </Button>
+            ))}
+          </div>
+        </header>
 
-        {/* Overall Stats - Modern Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="border-l-4 border-l-indigo-500 hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {kpiCards.map(({ id, label, value, subtitle, icon: Icon, orb, glow }) => (
+            <div
+              key={id}
+              className={`relative overflow-hidden rounded-[18px] border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/10 p-5 backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-blue-400/60 dark:hover:border-blue-300/40 hover:bg-white dark:hover:bg-white/20 hover:shadow-[0_25px_70px_rgba(59,130,246,0.25)] dark:hover:shadow-[0_25px_70px_rgba(2,8,20,0.6)] ${glow}`}
+            >
+              <div
+                className={`pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-gradient-to-br ${orb} opacity-40 dark:opacity-60 blur-3xl`}
+                aria-hidden
+              />
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Total Employees</CardTitle>
-                <div className="h-10 w-10 rounded-full bg-indigo-100 dark:bg-indigo-900/20 flex items-center justify-center">
-                  <Users className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">{label}</p>
+                  <p className="mt-3 text-[42px] font-semibold leading-tight text-slate-900 dark:text-white">{value}</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">{subtitle}</p>
+                </div>
+                <div className="rounded-2xl bg-blue-50/80 dark:bg-white/20 p-3 text-blue-600 dark:text-white shadow-inner">
+                  <Icon className="h-6 w-6" />
                 </div>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{totalEmployees}</div>
-              <p className="text-xs text-muted-foreground mt-1">Active team members</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-purple-500 hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Active Projects</CardTitle>
-                <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center">
-                  <Briefcase className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{activeProjects}</div>
-              <p className="text-xs text-muted-foreground mt-1">Currently in progress</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-amber-500 hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Pending Leaves</CardTitle>
-                <div className="h-10 w-10 rounded-full bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center">
-                  <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{pendingLeaves}</div>
-              <p className="text-xs text-muted-foreground mt-1">Awaiting approval</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-emerald-500 hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Active Assignments</CardTitle>
-                <div className="h-10 w-10 rounded-full bg-emerald-100 dark:bg-emerald-900/20 flex items-center justify-center">
-                  <Activity className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{activeAssignments}</div>
-              <p className="text-xs text-muted-foreground mt-1">Resource allocations</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-6">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="attendance">Attendance</TabsTrigger>
-            <TabsTrigger value="leaves">Leaves</TabsTrigger>
-            <TabsTrigger value="departments">Departments</TabsTrigger>
-            <TabsTrigger value="projects">Projects</TabsTrigger>
-            <TabsTrigger value="skills">Skills</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="overview" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-indigo-600" />
-                    Employee Growth (Last 6 Months)
-                  </CardTitle>
-                  <CardDescription>New hires over time</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {employeeGrowth.length === 0 ? (
-                    <div className="h-[350px] flex items-center justify-center text-muted-foreground">
-                      <p>No data available</p>
-                    </div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={350}>
-                      <AreaChart data={employeeGrowth}>
-                        <defs>
-                          <linearGradient id="colorGrowth" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                        <XAxis dataKey="month" className="text-xs" />
-                        <YAxis className="text-xs" />
-                        <Tooltip content={<CustomTooltip />} />
-                        <Area 
-                          type="monotone" 
-                          dataKey="count" 
-                          stroke="#6366f1" 
-                          strokeWidth={2}
-                          fill="url(#colorGrowth)"
-                          name="New Employees"
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5 text-purple-600" />
-                    Department Distribution
-                  </CardTitle>
-                  <CardDescription>Employee distribution across departments</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {departmentData.length === 0 ? (
-                    <div className="h-[350px] flex items-center justify-center text-muted-foreground">
-                      <p>No data available</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <ResponsiveContainer width="100%" height={280}>
-                        <PieChart>
-                          <Pie
-                            data={departmentData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={100}
-                            paddingAngle={2}
-                            dataKey="value"
-                            label={(entry) => {
-                              const total = departmentData.reduce((sum, item) => sum + item.value, 0);
-                              return renderLabel(entry, total);
-                            }}
-                          >
-                            {departmentData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length].fill} stroke={DONUT_COLORS[index % DONUT_COLORS.length].stroke} strokeWidth={2} />
-                            ))}
-                          </Pie>
-                          <Tooltip content={<CustomTooltip />} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="grid grid-cols-2 gap-2 mt-4">
-                        {departmentData.slice(0, 4).map((entry, index) => (
-                          <div key={index} className="flex items-center gap-2 text-sm">
-                            <div className="h-3 w-3 rounded-full" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length].fill }} />
-                            <span className="text-muted-foreground">{entry.name}</span>
-                            <span className="font-semibold ml-auto">{entry.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
             </div>
-          </TabsContent>
+          ))}
+        </section>
 
-          <TabsContent value="attendance" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-cyan-600" />
-                  Attendance Trends
-                </CardTitle>
-                <CardDescription>Average hours and active employees over time</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {attendanceData.length === 0 ? (
-                  <div className="h-[450px] flex items-center justify-center text-muted-foreground">
-                    <p>No data available</p>
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={450}>
-                    <LineChart data={attendanceData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="month" className="text-xs" />
-                      <YAxis yAxisId="left" className="text-xs" />
-                      <YAxis yAxisId="right" orientation="right" className="text-xs" />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend />
-                      <Line 
-                        yAxisId="left"
-                        type="monotone" 
-                        dataKey="avg_hours" 
-                        stroke="#06b6d4" 
-                        strokeWidth={3}
-                        name="Avg Hours"
-                        dot={{ fill: "#06b6d4", r: 4 }}
-                        activeDot={{ r: 6 }}
-                      />
-                      <Line 
-                        yAxisId="right"
-                        type="monotone" 
-                        dataKey="active_employees" 
-                        stroke="#10b981" 
-                        strokeWidth={3}
-                        name="Active Employees"
-                        dot={{ fill: "#10b981", r: 4 }}
-                        activeDot={{ r: 6 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="leaves" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="h-5 w-5 text-emerald-600" />
-                  Leave Requests Trend
-                </CardTitle>
-                <CardDescription>Approved, pending, and rejected leave requests over time</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {leaveData.length === 0 ? (
-                  <div className="h-[450px] flex items-center justify-center text-muted-foreground">
-                    <p>No data available</p>
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={450}>
-                    <BarChart data={leaveData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="month" className="text-xs" />
-                      <YAxis className="text-xs" />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend />
-                      <Bar dataKey="approved" stackId="a" fill="#10b981" name="Approved" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="pending" stackId="a" fill="#f59e0b" name="Pending" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="rejected" stackId="a" fill="#ef4444" name="Rejected" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="departments" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="h-5 w-5 text-purple-600" />
-                  Department Distribution
-                </CardTitle>
-                <CardDescription>Visual breakdown of employees by department</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {departmentData.length === 0 ? (
-                  <div className="h-[500px] flex items-center justify-center text-muted-foreground">
-                    <p>No data available</p>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    <ResponsiveContainer width="100%" height={400}>
-                      <PieChart>
-                        <Pie
-                          data={departmentData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={80}
-                          outerRadius={140}
-                          paddingAngle={3}
-                          dataKey="value"
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                        >
-                          {departmentData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length].fill} stroke={DONUT_COLORS[index % DONUT_COLORS.length].stroke} strokeWidth={2} />
-                          ))}
-                        </Pie>
-                        <Tooltip content={<CustomTooltip />} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <section className="grid gap-6 xl:grid-cols-2">
+          <div className="rounded-[26px] border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 backdrop-blur-xl shadow-[0_25px_70px_rgba(15,23,42,0.15)] dark:shadow-[0_25px_70px_rgba(2,8,20,0.45)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Departments</p>
+                <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Distribution by department</h2>
+                <p className="text-xs text-slate-600 dark:text-slate-300">Team mix & presence ({departmentTotal} employees)</p>
+              </div>
+            </div>
+            <div className="mt-4 h-[320px]">
+              {departmentData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">No data available</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={departmentData}
+                      innerRadius={80}
+                      outerRadius={120}
+                      paddingAngle={3}
+                      dataKey="value"
+                      strokeWidth={4}
+                    >
                       {departmentData.map((entry, index) => (
-                        <div key={index} className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors">
-                          <div className="flex items-center gap-2">
-                            <div className="h-4 w-4 rounded-full" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length].fill }} />
-                            <span className="text-sm font-medium">{entry.name}</span>
-                          </div>
-                          <Badge variant="secondary" className="font-semibold">{entry.value}</Badge>
-                        </div>
+                        <Cell
+                          key={entry.name}
+                          fill={SLICE_COLORS[index % SLICE_COLORS.length]}
+                          stroke={SLICE_COLORS[index % SLICE_COLORS.length]}
+                        />
                       ))}
-                    </div>
+                    </Pie>
+                    <Tooltip content={buildDonutTooltip(departmentTotal)} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-slate-700 dark:text-slate-200 lg:grid-cols-3">
+              {departmentData.slice(0, 6).map((entry, index) => (
+                <div key={entry.name} className="flex items-center justify-between rounded-2xl bg-slate-50/80 dark:bg-white/5 p-3">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="h-3.5 w-3.5 rounded-full"
+                      style={{ backgroundColor: SLICE_COLORS[index % SLICE_COLORS.length] }}
+                    />
+                    <span>{entry.name}</span>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  <span className="font-semibold">{entry.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
 
-          <TabsContent value="projects" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Briefcase className="h-5 w-5 text-indigo-600" />
-                  Project Utilization
-                </CardTitle>
-                <CardDescription>Employee allocation and utilization by project</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {projectUtilization.length === 0 ? (
-                  <div className="h-[450px] flex items-center justify-center text-muted-foreground">
-                    <p>No data available</p>
+          <div className="rounded-[26px] border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 backdrop-blur-xl shadow-[0_25px_70px_rgba(15,23,42,0.15)] dark:shadow-[0_25px_70px_rgba(2,8,20,0.45)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Skills</p>
+                <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Critical skills mix</h2>
+                <p className="text-xs text-slate-600 dark:text-slate-300">Top proficiencies ({skillTotal} endorsements)</p>
+              </div>
+            </div>
+            <div className="mt-4 h-[320px]">
+              {skillsData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">No data captured</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={skillsData}
+                      innerRadius={75}
+                      outerRadius={115}
+                      paddingAngle={2}
+                      cornerRadius={6}
+                      dataKey="value"
+                      strokeWidth={3}
+                    >
+                      {skillsData.map((entry, index) => (
+                        <Cell
+                          key={entry.name}
+                          fill={SLICE_COLORS[(index + 3) % SLICE_COLORS.length]}
+                          stroke={SLICE_COLORS[(index + 3) % SLICE_COLORS.length]}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip content={buildDonutTooltip(skillTotal)} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div className="mt-6 grid gap-2 text-sm text-slate-700 dark:text-slate-200">
+              {skillsData.slice(0, 5).map((skill, index) => (
+                <div key={skill.name} className="flex items-center justify-between rounded-2xl bg-slate-50/80 dark:bg-white/5 px-4 py-2.5">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: SLICE_COLORS[(index + 3) % SLICE_COLORS.length] }}
+                    />
+                    <span>{skill.name}</span>
                   </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={450}>
-                    <BarChart data={projectUtilization} layout="vertical" margin={{ left: 20, right: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis type="number" className="text-xs" />
-                      <YAxis dataKey="project_name" type="category" width={150} className="text-xs" />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend />
-                      <Bar dataKey="assigned_employees" fill="#6366f1" name="Assigned Employees" radius={[0, 4, 4, 0]} />
-                      <Bar dataKey="avg_allocation" fill="#8b5cf6" name="Avg Allocation %" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">{skill.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-          <TabsContent value="skills" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-pink-600" />
-                  Top Skills
-                </CardTitle>
-                <CardDescription>Most common skills and average proficiency levels</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {topSkills.length === 0 ? (
-                  <div className="h-[450px] flex items-center justify-center text-muted-foreground">
-                    <p>No data available</p>
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={450}>
-                    <BarChart data={topSkills} margin={{ left: 20, right: 20, bottom: 80 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} className="text-xs" />
-                      <YAxis yAxisId="left" className="text-xs" />
-                      <YAxis yAxisId="right" orientation="right" className="text-xs" />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend />
-                      <Bar yAxisId="left" dataKey="count" fill="#ec4899" name="Employees with Skill" radius={[4, 4, 0, 0]} />
-                      <Bar yAxisId="right" dataKey="avg_level" fill="#8b5cf6" name="Avg Skill Level" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+        <section className="rounded-[28px] border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 shadow-[0_35px_90px_rgba(15,23,42,0.2)] dark:shadow-[0_35px_90px_rgba(2,8,20,0.55)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Global presence</p>
+              <h2 className="text-2xl font-semibold text-slate-900 dark:text-white">Office footprint</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                {formatNumber(overall.total_teams ?? 0)} teams across {formatNumber(positionedBranches.length)} locations
+              </p>
+            </div>
+            {selectedBranch && (
+              <div className="rounded-2xl border border-slate-200/60 dark:border-white/10 bg-slate-50/80 dark:bg-white/10 px-5 py-4 text-sm text-slate-900 dark:text-slate-100">
+                <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Selected branch</p>
+                <p className="mt-1 text-lg font-semibold">{selectedBranch.name}</p>
+                <p className="text-slate-600 dark:text-slate-300">
+                  {selectedBranch.city || "—"} {selectedBranch.country ? `• ${selectedBranch.country}` : ""}
+                </p>
+                <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                  {formatNumber(selectedBranch.employees || 0)} employees • {formatNumber(selectedBranch.teams || 0)} teams
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-6 h-[360px] w-full overflow-hidden rounded-[26px] border border-slate-200/60 dark:border-white/10 relative" style={{ backgroundColor: 'transparent' }}>
+            {positionedBranches.length > 0 ? (
+              <div className="h-full w-full relative" style={{ zIndex: 1, minHeight: "360px", backgroundColor: 'transparent' }}>
+                <MapContainer
+                  key={mapKey}
+                  center={[
+                    positionedBranches.reduce((sum, b) => sum + b.lat, 0) / positionedBranches.length,
+                    positionedBranches.reduce((sum, b) => sum + b.lon, 0) / positionedBranches.length,
+                  ]}
+                  zoom={positionedBranches.length === 1 ? 10 : 3}
+                  style={{ height: "100%", width: "100%", position: "relative", minHeight: "360px", backgroundColor: 'transparent' }}
+                  className="rounded-[26px] [&_.leaflet-container]:!bg-transparent"
+                  scrollWheelZoom={true}
+                >
+                  <MapResizeHandler />
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  {positionedBranches.map((branch) => (
+                    <Marker
+                      key={branch.id}
+                      position={[branch.lat, branch.lon]}
+                      eventHandlers={{
+                        mouseover: () => setHoverBranchId(branch.id),
+                        mouseout: () => setHoverBranchId(null),
+                        click: () => setSelectedBranchId(branch.id),
+                      }}
+                    >
+                      <Popup>
+                        <div className="text-sm">
+                          <p className="font-semibold text-slate-900 dark:text-white">{branch.name}</p>
+                          <p className="text-xs text-slate-600 dark:text-slate-300">
+                            {branch.city || "—"} {branch.country ? `• ${branch.country}` : ""}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-700 dark:text-slate-200">
+                            {formatNumber(branch.employees || 0)} employees • {formatNumber(branch.teams || 0)} teams
+                          </p>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                No branch locations available
+              </div>
+            )}
+          </div>
+        </section>
+
+        <footer className="rounded-2xl border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 px-6 py-5 text-sm text-slate-700 dark:text-slate-200 backdrop-blur">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Executive summary</p>
+            <div className="flex flex-col gap-4 text-base font-semibold text-slate-900 dark:text-white sm:flex-row sm:gap-10">
+              {summaryHighlights.map((item) => (
+                <div key={item.label} className="flex flex-col">
+                  <span className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">{item.label}</span>
+                  <span className="text-lg">{item.value}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Updated {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })} at{" "}
+              {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          </div>
+        </footer>
       </div>
     </AppLayout>
   );

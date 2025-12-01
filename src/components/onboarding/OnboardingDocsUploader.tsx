@@ -3,20 +3,25 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { AlertCircle, CheckCircle, FileCheck2, RefreshCw, UploadCloud } from "lucide-react";
+import { AlertCircle, CheckCircle, FileCheck2, RefreshCw } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { format } from "date-fns";
 
-const DOC_TYPES = [
-  { type: "ID_PROOF", label: "ID Proof", description: "Government ID – PAN/Passport" },
-  { type: "ADDRESS_PROOF", label: "Address Proof", description: "Utility bill, Aadhaar" },
-  { type: "EDUCATION_CERT", label: "Education Certificate", description: "Highest qualification" },
-  { type: "EXPERIENCE_LETTER", label: "Experience Letters", description: "Previous employer letters" },
-  { type: "PAN", label: "PAN Card", description: "Permanent account number" },
-  { type: "AADHAAR", label: "Aadhaar", description: "Masked Aadhaar upload" },
-  { type: "BANK_STATEMENT", label: "Bank Statement", description: "Bank statement or cancelled cheque" },
-  { type: "PASSPORT", label: "Passport", description: "First and last page" },
+export const VERIFICATION_DOC_TYPES = [
+  { type: "RESUME", label: "Resume", description: "Most recent resume/CV", required: true, helper: "Combine into one PDF if you have multiple pages." },
+  { type: "ID_PROOF", label: "ID Proof", description: "Government ID – PAN/Passport", required: true, helper: "Use the same ID you used in personal info." },
+  { type: "ADDRESS_PROOF", label: "Address Proof", description: "Utility bill, Aadhaar", required: true, helper: "Upload any utility bill or rental agreement." },
+  { type: "EDUCATION_CERT", label: "Education Certificate", description: "Highest qualification", required: true, helper: "Combine into a single PDF if you have multiple pages." },
+  { type: "EXPERIENCE_LETTER", label: "Experience Letters", description: "Previous employer letters", required: true, helper: "Upload one combined PDF if you have multiple letters." },
+  { type: "PAN", label: "PAN Card", description: "Permanent account number", required: true, helper: "Masked PAN is accepted." },
+  { type: "AADHAAR", label: "Aadhaar", description: "Masked Aadhaar upload", required: true, helper: "Please upload the masked version downloaded from UIDAI." },
+  { type: "BANK_STATEMENT", label: "Bank Statement", description: "Bank statement or cancelled cheque", required: false, helper: "Optional now, required before payroll is processed." },
+  { type: "PASSPORT", label: "Passport", description: "First and last page", required: false, helper: "Optional if PAN/Aadhaar already uploaded." },
 ];
+
+const SENSITIVE_DOC_TYPES = ["ID_PROOF", "PAN", "AADHAAR", "PASSPORT"];
 
 interface UploadItem {
   id: string;
@@ -81,7 +86,7 @@ export function OnboardingDocsUploader({
       toast({ title: "Employee missing", description: "Please complete personal info first.", variant: "destructive" });
       return;
     }
-    const needsConsent = ["ID_PROOF", "PAN", "AADHAAR", "PASSPORT"].includes(docType);
+    const needsConsent = SENSITIVE_DOC_TYPES.includes(docType);
     if (needsConsent && !consentMap[docType]) {
       toast({
         title: "Consent required",
@@ -174,6 +179,7 @@ export function OnboardingDocsUploader({
           size: file.size,
           checksum,
           docType,
+          employeeId, // Pass employeeId for onboarding flow
           consent: needsConsent ? Boolean(consentMap[docType]) : true,
           notes: "",
         }),
@@ -209,48 +215,25 @@ export function OnboardingDocsUploader({
     }
   };
 
-  const renderDropZone = (docType: string) => (
-    <div
-      ref={(el) => (dropRefs.current[docType] = el)}
-      className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary transition-colors"
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        dropRefs.current[docType]?.classList.add("border-primary");
-      }}
-      onDragLeave={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        dropRefs.current[docType]?.classList.remove("border-primary");
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        dropRefs.current[docType]?.classList.remove("border-primary");
-        handleFiles(docType, event.dataTransfer.files);
-      }}
-    >
-      <input
-        type="file"
-        id={`file-${docType}`}
-        className="hidden"
-        onChange={(event) => handleFiles(docType, event.target.files)}
-        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.tiff"
-      />
-      <label htmlFor={`file-${docType}`} className="space-y-2 block cursor-pointer">
-        <UploadCloud className="h-8 w-8 mx-auto text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
-          Drag & drop or <span className="text-primary font-medium">browse</span>
-        </p>
-        <p className="text-xs text-muted-foreground">
-          PDF, DOC, DOCX, JPG, PNG up to 10MB
-        </p>
-      </label>
-    </div>
-  );
+  const getStatusBadge = (status: string | undefined) => {
+    if (!status) {
+      return <Badge variant="outline">Not uploaded</Badge>;
+    }
+    switch (status.toLowerCase()) {
+      case "approved":
+        return <Badge className="bg-emerald-100 text-emerald-900 border-none">Approved</Badge>;
+      case "rejected":
+        return <Badge variant="destructive">Rejected</Badge>;
+      case "pending":
+      case "uploaded":
+        return <Badge variant="outline">Pending review</Badge>;
+      default:
+        return <Badge variant="outline">{status.replace("_", " ")}</Badge>;
+    }
+  };
 
   const groupedDocs = useMemo(() => {
-    return DOC_TYPES.map((type) => ({
+    return VERIFICATION_DOC_TYPES.map((type) => ({
       ...type,
       items: documents.filter((doc) => doc.doc_type === type.type),
     }));
@@ -259,18 +242,61 @@ export function OnboardingDocsUploader({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Verification Documents</CardTitle>
+        <div className="space-y-2">
+          <CardTitle>Verification Documents</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Upload scans or clear photos of each document. You can drag & drop files, browse from your device,
+            or come back later—your uploads are saved automatically.
+          </p>
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-3">
           {groupedDocs.map((doc) => (
-            <div key={doc.type} className="border rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between">
+            <div
+              key={doc.type}
+              ref={(el) => (dropRefs.current[doc.type] = el)}
+              className="rounded-xl border bg-card/50 p-4 space-y-3"
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropRefs.current[doc.type]?.classList.add("border-primary");
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropRefs.current[doc.type]?.classList.remove("border-primary");
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropRefs.current[doc.type]?.classList.remove("border-primary");
+                handleFiles(doc.type, event.dataTransfer.files);
+              }}
+            >
+              <input
+                type="file"
+                id={`file-${doc.type}`}
+                className="hidden"
+                accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.tiff"
+                onChange={(event) => handleFiles(doc.type, event.target.files)}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="font-medium">{doc.label}</p>
+                  <p className="font-semibold">{doc.label}</p>
                   <p className="text-xs text-muted-foreground">{doc.description}</p>
                 </div>
-                {doc.type === "AADHAAR" || doc.type === "PAN" ? (
+                <div className="flex items-center gap-2">
+                  {doc.required ? (
+                    <Badge variant="secondary">Required</Badge>
+                  ) : (
+                    <Badge variant="outline">Optional</Badge>
+                  )}
+                  {getStatusBadge(doc.items[0]?.status)}
+                </div>
+              </div>
+              {SENSITIVE_DOC_TYPES.includes(doc.type) && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Checkbox
                     checked={Boolean(consentMap[doc.type])}
                     onCheckedChange={(checked) =>
@@ -278,36 +304,57 @@ export function OnboardingDocsUploader({
                     }
                     id={`consent-${doc.type}`}
                   />
-                ) : null}
+                  I consent to HR reviewing my {doc.label}.
+                </label>
+              )}
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`file-${doc.type}`)?.click()}
+                >
+                  Choose file
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  PDF, DOC, DOCX, JPG, PNG up to 10MB • drag & drop enabled
+                </span>
               </div>
-              {renderDropZone(doc.type)}
-              <div className="space-y-2">
-                {doc.items.length === 0 && (
-                  <p className="text-xs text-muted-foreground">No files uploaded yet.</p>
-                )}
-                {doc.items.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between text-sm border rounded px-3 py-2">
+              {doc.items.length > 0 ? (
+                doc.items.slice(0, 1).map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm bg-muted/50"
+                  >
                     <div>
                       <p className="font-medium">{item.file_name}</p>
-                      <p className="text-xs text-muted-foreground capitalize">{item.status}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Uploaded {item.uploaded_at ? format(new Date(item.uploaded_at), "MMM dd, yyyy") : "just now"}
+                      </p>
                     </div>
-                    {item.status === "approved" ? (
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                    ) : item.status === "rejected" ? (
-                      <AlertCircle className="h-4 w-4 text-destructive" />
-                    ) : (
-                      <FileCheck2 className="h-4 w-4 text-muted-foreground" />
-                    )}
+                    <div className="flex items-center gap-2">
+                      {item.status === "approved" ? (
+                        <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      ) : item.status === "rejected" ? (
+                        <AlertCircle className="h-4 w-4 text-destructive" />
+                      ) : (
+                        <FileCheck2 className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
                   </div>
-                ))}
-              </div>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground">No files uploaded yet.</p>
+              )}
             </div>
           ))}
         </div>
 
         {inProgressUploads.length > 0 && (
           <div className="space-y-3">
-            <p className="text-sm font-medium">Uploads in progress</p>
+            <div className="flex items-center justify-between text-sm">
+              <p className="font-medium">Uploads in progress</p>
+              <p className="text-xs text-muted-foreground">Please stay on this page until uploads finish.</p>
+            </div>
             {inProgressUploads.map((upload) => (
               <div key={upload.id} className="border rounded-lg p-3 space-y-2">
                 <div className="flex items-center justify-between text-sm">

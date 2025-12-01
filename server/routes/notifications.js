@@ -38,5 +38,20 @@ router.patch('/:id/read', authenticateToken, async (req, res) => {
   }
 });
 
+// Clear all notifications (mark all as read)
+router.post('/clear', authenticateToken, async (req, res) => {
+  try {
+    await query(
+      'UPDATE notifications SET read = true WHERE user_id = $1 AND read = false',
+      [req.user.id]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error clearing notifications:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
 
