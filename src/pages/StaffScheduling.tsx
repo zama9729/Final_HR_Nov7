@@ -213,10 +213,19 @@ export default function StaffScheduling() {
     month_start_date: format(startOfMonth(new Date()), "yyyy-MM-dd"),
     month_end_date: format(endOfMonth(new Date()), "yyyy-MM-dd"),
     rule_set_id: "",
-    algorithm: "greedy" as const,
     template_ids: [] as string[],
     employee_ids: [] as string[],
   });
+
+  // ScoreRank Settings
+  const [decayRate, setDecayRate] = useState(0.1);
+  const [shiftWeights, setShiftWeights] = useState({
+    morning: 1,
+    evening: 1.5,
+    night: 3
+  });
+  const [overwriteLocked, setOverwriteLocked] = useState(false);
+
   const [showSchedulerDialog, setShowSchedulerDialog] = useState(false);
   const [showRerunDialog, setShowRerunDialog] = useState(false);
   const [rerunScheduleId, setRerunScheduleId] = useState<string | null>(null);
@@ -347,16 +356,19 @@ export default function StaffScheduling() {
     try {
       // Add random seed for variation on each run
       const randomSeed = Math.floor(Math.random() * 1000000);
-      
+
       const result = await api.runScheduler({
         week_start_date: scheduleType === "weekly" ? schedulerForm.week_start_date : schedulerForm.month_start_date,
         week_end_date: scheduleType === "weekly" ? schedulerForm.week_end_date : schedulerForm.month_end_date,
         rule_set_id: schedulerForm.rule_set_id,
-        algorithm: schedulerForm.algorithm,
+        // algorithm: schedulerForm.algorithm, // Deprecated
         template_ids: schedulerForm.template_ids.length > 0 ? schedulerForm.template_ids : undefined,
         employee_ids: schedulerForm.employee_ids.length > 0 ? schedulerForm.employee_ids : undefined,
         seed: randomSeed, // Add random seed for variation
         replace_schedule_id: rerunScheduleId || undefined, // Replace existing schedule if rerunning
+        decayRate,
+        shiftWeights,
+        overwriteLocked
       });
 
       toast({
@@ -396,11 +408,11 @@ export default function StaffScheduling() {
 
   const handleRerunSchedule = async (scheduleId: string) => {
     if (!selectedSchedule) return;
-    
+
     try {
       // Fetch full schedule details to get rule_set_id
       const fullSchedule = await api.getSchedule(scheduleId);
-      
+
       // Format dates properly for HTML date inputs (yyyy-MM-dd)
       const formatDateForInput = (dateStr: string) => {
         if (!dateStr) return "";
@@ -416,7 +428,7 @@ export default function StaffScheduling() {
           return dateStr.split('T')[0]; // Fallback: take just the date part
         }
       };
-      
+
       // Pre-fill the form with current schedule's parameters
       setSchedulerForm({
         week_start_date: formatDateForInput(fullSchedule.week_start_date || selectedSchedule.week_start_date),
@@ -426,7 +438,7 @@ export default function StaffScheduling() {
         template_ids: [],
         employee_ids: [],
       });
-      
+
       setRerunScheduleId(scheduleId);
       setShowRerunDialog(true);
     } catch (error: any) {
@@ -452,16 +464,19 @@ export default function StaffScheduling() {
     try {
       // Add random seed for variation on each rerun
       const randomSeed = Math.floor(Math.random() * 1000000);
-      
+
       const result = await api.runScheduler({
         week_start_date: scheduleType === "weekly" ? schedulerForm.week_start_date : schedulerForm.month_start_date,
         week_end_date: scheduleType === "weekly" ? schedulerForm.week_end_date : schedulerForm.month_end_date,
         rule_set_id: schedulerForm.rule_set_id,
-        algorithm: schedulerForm.algorithm,
+        // algorithm: schedulerForm.algorithm, // Deprecated
         template_ids: schedulerForm.template_ids.length > 0 ? schedulerForm.template_ids : undefined,
         employee_ids: schedulerForm.employee_ids.length > 0 ? schedulerForm.employee_ids : undefined,
         seed: randomSeed, // Add random seed for variation
         replace_schedule_id: rerunScheduleId || undefined, // Replace existing schedule if rerunning
+        decayRate,
+        shiftWeights,
+        overwriteLocked
       });
 
       toast({
@@ -486,7 +501,7 @@ export default function StaffScheduling() {
         fairness_summary: result.fairness_summary || null,
         exception_suggestions: result.exception_suggestions || [],
       };
-      
+
       setSelectedSchedule(updatedSchedule);
       setShowRerunDialog(false);
       setRerunScheduleId(null);
@@ -674,9 +689,9 @@ export default function StaffScheduling() {
   const previewRangeLabel =
     previewDays.length > 0
       ? `${format(previewDays[0], "MMM dd")} - ${format(
-          previewDays[previewDays.length - 1],
-          "MMM dd, yyyy"
-        )}`
+        previewDays[previewDays.length - 1],
+        "MMM dd, yyyy"
+      )}`
       : "";
 
   // Get employees only from assignments to avoid duplicates
@@ -698,7 +713,7 @@ export default function StaffScheduling() {
   const roster = useMemo(() => {
     // Only include employees who have assignments to avoid duplicate empty rows
     const rosterMap = new Map<string, ScheduleEmployee>();
-    
+
     if (selectedSchedule?.assignments && selectedSchedule.assignments.length > 0) {
       // Get unique employee IDs from assignments
       const employeeIdsWithAssignments = new Set(
@@ -706,7 +721,7 @@ export default function StaffScheduling() {
           .map(a => a.employee_id)
           .filter(Boolean)
       );
-      
+
       // Add employees from the employees list if they have assignments
       selectedSchedule?.employees?.forEach((employee) => {
         const key = employee.id || (employee as any).employee_id;
@@ -714,7 +729,7 @@ export default function StaffScheduling() {
           rosterMap.set(key, employee);
         }
       });
-      
+
       // For any assignments without employee details, extract names from assignments
       employeeIdsWithAssignments.forEach((empId) => {
         if (!rosterMap.has(empId)) {
@@ -722,7 +737,7 @@ export default function StaffScheduling() {
           const assignmentWithName = selectedSchedule.assignments.find(
             a => a.employee_id === empId && (a.first_name || a.last_name)
           );
-          
+
           if (assignmentWithName) {
             rosterMap.set(empId, {
               id: empId,
@@ -736,13 +751,13 @@ export default function StaffScheduling() {
         }
       });
     }
-    
+
     return Array.from(rosterMap.values());
   }, [selectedSchedule?.employees, selectedSchedule?.assignments]);
 
   const rosterNameMap = useMemo(() => {
     const nameMap = new Map<string, string>();
-    
+
     // First, add names from roster employees
     roster.forEach((employee) => {
       const key = employee.id || (employee as any).employee_id;
@@ -751,7 +766,7 @@ export default function StaffScheduling() {
         key;
       nameMap.set(key, name);
     });
-    
+
     // Also check assignments for employee names (in case roster doesn't have them)
     if (selectedSchedule?.assignments) {
       selectedSchedule.assignments.forEach((assignment) => {
@@ -764,28 +779,28 @@ export default function StaffScheduling() {
         }
       });
     }
-    
+
     return nameMap;
   }, [roster, selectedSchedule?.assignments]);
 
   const fairnessEntries = selectedSchedule?.fairness_summary
     ? Array.from(
-        new Set([
-          ...Object.keys(selectedSchedule.fairness_summary.priorNightCounts || {}),
-          ...Object.keys(
-            selectedSchedule.fairness_summary.nightShiftDistribution || {}
-          ),
-        ])
-      ).map((employeeId) => ({
-        employeeId,
-        prior:
-          selectedSchedule.fairness_summary?.priorNightCounts?.[employeeId] || 0,
-        current:
-          selectedSchedule.fairness_summary?.nightShiftDistribution?.[
-            employeeId
-          ] || 0,
-        name: rosterNameMap.get(employeeId) || employeeId,
-      }))
+      new Set([
+        ...Object.keys(selectedSchedule.fairness_summary.priorNightCounts || {}),
+        ...Object.keys(
+          selectedSchedule.fairness_summary.nightShiftDistribution || {}
+        ),
+      ])
+    ).map((employeeId) => ({
+      employeeId,
+      prior:
+        selectedSchedule.fairness_summary?.priorNightCounts?.[employeeId] || 0,
+      current:
+        selectedSchedule.fairness_summary?.nightShiftDistribution?.[
+        employeeId
+        ] || 0,
+      name: rosterNameMap.get(employeeId) || employeeId,
+    }))
     : [];
 
   const detailedAssignments = useMemo(() => {
@@ -1159,7 +1174,7 @@ export default function StaffScheduling() {
                   </CardHeader>
                   <CardContent>
                     {!selectedSchedule.assignments ||
-                    selectedSchedule.assignments.length === 0 ? (
+                      selectedSchedule.assignments.length === 0 ? (
                       <Alert className="mb-4">
                         <AlertCircle className="h-4 w-4" />
                         <AlertDescription>
@@ -1195,11 +1210,10 @@ export default function StaffScheduling() {
                               "Employee";
 
                             return (
-                              <div 
-                                key={employeeKey} 
-                                className={`grid grid-cols-8 hover:bg-muted/30 dark:hover:bg-slate-800/50 transition-colors ${
-                                  empIdx % 2 === 0 ? 'bg-background dark:bg-slate-900' : 'bg-muted/20 dark:bg-slate-800/30'
-                                }`}
+                              <div
+                                key={employeeKey}
+                                className={`grid grid-cols-8 hover:bg-muted/30 dark:hover:bg-slate-800/50 transition-colors ${empIdx % 2 === 0 ? 'bg-background dark:bg-slate-900' : 'bg-muted/20 dark:bg-slate-800/30'
+                                  }`}
                               >
                                 <div className="p-3 border-r font-medium text-sm flex items-center text-foreground dark:text-slate-100">
                                   {empName}
@@ -1211,13 +1225,12 @@ export default function StaffScheduling() {
                                   );
                                   const dayStr = format(day, "yyyy-MM-dd");
                                   const isToday = dayStr === format(new Date(), "yyyy-MM-dd");
-                                  
+
                                   return (
                                     <div
                                       key={day.toISOString()}
-                                      className={`p-2 border-l min-h-[80px] flex items-center justify-center ${
-                                        isToday ? 'bg-blue-50/50 dark:bg-blue-950/30' : ''
-                                      }`}
+                                      className={`p-2 border-l min-h-[80px] flex items-center justify-center ${isToday ? 'bg-blue-50/50 dark:bg-blue-950/30' : ''
+                                        }`}
                                     >
                                       {assignment ? (
                                         <div className="w-full space-y-1.5">
@@ -1226,8 +1239,8 @@ export default function StaffScheduling() {
                                               assignment.shift_type === "night"
                                                 ? "destructive"
                                                 : assignment.shift_type === "evening"
-                                                ? "secondary"
-                                                : "default"
+                                                  ? "secondary"
+                                                  : "default"
                                             }
                                             className="w-full justify-center text-xs py-1"
                                           >
@@ -1518,23 +1531,65 @@ export default function StaffScheduling() {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label>Algorithm</Label>
-                <Select
-                  value={schedulerForm.algorithm}
-                  onValueChange={(value: any) =>
-                    setSchedulerForm({ ...schedulerForm, algorithm: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="greedy">Greedy (Fast)</SelectItem>
-                    <SelectItem value="ilp">Constraint Solver (Optimal)</SelectItem>
-                    <SelectItem value="simulated_annealing">Simulated Annealing (Large Scale)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-4 border rounded-md p-3 bg-muted/20">
+                <h4 className="font-medium text-sm">ScoreRank Settings</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Decay Rate (0-1)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={decayRate}
+                      onChange={(e) => setDecayRate(parseFloat(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex items-center pt-6">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="rerun-overwrite"
+                        checked={overwriteLocked}
+                        onChange={(e) => setOverwriteLocked(e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      <Label htmlFor="rerun-overwrite">Overwrite Locked</Label>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <Label className="mb-2 block">Shift Weights</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <Label className="text-xs">Morning</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={shiftWeights.morning}
+                        onChange={(e) => setShiftWeights({ ...shiftWeights, morning: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Evening</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={shiftWeights.evening}
+                        onChange={(e) => setShiftWeights({ ...shiftWeights, evening: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Night</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={shiftWeights.night}
+                        onChange={(e) => setShiftWeights({ ...shiftWeights, night: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
               <Alert>
                 <AlertCircle className="h-4 w-4" />
@@ -1625,23 +1680,65 @@ export default function StaffScheduling() {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label>Algorithm</Label>
-                <Select
-                  value={schedulerForm.algorithm}
-                  onValueChange={(value: any) =>
-                    setSchedulerForm({ ...schedulerForm, algorithm: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="greedy">Greedy (Fast)</SelectItem>
-                    <SelectItem value="ilp">Constraint Solver (Optimal)</SelectItem>
-                    <SelectItem value="simulated_annealing">Simulated Annealing (Large Scale)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-4 border rounded-md p-3 bg-muted/20">
+                <h4 className="font-medium text-sm">ScoreRank Settings</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Decay Rate (0-1)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={decayRate}
+                      onChange={(e) => setDecayRate(parseFloat(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex items-center pt-6">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="scheduler-overwrite"
+                        checked={overwriteLocked}
+                        onChange={(e) => setOverwriteLocked(e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      <Label htmlFor="scheduler-overwrite">Overwrite Locked</Label>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <Label className="mb-2 block">Shift Weights</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <Label className="text-xs">Morning</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={shiftWeights.morning}
+                        onChange={(e) => setShiftWeights({ ...shiftWeights, morning: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Evening</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={shiftWeights.evening}
+                        onChange={(e) => setShiftWeights({ ...shiftWeights, evening: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Night</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={shiftWeights.night}
+                        onChange={(e) => setShiftWeights({ ...shiftWeights, night: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
             <DialogFooter>
