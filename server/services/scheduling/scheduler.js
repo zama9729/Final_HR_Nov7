@@ -24,10 +24,10 @@ export class GreedyScheduler {
       console.log('[Scheduler] No rules found, defaulting to 2 consecutive nights');
       return 2;
     }
-    
+
     // Check for max_consecutive_nights rule first (preferred)
-    const consecutiveRule = ruleEngine.rules.find(r => 
-      r.id === 'max_consecutive_nights' || 
+    const consecutiveRule = ruleEngine.rules.find(r =>
+      r.id === 'max_consecutive_nights' ||
       r.name === 'max_consecutive_nights' ||
       r.id === 'max_consecutive_night_shifts' ||
       r.name === 'max_consecutive_night_shifts'
@@ -37,10 +37,10 @@ export class GreedyScheduler {
       console.log(`[Scheduler] Found consecutive nights rule: ${maxNights}`);
       return maxNights;
     }
-    
+
     // Fallback to max_night_shifts_per_week (but we'll treat it as consecutive)
-    const nightShiftRule = ruleEngine.rules.find(r => 
-      r.id === 'max_night_shifts_per_week' || 
+    const nightShiftRule = ruleEngine.rules.find(r =>
+      r.id === 'max_night_shifts_per_week' ||
       r.name === 'max_night_shifts_per_week' ||
       r.name === 'Maximum Night Shifts Per Week'
     );
@@ -49,7 +49,7 @@ export class GreedyScheduler {
       console.log(`[Scheduler] Found night shifts per week rule: ${maxShifts}, treating as consecutive`);
       return maxShifts;
     }
-    
+
     console.log('[Scheduler] No night shift rule found, defaulting to 2 consecutive nights');
     return 2; // Default to 2 consecutive nights
   }
@@ -84,9 +84,9 @@ export class GreedyScheduler {
 
     // Create demand slots
     let demandSlots = this.createDemandSlots(weekStart, weekEnd, demand, templates);
-    
+
     console.log(`[Scheduler] Created ${demandSlots.length} demand slots for ${employees.length} employees`);
-    
+
     if (demandSlots.length === 0) {
       console.warn('[Scheduler] No demand slots created. Check demand requirements and templates.');
       return {
@@ -99,7 +99,7 @@ export class GreedyScheduler {
         }
       };
     }
-    
+
     // Shuffle demand slots based on seed for randomization
     if (this.seed) {
       for (let i = demandSlots.length - 1; i > 0; i--) {
@@ -107,7 +107,7 @@ export class GreedyScheduler {
         [demandSlots[i], demandSlots[j]] = [demandSlots[j], demandSlots[i]];
       }
     }
-    
+
     // Sort employees by availability and preferences
     const sortedEmployees = this.sortEmployeesByAvailability(employees, availability, weekStart, weekEnd);
     console.log(`[Scheduler] Sorted ${sortedEmployees.length} employees`);
@@ -119,7 +119,7 @@ export class GreedyScheduler {
     // Fill each demand slot
     for (const slot of demandSlots) {
       let assigned = 0;
-      
+
       // Sort employees for this slot considering their current assignment count
       // Add randomization based on seed for variation
       const employeesForSlot = [...sortedEmployees].sort((a, b) => {
@@ -140,10 +140,10 @@ export class GreedyScheduler {
         }
         return 0;
       });
-      
+
       for (const employee of employeesForSlot) {
         if (assigned >= slot.required) break;
-        
+
         // Check if employee can be assigned
         if (this.canAssign(employee, slot, assignments, availability, exceptions, templates, telemetry)) {
           assignments.push({
@@ -174,7 +174,7 @@ export class GreedyScheduler {
         });
       }
     }
-    
+
     console.log(`[Scheduler] Created ${assignments.length} total assignments`);
 
     telemetry.endTime = Date.now();
@@ -208,7 +208,7 @@ export class GreedyScheduler {
         // Match day of week (0=Sunday, 1=Monday, etc.)
         // req.day_of_week should be an integer 0-6
         const reqDayOfWeek = typeof req.day_of_week === 'number' ? req.day_of_week : parseInt(req.day_of_week);
-        
+
         if (reqDayOfWeek === dayOfWeek) {
           const template = templates.find(t => t.id === req.shift_template_id);
           if (!template) {
@@ -246,19 +246,19 @@ export class GreedyScheduler {
     const scored = employees.map(emp => {
       let score = 0;
       const empAvailability = availability.filter(a => a.employee_id === emp.id);
-      
+
       // Prefer employees with more availability
       score += empAvailability.filter(a => a.availability_type === 'available').length * 10;
-      
+
       // Prefer employees with preferences
       score += empAvailability.filter(a => a.availability_type === 'preferred').length * 5;
-      
+
       const priorNightCount = this.priorNightCounts[emp.id] || 0;
       score -= priorNightCount * 50;
 
       return { ...emp, score };
     });
-    
+
     // Use seed for randomization if provided
     const seed = this.options?.seed || 0;
     if (seed) {
@@ -275,7 +275,7 @@ export class GreedyScheduler {
         return (a.id || '').localeCompare(b.id || '');
       });
     }
-    
+
     return scored.sort((a, b) => {
       // Primary sort by score
       if (b.score !== a.score) return b.score - a.score;
@@ -291,7 +291,7 @@ export class GreedyScheduler {
       a.date === slot.date &&
       (a.availability_type === 'blackout' || a.is_forbidden)
     );
-    
+
     if (blackouts.length > 0) {
       telemetry?.blockedAssignments?.push({
         type: 'blackout',
@@ -303,12 +303,22 @@ export class GreedyScheduler {
       return false;
     }
 
+    // STRICT ROTATION: If employee worked night shifts last week, they cannot work night shifts this week
+    const slotTemplate = templates?.find(t => t.id === slot.templateId);
+    if (slotTemplate?.shift_type === 'night') {
+      const workedNightLastWeek = (this.priorNightCounts[employee.id] || 0) > 0;
+      if (workedNightLastWeek) {
+        console.log(`[Scheduler] Skipping assignment: Employee ${employee.id} worked night shifts last week`);
+        return false;
+      }
+    }
+
     // Check if already assigned this day
     const existing = existingAssignments.find(a =>
       a.employee_id === employee.id &&
       a.shift_date === slot.date
     );
-    
+
     if (existing) {
       return false;
     }
@@ -318,18 +328,18 @@ export class GreedyScheduler {
       .filter(a => a.employee_id === employee.id)
       .map(a => a.shift_date)
       .sort();
-    
+
     if (employeeAssignments.length > 0) {
       // Check if adding this slot would create too many consecutive days
       const testDates = [...employeeAssignments, slot.date].sort();
       let maxConsecutive = 1;
       let currentConsecutive = 1;
-      
+
       for (let i = 1; i < testDates.length; i++) {
         const prevDate = new Date(testDates[i - 1]);
         const currDate = new Date(testDates[i]);
         const daysDiff = (currDate - prevDate) / (1000 * 60 * 60 * 24);
-        
+
         if (daysDiff === 1) {
           currentConsecutive++;
           maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
@@ -337,7 +347,7 @@ export class GreedyScheduler {
           currentConsecutive = 1;
         }
       }
-      
+
       // Default max consecutive days is 6, but should come from rules
       const maxConsecutiveDays = 6; // TODO: Get from rule engine
       if (maxConsecutive > maxConsecutiveDays) {
@@ -357,23 +367,23 @@ export class GreedyScheduler {
         })
         .map(a => a.shift_date)
         .sort();
-      
+
       const slotDate = slot.date;
       const maxConsecutiveNights = this.maxNightShifts || 2;
-      
+
       // Check if adding this slot would create a consecutive sequence exceeding the limit
       // We need to find the longest consecutive sequence that includes this new date
       const allDates = [...employeeNightShiftDates, slotDate].sort();
-      
+
       // Find consecutive sequences that include the slot date
       let maxConsecutiveIncludingSlot = 1;
       let currentConsecutive = 1;
-      
+
       for (let i = 1; i < allDates.length; i++) {
         const prevDate = new Date(allDates[i - 1]);
         const currDate = new Date(allDates[i]);
         const daysDiff = (currDate - prevDate) / (1000 * 60 * 60 * 24);
-        
+
         if (daysDiff === 1) {
           // Consecutive day
           currentConsecutive++;
@@ -386,7 +396,7 @@ export class GreedyScheduler {
           currentConsecutive = 1;
         }
       }
-      
+
       // If adding this shift would exceed consecutive limit, block it
       if (maxConsecutiveIncludingSlot > maxConsecutiveNights) {
         console.log(`[Scheduler] Skipping assignment: Employee ${employee.id} would exceed max consecutive nights (${maxConsecutiveIncludingSlot} > ${maxConsecutiveNights})`);
@@ -553,6 +563,15 @@ export class ConstraintScheduler {
             );
 
             if (!hasBlackout) {
+              // STRICT ROTATION: If employee worked night shifts last week, they cannot work night shifts this week
+              const isNightShift = template.shift_type === 'night';
+              const workedNightLastWeek = (priorNightCounts[employee.id] || 0) > 0;
+
+              if (isNightShift && workedNightLastWeek) {
+                // Skip this candidate
+                continue;
+              }
+
               candidates.push({
                 employee_id: employee.id,
                 shift_date: dateStr,
@@ -571,7 +590,7 @@ export class ConstraintScheduler {
 
     // Sort by priority, then shuffle based on seed for randomization
     candidates.sort((a, b) => b.priority - a.priority);
-    
+
     // Apply seed-based shuffling for randomization
     if (this.seed) {
       for (let i = candidates.length - 1; i > 0; i--) {
@@ -579,7 +598,7 @@ export class ConstraintScheduler {
         [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
       }
     }
-    
+
     return candidates;
   }
 
@@ -614,7 +633,7 @@ export class ConstraintScheduler {
     }
 
     telemetry.iterations++;
-    
+
     // Only log every 100 iterations to reduce spam
     if (telemetry.iterations % 100 === 0) {
       console.log(`[ConstraintScheduler] Iteration ${telemetry.iterations}/${this.options.maxIterations}`);
@@ -809,7 +828,7 @@ export class SimulatedAnnealingScheduler {
       // Accept if better or with probability (simulated annealing)
       if (delta < 0 || Math.random() < Math.exp(-delta / temperature)) {
         currentSolution = neighbor;
-        
+
         if (neighborEval.score < bestScore) {
           bestSolution = [...neighbor];
           bestScore = neighborEval.score;
@@ -858,18 +877,12 @@ export class SimulatedAnnealingScheduler {
 /**
  * Factory function to get scheduler by algorithm name
  */
+import { ScoreRankScheduler } from './score-rank-scheduler.js';
+
 export function getScheduler(algorithm, ruleEngine, options = {}) {
-  switch (algorithm) {
-    case 'greedy':
-      return new GreedyScheduler(ruleEngine, options);
-    case 'ilp':
-    case 'constraint':
-      return new ConstraintScheduler(ruleEngine, options);
-    case 'simulated_annealing':
-      return new SimulatedAnnealingScheduler(ruleEngine, options);
-    default:
-      throw new Error(`Unknown algorithm: ${algorithm}`);
-  }
+  // We now default to ScoreRankScheduler for everything
+  // The 'algorithm' param is kept for backward compatibility but ignored
+  return new ScoreRankScheduler(ruleEngine, options);
 }
 
 export default {
