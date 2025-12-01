@@ -16,7 +16,8 @@ export function createPool() {
     password: process.env.DB_PASSWORD || 'postgres',
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    // Allow a bit more time for connections in dev/docker to avoid transient timeouts
+    connectionTimeoutMillis: 10000,
     ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   });
 

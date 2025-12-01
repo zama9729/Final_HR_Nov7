@@ -47,6 +47,10 @@ interface Employee {
     first_name?: string;
     last_name?: string;
     email?: string;
+    role?: string;
+  };
+  home_assignment?: {
+    role?: string;
   };
 }
 
@@ -297,7 +301,7 @@ export default function Employees() {
                           </Link>
                         </TableCell>
                         <TableCell>{employee.profiles?.email || 'N/A'}</TableCell>
-                        <TableCell>{employee.position}</TableCell>
+                        <TableCell>{employee.profiles?.role || employee.home_assignment?.role || employee.position || 'employee'}</TableCell>
                         <TableCell>{employee.department}</TableCell>
                         <TableCell>{new Date(employee.join_date).toLocaleDateString()}</TableCell>
                         <TableCell>

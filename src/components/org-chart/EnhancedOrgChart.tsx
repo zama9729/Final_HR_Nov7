@@ -9,7 +9,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
-import { ChevronDown, Mail, Building2, Users } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ChevronDown, Mail, Building2, Users, Search } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -122,9 +123,20 @@ interface OrgChartNodeProps {
   onToggle: (nodeId: string) => void;
   isRoot?: boolean;
   expandedNodes: Set<string>;
+   selectedId?: string | null;
+   onSelect?: (node: TreeNode) => void;
 }
 
-function OrgChartNode({ node, level, isExpanded, onToggle, isRoot = false, expandedNodes }: OrgChartNodeProps) {
+function OrgChartNode({
+  node,
+  level,
+  isExpanded,
+  onToggle,
+  isRoot = false,
+  expandedNodes,
+  selectedId,
+  onSelect,
+}: OrgChartNodeProps) {
   if (!node.profiles) return null;
 
   const initials = `${node.profiles.first_name?.[0] || ''}${node.profiles.last_name?.[0] || ''}`.toUpperCase();
@@ -134,6 +146,7 @@ function OrgChartNode({ node, level, isExpanded, onToggle, isRoot = false, expan
   const hasChildren = node.children.length > 0;
   const department = node.home_assignment?.department_name || node.department || "Unassigned";
   const branch = node.home_assignment?.branch_name || node.work_location || "";
+  const isSelected = selectedId === node.id;
 
   return (
     <div className="flex flex-col items-center relative">
@@ -141,7 +154,13 @@ function OrgChartNode({ node, level, isExpanded, onToggle, isRoot = false, expan
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="relative group">
+            <div
+              className="relative group cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect?.(node);
+              }}
+            >
               <div
                 className={`
                   relative w-32 h-32 rounded-full 
@@ -153,6 +172,7 @@ function OrgChartNode({ node, level, isExpanded, onToggle, isRoot = false, expan
                   transition-all duration-300
                   hover:scale-105 hover:shadow-[0_12px_32px_rgba(15,23,42,0.18)] dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)]
                   ${isRoot ? 'ring-4 ring-blue-200/50 dark:ring-blue-800/30' : ''}
+                  ${isSelected ? 'ring-4 ring-emerald-300/70 dark:ring-emerald-500/70 ring-offset-2 ring-offset-slate-50 dark:ring-offset-slate-900' : ''}
                 `}
               >
                 {/* Profile Picture */}
@@ -174,12 +194,15 @@ function OrgChartNode({ node, level, isExpanded, onToggle, isRoot = false, expan
               </div>
 
               {/* Name and Designation */}
-              <div className="mt-3 text-center space-y-1 min-w-[140px]">
+              <div className="mt-3 text-center space-y-1 min-w-[160px]">
                 <p className="font-semibold text-sm text-slate-900 dark:text-white leading-tight">
                   {fullName || "Unnamed"}
                 </p>
                 <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
                   {designation}
+                </p>
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  {department}
                 </p>
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
                   {email}
@@ -281,6 +304,8 @@ function OrgChartNode({ node, level, isExpanded, onToggle, isRoot = false, expan
                       isExpanded={expandedNodes.has(child.id)}
                       onToggle={onToggle}
                       expandedNodes={expandedNodes}
+                      selectedId={selectedId}
+                      onSelect={onSelect}
                     />
                   </div>
                 ))}
@@ -309,6 +334,8 @@ export default function EnhancedOrgChart() {
     team: "all",
   });
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Expand all nodes by default
   useEffect(() => {
@@ -370,14 +397,26 @@ export default function EnhancedOrgChart() {
   };
 
   const filteredEmployees = useMemo(() => {
+    const searchTerm = search.trim().toLowerCase();
     return employees.filter((emp) => {
       const home = emp.home_assignment;
       if (filters.branch !== "all" && home?.branch_id !== filters.branch) return false;
       if (filters.department !== "all" && home?.department_id !== filters.department) return false;
       if (filters.team !== "all" && home?.team_id !== filters.team) return false;
-      return true;
+
+      if (!searchTerm) return true;
+
+      const fullName = `${emp.profiles?.first_name || ""} ${emp.profiles?.last_name || ""}`.toLowerCase();
+      const position = (emp.position || "").toLowerCase();
+      const department = (home?.department_name || emp.department || "").toLowerCase();
+
+      return (
+        fullName.includes(searchTerm) ||
+        position.includes(searchTerm) ||
+        department.includes(searchTerm)
+      );
     });
-  }, [employees, filters]);
+  }, [employees, filters, search]);
 
   useEffect(() => {
     const orgTree = buildTree(filteredEmployees);
@@ -445,7 +484,7 @@ export default function EnhancedOrgChart() {
 
   return (
     <div className="w-full space-y-6">
-      {/* Filters */}
+      {/* Filters & Search */}
       <div className="flex flex-wrap gap-4 items-end px-6 pt-6">
         <div className="flex flex-col gap-2">
           <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Branch</p>
@@ -512,6 +551,18 @@ export default function EnhancedOrgChart() {
             </SelectContent>
           </Select>
         </div>
+        <div className="flex-1 min-w-[220px] flex flex-col gap-2">
+          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Search</p>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, role, or department"
+              className="pl-9 border-slate-200 dark:border-slate-700"
+            />
+          </div>
+        </div>
       </div>
 
       {/* Metrics Cards */}
@@ -539,6 +590,8 @@ export default function EnhancedOrgChart() {
               onToggle={toggleNode}
               isRoot={true}
               expandedNodes={expandedNodes}
+              selectedId={selectedId}
+              onSelect={(node) => setSelectedId(node.id)}
             />
           )}
 
@@ -553,6 +606,8 @@ export default function EnhancedOrgChart() {
                   isExpanded={expandedNodes.has(root.id)}
                   onToggle={toggleNode}
                   expandedNodes={expandedNodes}
+                  selectedId={selectedId}
+                  onSelect={(node) => setSelectedId(node.id)}
                 />
               ))}
             </div>

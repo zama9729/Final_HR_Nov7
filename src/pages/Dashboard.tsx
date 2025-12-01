@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2 } from "lucide-react";
+import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, Megaphone, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2 } from "lucide-react";
 import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay, isSameDay } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ interface DashboardStats {
   leaveBalance: number;
   nextHoliday: { date: string; name: string } | null;
   projects: Array<{ id: string; name: string; category?: string }>;
+  announcements: Array<{ id: string; title: string; body: string; priority: string; created_at: string }>;
 }
 
 interface UpcomingShift {
@@ -58,6 +59,7 @@ export default function Dashboard() {
     leaveBalance: 0,
     nextHoliday: null,
     projects: [],
+    announcements: [],
   });
   const [presenceStatus, setPresenceStatus] = useState<string>('online');
   const [upcomingShifts, setUpcomingShifts] = useState<UpcomingShift[]>([]);
@@ -203,11 +205,27 @@ export default function Dashboard() {
         console.error('Error fetching projects:', error);
       }
 
+      // Get announcements (latest for this org)
+      let announcements: Array<{ id: string; title: string; body: string; priority: string; created_at: string }> = [];
+      try {
+        const data = await api.getAnnouncements(5);
+        announcements = (data || []).map((a: any) => ({
+          id: a.id,
+          title: a.title,
+          body: a.body,
+          priority: a.priority || 'normal',
+          created_at: a.created_at,
+        }));
+      } catch (error) {
+        console.error('Error fetching announcements:', error);
+      }
+
       setStats({
         timesheetHours: Math.round(timesheetHours),
         leaveBalance,
         nextHoliday,
         projects,
+        announcements,
       });
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -752,37 +770,90 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* My Projects and AI Assistant */}
+        {/* Projects, Announcements and Attendance Trends */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* My Projects */}
-          <Card className="shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-lg font-semibold">My Projects</CardTitle>
-              <Link to="/projects" className="text-sm text-blue-600 hover:underline">
-                View All
-              </Link>
-            </CardHeader>
-            <CardContent>
-              {stats.projects.length > 0 ? (
-                <div className="space-y-3">
-                  {stats.projects.map((project) => (
-                    <div 
-                      key={project.id}
-                      className="p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-                      onClick={() => navigate(`/projects/${project.id}`)}
-                    >
-                      <p className="font-medium">{project.name}</p>
-                      <p className="text-sm text-muted-foreground">{project.category}</p>
+          {/* Projects + Announcements */}
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* My Projects */}
+              <Card className="shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                    <Briefcase className="h-5 w-5 text-primary" />
+                    My Projects
+                  </CardTitle>
+                  <Link to="/projects" className="text-sm text-blue-600 hover:underline">
+                    View All
+                  </Link>
+                </CardHeader>
+                <CardContent>
+                  {stats.projects.length > 0 ? (
+                    <div className="space-y-3">
+                      {stats.projects.map((project) => (
+                        <div 
+                          key={project.id}
+                          className="p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                          onClick={() => navigate(`/projects/${project.id}`)}
+                        >
+                          <p className="font-medium">{project.name}</p>
+                          <p className="text-sm text-muted-foreground">{project.category}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <p className="text-sm">No projects assigned</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p className="text-sm">No projects assigned</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Announcements */}
+              <Card className="shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                    <Megaphone className="h-5 w-5 text-amber-600" />
+                    Announcements
+                  </CardTitle>
+                  {(userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') && (
+                    <Link to="/announcements" className="text-sm text-blue-600 hover:underline">
+                      View All
+                    </Link>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  {stats.announcements.length === 0 ? (
+                    <div className="text-center py-6 text-muted-foreground text-sm">
+                      No announcements yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {stats.announcements.map((a) => (
+                        <div
+                          key={a.id}
+                          className={`p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
+                            a.priority === 'urgent' ? 'border-red-300 bg-red-50/70' : 'border-border'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-medium text-sm line-clamp-1">{a.title}</p>
+                            {a.priority === 'urgent' && (
+                              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                Urgent
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                            {a.body}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
 
           {/* Attendance Trends */}
           <Card className="shadow-sm">

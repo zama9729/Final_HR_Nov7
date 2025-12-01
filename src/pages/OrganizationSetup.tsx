@@ -77,6 +77,22 @@ export default function OrganizationSetup() {
   const [policyVariables, setPolicyVariables] = useState<Record<string, any>>({});
   const [publishingPolicy, setPublishingPolicy] = useState(false);
 
+  const branchLookup = useMemo(() => {
+    const lookup: Record<string, string> = {};
+    hierarchy?.branches?.forEach((branch: any) => {
+      lookup[branch.id] = branch.name;
+    });
+    return lookup;
+  }, [hierarchy?.branches]);
+
+  const departmentLookup = useMemo(() => {
+    const lookup: Record<string, string> = {};
+    hierarchy?.departments?.forEach((dept: any) => {
+      lookup[dept.id] = dept.name;
+    });
+    return lookup;
+  }, [hierarchy?.departments]);
+
   useEffect(() => {
     if (status?.currentStep) {
       setActiveStep(status.currentStep);
@@ -236,8 +252,6 @@ export default function OrganizationSetup() {
     }
   };
 
-  const handleFinish = async () => {
-  const handleAttendanceSave = async (markComplete = false) => {
   const handleSelectTemplate = (template: any) => {
     setSelectedTemplate(template);
     const defaults = Object.entries(template?.variables || {}).reduce(
@@ -277,6 +291,7 @@ export default function OrganizationSetup() {
     }
   };
 
+  const handleAttendanceSave = async (markComplete = false) => {
     if (!attendanceSettings) return;
     setSavingStep(true);
     try {
@@ -298,6 +313,7 @@ export default function OrganizationSetup() {
     }
   };
 
+  const handleFinish = async () => {
     setSavingStep(true);
     try {
       await api.updateSetupStep("review", { completed: true, finish: true });
@@ -363,6 +379,12 @@ export default function OrganizationSetup() {
       {label}
     </Button>
   );
+
+  const formatDate = (value?: string) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+  };
 
   const renderBranchesStep = () => (
     <div className="space-y-6">
@@ -552,6 +574,33 @@ export default function OrganizationSetup() {
         </Button>
       </div>
       <Separator />
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h4 className="font-semibold">Existing departments</h4>
+          <Badge variant="secondary">{hierarchy?.departments?.length || 0}</Badge>
+        </div>
+        {hierarchy?.departments?.length ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {hierarchy.departments.map((dept: any) => (
+              <Card key={dept.id}>
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{dept.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Branch: {dept.branch_id ? branchLookup[dept.branch_id] || "—" : "Unassigned"}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{formatDate(dept.updated_at || dept.created_at)}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No departments created yet.</p>
+        )}
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label>Team name</Label>
@@ -623,6 +672,36 @@ export default function OrganizationSetup() {
         <Button variant="ghost" onClick={() => persistDraft("departments", { draftTeam: teamForm })}>
           Store team draft
         </Button>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h4 className="font-semibold">Existing teams</h4>
+          <Badge variant="secondary">{hierarchy?.teams?.length || 0}</Badge>
+        </div>
+        {hierarchy?.teams?.length ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {hierarchy.teams.map((team: any) => (
+              <Card key={team.id}>
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{team.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Dept: {team.department_id ? departmentLookup[team.department_id] || "—" : "Unassigned"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Branch: {team.branch_id ? branchLookup[team.branch_id] || "—" : "Unassigned"}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{formatDate(team.updated_at || team.created_at)}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No teams created yet.</p>
+        )}
       </div>
     </div>
   );

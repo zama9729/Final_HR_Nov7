@@ -452,6 +452,23 @@ class ApiClient {
     return this.request(`/api/analytics/attendance/distribution?${query.toString()}`);
   }
 
+  async getPendingTimesheetApprovals(params: { from?: string; to?: string; manager_id?: string; department_id?: string }) {
+    const query = new URLSearchParams();
+    if (params.from) query.append('from', params.from);
+    if (params.to) query.append('to', params.to);
+    if (params.manager_id) query.append('manager_id', params.manager_id);
+    if (params.department_id) query.append('department_id', params.department_id);
+    const qs = query.toString();
+    const url = qs ? `/api/analytics/approvals/pending?${qs}` : `/api/analytics/approvals/pending`;
+    return this.request(url);
+  }
+
+  async getAnnouncements(limit = 5) {
+    const query = new URLSearchParams();
+    query.append('limit', String(limit));
+    return this.request(`/api/announcements?${query.toString()}`);
+  }
+
   // Background check methods
   async getBackgroundChecks() {
     return this.request('/api/background-checks');

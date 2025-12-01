@@ -54,6 +54,7 @@ import payrollSsoRoutes from './routes/payroll-sso.js';
 import taxDeclarationsRoutes from './routes/tax-declarations.js';
 import reimbursementRoutes from './routes/reimbursements.js';
 import reportsRoutes from './routes/reports.js';
+import announcementsRoutes from './routes/announcements.js';
 import setupRoutes from './routes/setup.js';
 import branchesRoutes from './routes/branches.js';
 import superRoutes from './routes/super.js';
@@ -64,7 +65,7 @@ import probationRoutes from './routes/probation.js';
 import documentUploadRoutes from './routes/document-upload.js';
 import backgroundCheckRoutes from './routes/background-check.js';
 import { setTenantContext } from './middleware/tenant.js';
-import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs } from './services/cron.js';
+import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders } from './services/cron.js';
 import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
 import { scheduleAutoLogout } from './services/attendance-auto-logout.js';
@@ -72,6 +73,7 @@ import { createAttendanceTables } from './utils/createAttendanceTables.js';
 import { createSchedulingTables } from './utils/createSchedulingTables.js';
 import { ensureAdminRole } from './utils/runMigration.js';
 import { ensureOnboardingColumns } from './utils/ensureOnboardingColumns.js';
+import { ensureManagerRoles } from './utils/ensureManagerRoles.js';
 import { scheduleAnalyticsRefresh } from './services/analytics-refresh.js';
 
 dotenv.config();
@@ -204,6 +206,7 @@ app.use('/api/payroll/sso', payrollSsoRoutes);
 app.use('/api/tax/declarations', taxDeclarationsRoutes);
 app.use('/api/v1/reimbursements', reimbursementRoutes);
 app.use('/api/reports', authenticateToken, reportsRoutes);
+app.use('/api/announcements', authenticateToken, announcementsRoutes);
 
 // Tenant info endpoint for payroll service compatibility
 app.get('/api/tenant', authenticateToken, async (req, res) => {
@@ -291,6 +294,13 @@ createPool().then(async () => {
   } catch (error) {
     console.error('Error ensuring onboarding columns:', error);
     console.warn('⚠️  Please manually run the migration to add onboarding columns');
+  }
+  
+  // Ensure anyone with direct reports is at least a manager
+  try {
+    await ensureManagerRoles();
+  } catch (error) {
+    console.error('Error ensuring manager roles:', error);
   }
   
   // Initialize MinIO buckets
@@ -488,6 +498,7 @@ createPool().then(async () => {
   await scheduleOffboardingJobs();
   await scheduleAutoLogout();
   await scheduleProbationJobs();
+  await scheduleTimesheetReminders();
   console.log('✅ Cron jobs scheduled');
 
   // SSL/HTTPS Configuration

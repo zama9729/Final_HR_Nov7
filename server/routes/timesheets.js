@@ -575,9 +575,9 @@ router.get('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'weekStart and weekEnd required' });
     }
 
-    // Get employee ID
+    // Get employee & tenant
     const empResult = await query(
-      'SELECT id FROM employees WHERE user_id = $1',
+      'SELECT id, tenant_id FROM employees WHERE user_id = $1',
       [req.user.id]
     );
 
@@ -586,99 +586,121 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     const employeeId = empResult.rows[0].id;
+    const tenantId = empResult.rows[0].tenant_id;
 
-    // Get timesheet
+    // Try to find an existing timesheet for this week
     const timesheetResult = await query(
       `SELECT * FROM timesheets
        WHERE employee_id = $1 AND week_start_date = $2`,
       [employeeId, weekStart]
     );
 
-    // Get employee info for holidays (needed even if timesheet doesn't exist)
-    const orgRes = await query('SELECT tenant_id FROM employees WHERE id = $1', [employeeId]);
-    const orgId = orgRes.rows[0]?.tenant_id;
-    const empRes = await query(
-      'SELECT id, tenant_id, state, work_location, holiday_override FROM employees WHERE id = $1',
-      [employeeId]
-    );
-    const employee = empRes.rows[0] || {};
-    const month = String(weekStart).slice(0,7); // YYYY-MM
-    
-    // Get attendance entries for this week (even if timesheet doesn't exist yet)
-    const attendanceEntriesResult = await query(
-      `SELECT * FROM timesheet_entries 
-       WHERE employee_id = $1 
-         AND work_date >= $2 
-         AND work_date <= $3 
-         AND source IN ('api', 'upload')
+    const timesheet = timesheetResult.rows[0] || null;
+
+    // Build base rows from punches (attendance_events)
+    const punchesResult = await query(
+      `SELECT 
+         DATE(raw_timestamp) AS work_date,
+         MIN(raw_timestamp) FILTER (WHERE event_type = 'IN')  AS first_in,
+         MAX(raw_timestamp) FILTER (WHERE event_type = 'OUT') AS last_out
+       FROM attendance_events
+       WHERE tenant_id = $1
+         AND employee_id = $2
+         AND raw_timestamp >= $3::date
+         AND raw_timestamp <= $4::date + INTERVAL '1 day' - INTERVAL '1 second'
+       GROUP BY DATE(raw_timestamp)
        ORDER BY work_date`,
-      [employeeId, weekStart, weekEnd]
+      [tenantId, employeeId, weekStart, weekEnd]
     );
 
-    if (timesheetResult.rows.length === 0) {
-      // No timesheet exists yet, but return attendance entries and holidays so they show in the UI
-      const allEntries = attendanceEntriesResult.rows;
-      const { holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, allEntries);
-      
-      // Calculate total hours from attendance entries
-      const totalHours = allEntries.reduce((sum, e) => {
-        return sum + parseFloat(e.hours || 0);
-      }, 0);
-      
-      return res.json({ 
-        entries: allEntries, 
-        holidayCalendar,
-        // Return a minimal timesheet structure for the frontend
-        week_start_date: weekStart,
-        week_end_date: weekEnd,
-        total_hours: totalHours,
-        status: 'pending'
+    const punchMap = new Map();
+    punchesResult.rows.forEach((row) => {
+      punchMap.set(String(row.work_date), row);
+    });
+
+    // If a timesheet exists, load its entries to overlay manual edits
+    let existingEntriesByDate = new Map();
+    if (timesheet) {
+      const tsEntries = await query(
+        `SELECT * FROM timesheet_entries 
+         WHERE timesheet_id = $1 
+         ORDER BY work_date`,
+        [timesheet.id]
+      );
+      tsEntries.rows.forEach((e) => {
+        existingEntriesByDate.set(String(e.work_date), e);
       });
     }
 
-    const timesheet = timesheetResult.rows[0];
+    // Build rows for each day in the requested range
+    const rows = [];
+    let cursor = new Date(weekStart);
+    const endDate = new Date(weekEnd);
+    while (cursor <= endDate) {
+      const dateKey = cursor.toISOString().split('T')[0];
+      const punch = punchMap.get(dateKey);
+      const existing = existingEntriesByDate.get(dateKey);
 
-    // Get entries - include both timesheet entries and attendance entries for this week
-    const timesheetEntriesResult = await query(
-      `SELECT * FROM timesheet_entries 
-       WHERE timesheet_id = $1 
-       ORDER BY work_date`,
-      [timesheet.id]
-    );
+      let clockIn = punch?.first_in || null;
+      let clockOut = punch?.last_out || null;
+      let manualIn = existing?.manual_in || null;
+      let manualOut = existing?.manual_out || null;
+      let source = existing?.source || (manualIn || manualOut ? 'manual_edit' : 'punch');
 
-    // Get attendance entries for this week that aren't linked to the timesheet yet
-    const attendanceEntriesForWeek = await query(
-      `SELECT * FROM timesheet_entries 
-       WHERE employee_id = $1 
-         AND work_date >= $2 
-         AND work_date <= $3 
-         AND source IN ('api', 'upload')
-         AND (timesheet_id IS NULL OR timesheet_id != $4)
-       ORDER BY work_date`,
-      [employeeId, weekStart, weekEnd, timesheet.id]
-    );
+      // Prefer manual overrides if present
+      const effectiveIn = manualIn || clockIn;
+      const effectiveOut = manualOut || clockOut;
 
-    // Combine timesheet entries and attendance entries
-    const allEntries = [...timesheetEntriesResult.rows, ...attendanceEntriesForWeek.rows];
-    
-    // Auto-persist holiday entries that don't exist in DB
-    await persistHolidayEntries(timesheet.id, orgId, employee, month, allEntries);
-    
-    // Fetch entries again after persisting holidays (only timesheet entries)
-    const updatedEntriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date', [timesheet.id]);
-    
-    // Combine with attendance entries again
-    const finalEntries = [...updatedEntriesResult.rows, ...attendanceEntriesForWeek.rows];
-    const { rows: withHolidays, holidayCalendar } = await injectHolidayRowsIntoTimesheet(orgId, employee, month, finalEntries);
+      let hoursWorked = null;
+      let hasMissingPunches = false;
+      if (effectiveIn && effectiveOut) {
+        const diffMs = new Date(effectiveOut) - new Date(effectiveIn);
+        hoursWorked = Math.max(0, diffMs / (1000 * 60 * 60));
+      } else if (clockIn || clockOut) {
+        hasMissingPunches = true;
+      }
 
-    res.json({ ...timesheet, entries: withHolidays, holidayCalendar });
+      rows.push({
+        work_date: dateKey,
+        clock_in: clockIn,
+        clock_out: clockOut,
+        manual_in: manualIn,
+        manual_out: manualOut,
+        notes: existing?.notes || existing?.description || null,
+        hours_worked: existing?.hours_worked ?? hoursWorked,
+        source,
+        has_missing_punches: hasMissingPunches,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const totalHours = rows.reduce((sum, r) => sum + (Number(r.hours_worked) || 0), 0);
+
+    // Return either the existing timesheet with rows, or a virtual draft
+    if (timesheet) {
+      return res.json({
+        ...timesheet,
+        total_hours: totalHours,
+        entries: rows,
+      });
+    }
+
+    return res.json({
+      employee_id: employeeId,
+      week_start_date: weekStart,
+      week_end_date: weekEnd,
+      status: 'draft',
+      total_hours: totalHours,
+      entries: rows,
+    });
   } catch (error) {
     console.error('Error fetching timesheet:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Save/update timesheet
+// Save/update timesheet (draft) with manual edits
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { weekStart, weekEnd, totalHours, entries } = req.body;
@@ -750,29 +772,29 @@ router.post('/', authenticateToken, async (req, res) => {
             `UPDATE timesheets SET
               week_end_date = $1,
               total_hours = $2,
-              status = 'pending',
+              status = 'draft',
               updated_at = now()
             WHERE id = $3`,
             [weekEnd, totalHours, timesheetId]
           );
         }
       } else {
-        // Insert new timesheet
+        // Insert new timesheet as draft
         const insertResult = await query(
           `INSERT INTO timesheets (
             employee_id, tenant_id, week_start_date, week_end_date,
             total_hours, status
           )
-          VALUES ($1, $2, $3, $4, $5, 'pending')
+          VALUES ($1, $2, $3, $4, $5, 'draft')
           RETURNING *`,
           [employeeId, tenantId, weekStart, weekEnd, totalHours]
         );
         timesheetId = insertResult.rows[0].id;
       }
 
-      // Delete old entries (but preserve holiday entries)
+      // Delete old non-holiday entries; manual edits are represented by new rows
       await query(
-        'DELETE FROM timesheet_entries WHERE timesheet_id = $1 AND is_holiday = false',
+        'DELETE FROM timesheet_entries WHERE timesheet_id = $1 AND (is_holiday = false OR is_holiday IS NULL)',
         [timesheetId]
       );
 
@@ -838,12 +860,30 @@ router.post('/', authenticateToken, async (req, res) => {
             project_id: projectId,
             project_type: projectType,
             description,
+            clock_in: entry.clock_in,
+            clock_out: entry.clock_out,
+            manual_in: entry.manual_in,
+            manual_out: entry.manual_out,
           });
+
+          // Compute hours_worked from effective in/out if not provided
+          let hoursWorked = entry.hours_worked;
+          const effectiveIn = entry.manual_in || entry.clock_in;
+          const effectiveOut = entry.manual_out || entry.clock_out;
+          if (hoursWorked == null && effectiveIn && effectiveOut) {
+            const diffMs = new Date(effectiveOut) - new Date(effectiveIn);
+            hoursWorked = Math.max(0, diffMs / (1000 * 60 * 60));
+          }
+          const source = entry.manual_in || entry.manual_out ? 'manual_edit' : (entry.source || 'punch');
           
           if (hasProjectColumns) {
             await query(
-              `INSERT INTO timesheet_entries (timesheet_id, tenant_id, work_date, hours, description, is_holiday, project_id, project_type)
-               VALUES ($1, $2, $3, $4, $5, false, $6, $7)`,
+              `INSERT INTO timesheet_entries (
+                 timesheet_id, tenant_id, work_date, hours, description, is_holiday,
+                 project_id, project_type, clock_in, clock_out, manual_in, manual_out,
+                 notes, hours_worked, source
+               )
+               VALUES ($1, $2, $3, $4, $5, false, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
               [
                 timesheetId,
                 tenantId,
@@ -852,34 +892,41 @@ router.post('/', authenticateToken, async (req, res) => {
                 description,
                 projectId,
                 projectType,
+                entry.clock_in || null,
+                entry.clock_out || null,
+                entry.manual_in || null,
+                entry.manual_out || null,
+                entry.notes || null,
+                hoursWorked ?? null,
+                source,
               ]
             );
           } else {
             // Insert without project columns
             await query(
-              `INSERT INTO timesheet_entries (timesheet_id, tenant_id, work_date, hours, description, is_holiday)
-               VALUES ($1, $2, $3, $4, $5, false)`,
+              `INSERT INTO timesheet_entries (
+                 timesheet_id, tenant_id, work_date, hours, description, is_holiday,
+                 clock_in, clock_out, manual_in, manual_out, notes, hours_worked, source
+               )
+               VALUES ($1, $2, $3, $4, $5, false, $6, $7, $8, $9, $10, $11, $12)`,
               [
                 timesheetId,
                 tenantId,
                 workDate,
                 Number(entry.hours) || 0,
                 description,
+                entry.clock_in || null,
+                entry.clock_out || null,
+                entry.manual_in || null,
+                entry.manual_out || null,
+                entry.notes || null,
+                hoursWorked ?? null,
+                source,
               ]
             );
           }
         }
       }
-
-      // Auto-persist holiday entries for this timesheet
-      const empRes = await query(
-        'SELECT id, tenant_id, state, work_location, holiday_override FROM employees WHERE id = $1',
-        [employeeId]
-      );
-      const employee = empRes.rows[0] || {};
-      const month = String(weekStart).slice(0,7); // YYYY-MM
-      const existingEntriesResult = await query('SELECT * FROM timesheet_entries WHERE timesheet_id = $1', [timesheetId]);
-      await persistHolidayEntries(timesheetId, tenantId, employee, month, existingEntriesResult.rows);
 
       await query('COMMIT');
 
@@ -908,18 +955,101 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Approve or reject timesheet
+// Submit timesheet - lock and move to pending_approval, create audit snapshot & approvals shell
+router.post('/:id/submit', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Load timesheet and ensure it belongs to current user
+    const tsResult = await query(
+      `SELECT t.*, e.user_id AS employee_user_id, e.reporting_manager_id
+       FROM timesheets t
+       JOIN employees e ON e.id = t.employee_id
+       WHERE t.id = $1`,
+      [id]
+    );
+
+    if (tsResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Timesheet not found' });
+    }
+
+    const ts = tsResult.rows[0];
+
+    if (ts.employee_user_id !== req.user.id) {
+      return res.status(403).json({ error: 'You can only submit your own timesheet' });
+    }
+
+    if (ts.status === 'approved' || ts.status === 'pending_approval') {
+      return res.status(400).json({ error: 'Timesheet is already submitted' });
+    }
+
+    // Load entries to build audit snapshot
+    const entriesRes = await query(
+      'SELECT * FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date',
+      [id]
+    );
+    const entries = entriesRes.rows;
+
+    if (!entries.length) {
+      return res.status(400).json({ error: 'Cannot submit an empty timesheet' });
+    }
+
+    const totalHours = entries.reduce((sum, e) => sum + Number(e.hours_worked || e.hours || 0), 0);
+    if (totalHours <= 0) {
+      return res.status(400).json({ error: 'Timesheet has no hours to submit' });
+    }
+
+    // Simple approval shell: manager first; HR/CEO can be appended later
+    const approvals = [];
+    if (ts.reporting_manager_id) {
+      approvals.push({
+        approver_role: 'manager',
+        approver_employee_id: ts.reporting_manager_id,
+        status: 'pending',
+      });
+    }
+
+    const snapshot = {
+      id,
+      week_start_date: ts.week_start_date,
+      week_end_date: ts.week_end_date,
+      total_hours: totalHours,
+      entries,
+    };
+
+    const updated = await query(
+      `UPDATE timesheets
+       SET status = 'pending_approval',
+           total_hours = $1,
+           submitted_at = now(),
+           submitted_by = $2,
+           approvals = $3::jsonb,
+           audit_snapshot = $4::jsonb,
+           updated_at = now()
+       WHERE id = $5
+       RETURNING *`,
+      [totalHours, req.user.id, JSON.stringify(approvals), JSON.stringify(snapshot), id]
+    );
+
+    res.json(updated.rows[0]);
+  } catch (error) {
+    console.error('Error submitting timesheet:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Approve or reject timesheet (simple single-step approval, will be extended later)
 router.post('/:id/approve', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, rejectionReason } = req.body; // action: 'approve', 'reject', or 'return'
+    const { action, rejectionReason } = req.body; // action: 'approve', 'reject'
 
-    if (!action || !['approve', 'reject', 'return'].includes(action)) {
-      return res.status(400).json({ error: 'Action must be approve, reject, or return' });
+    if (!action || !['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ error: 'Action must be approve or reject' });
     }
 
-    if ((action === 'reject' || action === 'return') && !rejectionReason) {
-      return res.status(400).json({ error: 'Reason required for reject or return' });
+    if (action === 'reject' && !rejectionReason) {
+      return res.status(400).json({ error: 'Reason required for reject' });
     }
 
     // Get current user's employee ID and role
@@ -1006,45 +1136,19 @@ router.post('/:id/approve', authenticateToken, async (req, res) => {
       }
     }
 
-    // Update timesheet
-    let status, updateQuery, params;
-    
-    if (action === 'approve') {
-      status = 'approved';
-      updateQuery = `UPDATE timesheets SET 
-           status = $1,
-           reviewed_by = $2,
-           reviewed_at = now(),
-           updated_at = now()
-         WHERE id = $3
-         RETURNING *`;
-      params = [status, reviewerId, id];
-    } else if (action === 'reject') {
-      status = 'rejected';
-      updateQuery = `UPDATE timesheets SET 
-           status = $1,
-           reviewed_by = $2,
-           reviewed_at = now(),
-           rejection_reason = $4,
-           updated_at = now()
-         WHERE id = $3
-         RETURNING *`;
-      params = [status, reviewerId, id, rejectionReason];
-    } else { // return
-      status = 'pending';
-      updateQuery = `UPDATE timesheets SET 
-           status = $1,
-           reviewed_by = $2,
-           reviewed_at = now(),
-           rejection_reason = $4,
-           updated_at = now(),
-           resubmitted_at = NULL
-         WHERE id = $3
-         RETURNING *`;
-      params = [status, reviewerId, id, rejectionReason];
-    }
-
-    const updateResult = await query(updateQuery, params);
+    // For now, simple single-step approval that updates status directly
+    const newStatus = action === 'approve' ? 'approved' : 'rejected';
+    const updateResult = await query(
+      `UPDATE timesheets SET 
+         status = $1,
+         reviewed_by = $2,
+         reviewed_at = now(),
+         rejection_reason = $3,
+         updated_at = now()
+       WHERE id = $4
+       RETURNING *`,
+      [newStatus, reviewerId, rejectionReason || null, id]
+    );
 
     res.json({
       success: true,

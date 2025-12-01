@@ -13,10 +13,17 @@ const ensureReportingInfra = async () => {
     try {
       const fs = await import('fs');
       const path = await import('path');
-      const migrationPath = path.join(process.cwd(), 'server', 'db', 'migrations', '20250131_team_project_allocation.sql');
-      if (fs.existsSync(migrationPath)) {
+      // In the Docker container, migrations live under /app/db/migrations
+      const candidates = [
+        path.join(process.cwd(), 'db', 'migrations', '20250131_team_project_allocation.sql'),
+        path.join(process.cwd(), 'server', 'db', 'migrations', '20250131_team_project_allocation.sql'),
+      ];
+      const migrationPath = candidates.find((p) => fs.existsSync(p));
+      if (migrationPath) {
         const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
         await query(migrationSQL);
+      } else {
+        console.warn('Reporting-lines migration file not found; skipping auto-create.');
       }
     } catch (err) {
       console.error('Error ensuring reporting infrastructure:', err);

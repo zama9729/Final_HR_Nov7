@@ -147,6 +147,23 @@ export async function createSchedulingTables() {
       );
     `);
 
+    // Ensure algorithm constraint includes latest options
+    await query(`
+      DO $$
+      BEGIN
+        BEGIN
+          ALTER TABLE generated_schedules
+            DROP CONSTRAINT IF EXISTS generated_schedules_algorithm_used_check;
+          ALTER TABLE generated_schedules
+            ADD CONSTRAINT generated_schedules_algorithm_used_check
+            CHECK (algorithm_used IN ('greedy', 'ilp', 'simulated_annealing', 'genetic', 'manual', 'score_rank'));
+        EXCEPTION
+          WHEN undefined_table THEN NULL;
+        END;
+      END
+      $$;
+    `);
+
     await query(`CREATE INDEX IF NOT EXISTS idx_schedules_tenant ON generated_schedules(tenant_id);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_schedules_week ON generated_schedules(week_start_date, week_end_date);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_schedules_status ON generated_schedules(status);`);

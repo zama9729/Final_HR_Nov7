@@ -239,13 +239,13 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
     const wfoPercent = total > 0 ? Math.round((wfoCount / total) * 100) : 0;
     const wfhPercent = total > 0 ? Math.round((wfhCount / total) * 100) : 0;
 
-    // Pending approvals (timesheet approvals)
+    // Pending approvals (timesheet approvals) - use new 'pending_approval' status
     const pendingApprovalsResult = await queryWithOrg(
       `SELECT COUNT(*) as count
        FROM timesheets t
        JOIN employees e ON e.id = t.employee_id
        WHERE t.tenant_id = $1
-         AND t.status = 'pending'
+         AND t.status = 'pending_approval'
          ${branch_id ? 'AND EXISTS (SELECT 1 FROM employee_assignments ea WHERE ea.employee_id = e.id AND ea.branch_id = $2)' : ''}`,
       branch_id ? [orgId, branch_id] : [orgId],
       orgId
@@ -264,6 +264,75 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
   } catch (error) {
     console.error('Analytics overview error:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch overview' });
+  }
+});
+
+// GET /api/analytics/approvals/pending
+// List timesheets in pending_approval state for HR/CEO/Admin
+router.get('/approvals/pending', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
+  try {
+    const { from, to, manager_id, department_id } = req.query;
+    const orgId = req.orgId;
+
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+
+    const filters = ['t.tenant_id = $1', "t.status = 'pending_approval'"];
+    const params = [orgId];
+    let idx = 2;
+
+    if (fromDate) {
+      filters.push(`t.submitted_at >= $${idx++}`);
+      params.push(fromDate);
+    }
+    if (toDate) {
+      filters.push(`t.submitted_at <= $${idx++}`);
+      params.push(toDate);
+    }
+    if (manager_id) {
+      filters.push(`mgr.id = $${idx++}`);
+      params.push(manager_id);
+    }
+    if (department_id) {
+      filters.push(`ea.department_id = $${idx++}`);
+      params.push(department_id);
+    }
+
+    const result = await queryWithOrg(
+      `SELECT
+         t.id,
+         t.week_start_date,
+         t.week_end_date,
+         t.status,
+         t.submitted_at,
+         t.total_hours,
+         json_build_object(
+           'id', e.id,
+           'employee_id', e.employee_id,
+           'first_name', p.first_name,
+           'last_name', p.last_name,
+           'email', p.email
+         ) AS employee,
+         mgr.id AS manager_id,
+         mp.first_name AS manager_first_name,
+         mp.last_name  AS manager_last_name,
+         mp.email      AS manager_email
+       FROM timesheets t
+       JOIN employees e ON e.id = t.employee_id
+       JOIN profiles p ON p.id = e.user_id
+       LEFT JOIN employees mgr ON mgr.id = e.reporting_manager_id
+       LEFT JOIN profiles mp ON mp.id = mgr.user_id
+       LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
+       WHERE ${filters.join(' AND ')}
+       ORDER BY t.submitted_at DESC NULLS LAST`,
+      params,
+      orgId
+    );
+
+    res.json({ pending: result.rows });
+  } catch (error) {
+    console.error('Analytics approvals pending error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch pending approvals' });
   }
 });
 

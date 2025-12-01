@@ -140,6 +140,9 @@ router.post('/departments/upsert', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Failed to upsert department', error);
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Department with this name already exists in the organization' });
+    }
     res.status(500).json({ error: error.message || 'Failed to save department' });
   }
 });
@@ -168,6 +171,9 @@ router.post('/teams/upsert', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Failed to upsert team', error);
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Team with this name already exists for this branch' });
+    }
     res.status(500).json({ error: error.message || 'Failed to save team' });
   }
 });

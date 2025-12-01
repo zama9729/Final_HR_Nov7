@@ -237,14 +237,19 @@ CREATE TABLE timesheets (
   week_start_date DATE NOT NULL,
   week_end_date DATE NOT NULL,
   total_hours DECIMAL(5,2) NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
-  submitted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','pending_approval','approved','rejected')),
+  submitted_at TIMESTAMP WITH TIME ZONE,
   reviewed_by UUID REFERENCES employees(id),
   reviewed_at TIMESTAMP WITH TIME ZONE,
   rejection_reason TEXT,
   tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  period_start DATE,
+  period_end DATE,
+  submitted_by UUID REFERENCES profiles(id),
+  approvals JSONB DEFAULT '[]'::jsonb,
+  audit_snapshot JSONB
 );
 
 -- Timesheet entries table
@@ -255,7 +260,15 @@ CREATE TABLE timesheet_entries (
   hours DECIMAL(4,2) NOT NULL,
   description TEXT,
   tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  clock_in TIMESTAMPTZ,
+  clock_out TIMESTAMPTZ,
+  manual_in TIMESTAMPTZ,
+  manual_out TIMESTAMPTZ,
+  notes TEXT,
+  hours_worked NUMERIC(6,2),
+  source TEXT DEFAULT 'punch' CHECK (source IN ('punch','manual_edit')),
+  audit_trail JSONB DEFAULT '[]'::jsonb
 );
 
 -- Holiday management tables
@@ -299,6 +312,21 @@ ALTER TABLE timesheet_entries ADD COLUMN IF NOT EXISTS is_holiday BOOLEAN DEFAUL
 ALTER TABLE timesheet_entries ADD COLUMN IF NOT EXISTS holiday_id UUID REFERENCES holidays(id);
 ALTER TABLE timesheet_entries ADD COLUMN IF NOT EXISTS readonly BOOLEAN DEFAULT false;
 ALTER TABLE timesheet_entries ADD COLUMN IF NOT EXISTS conflict BOOLEAN DEFAULT false;
+
+-- Announcements (for dashboard)
+CREATE TABLE IF NOT EXISTS announcements (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  org_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('normal','urgent')),
+  pinned BOOLEAN NOT NULL DEFAULT false,
+  created_by UUID REFERENCES profiles(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_announcements_org_created ON announcements(org_id, created_at DESC);
 
 -- Workflows table
 CREATE TABLE workflows (

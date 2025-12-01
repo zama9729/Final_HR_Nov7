@@ -60,6 +60,26 @@ interface HistogramData {
   wfh: number;
 }
 
+interface PendingApproval {
+  id: string;
+  week_start_date: string;
+  week_end_date: string;
+  status: string;
+  submitted_at: string | null;
+  total_hours: number;
+  employee: {
+    id: string;
+    employee_id: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+  };
+  manager_id: string | null;
+  manager_first_name: string | null;
+  manager_last_name: string | null;
+  manager_email: string | null;
+}
+
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
@@ -82,6 +102,7 @@ export default function AttendanceAnalytics() {
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [histogram, setHistogram] = useState<HistogramData[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [dateRange, setDateRange] = useState({
     from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
     to: new Date(),
@@ -106,9 +127,10 @@ export default function AttendanceAnalytics() {
       const fromStr = format(dateRange.from, "yyyy-MM-dd");
       const toStr = format(dateRange.to, "yyyy-MM-dd");
 
-      const [overviewData, histogramData] = await Promise.all([
+      const [overviewData, histogramData, approvalsData] = await Promise.all([
         api.getAttendanceOverview({ from: fromStr, to: toStr }),
         api.getAttendanceHistogram({ from: fromStr, to: toStr }),
+        api.getPendingTimesheetApprovals({ from: fromStr, to: toStr }),
       ]);
 
       setOverview(overviewData);
@@ -118,6 +140,8 @@ export default function AttendanceAnalytics() {
         date: item.date || format(parseISO(item.date), "yyyy-MM-dd"),
       }));
       setHistogram(formattedHistogram);
+
+      setPendingApprovals(approvalsData?.pending || []);
       
       console.log("Histogram data:", formattedHistogram); // Debug log
     } catch (error: any) {
@@ -333,6 +357,19 @@ export default function AttendanceAnalytics() {
                   </p>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Pending Timesheets</CardTitle>
+                  <Clock className="h-4 w-4 text-amber-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{overview?.pending_approvals || 0}</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Awaiting approval (HR/CEO view)
+                  </p>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Statistics Cards */}
@@ -392,12 +429,13 @@ export default function AttendanceAnalytics() {
               </div>
             )}
 
-            {/* Charts Section */}
+            {/* Charts & Approvals Section */}
             <Tabs defaultValue="timeline" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="timeline">Timeline</TabsTrigger>
                 <TabsTrigger value="trends">Trends</TabsTrigger>
                 <TabsTrigger value="location">Work Location</TabsTrigger>
+                <TabsTrigger value="approvals">Pending Approvals</TabsTrigger>
               </TabsList>
 
               <TabsContent value="timeline" className="space-y-4">
@@ -548,6 +586,80 @@ export default function AttendanceAnalytics() {
                         <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                         <p className="text-lg font-medium">No data available</p>
                         <p className="text-sm mt-2">No attendance records found for the selected period</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="approvals" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Pending Timesheet Approvals</CardTitle>
+                    <CardDescription>
+                      Timesheets submitted and awaiting manager/HR/CEO action for the selected period.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {pendingApprovals.length === 0 ? (
+                      <div className="text-center py-10 text-muted-foreground text-sm">
+                        No pending timesheet approvals for this period.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b text-xs text-muted-foreground">
+                              <th className="py-2 px-2 text-left">Employee</th>
+                              <th className="py-2 px-2 text-left">Period</th>
+                              <th className="py-2 px-2 text-left">Submitted At</th>
+                              <th className="py-2 px-2 text-left">Manager</th>
+                              <th className="py-2 px-2 text-left">Hours</th>
+                              <th className="py-2 px-2 text-left">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pendingApprovals.map((ts) => (
+                              <tr key={ts.id} className="border-b last:border-0">
+                                <td className="py-2 px-2">
+                                  <div className="font-medium">
+                                    {ts.employee.first_name} {ts.employee.last_name}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {ts.employee.employee_id} · {ts.employee.email}
+                                  </div>
+                                </td>
+                                <td className="py-2 px-2 text-xs">
+                                  {format(parseISO(ts.week_start_date), "dd MMM yyyy")} –{" "}
+                                  {format(parseISO(ts.week_end_date), "dd MMM yyyy")}
+                                </td>
+                                <td className="py-2 px-2 text-xs">
+                                  {ts.submitted_at
+                                    ? format(parseISO(ts.submitted_at), "dd MMM yyyy HH:mm")
+                                    : "—"}
+                                </td>
+                                <td className="py-2 px-2 text-xs">
+                                  {ts.manager_first_name ? (
+                                    <>
+                                      {ts.manager_first_name} {ts.manager_last_name}
+                                      <div className="text-xs text-muted-foreground">
+                                        {ts.manager_email}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <span className="text-muted-foreground">Unassigned</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-2 text-xs">
+                                  {ts.total_hours ?? 0}
+                                </td>
+                                <td className="py-2 px-2 text-xs capitalize">
+                                  {ts.status.replace('_', ' ')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </CardContent>

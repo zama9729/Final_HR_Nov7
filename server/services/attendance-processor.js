@@ -216,20 +216,35 @@ export async function processAttendanceUpload(uploadId, fileBuffer, filename, te
 
         successCount++;
       } catch (error) {
-        console.error(`Error processing row ${rowNumber}:`, error);
-        
-        await query(
-          `UPDATE attendance_upload_rows 
-           SET status = 'failed', error_message = $1
-           WHERE upload_id = $2 AND row_number = $3`,
-          [error.message.substring(0, 500), uploadId, rowNumber]
-        );
+        // Handle duplicate row_hash specially: treat as ignored, not failed
+        if (error.code === '23505' && error.constraint === 'idx_attendance_upload_rows_hash_unique') {
+          const msg = 'Duplicate attendance row detected (same hash as a previous upload) - row ignored';
+          console.warn(`Ignoring duplicate attendance row ${rowNumber} due to unique hash:`, error.detail || error.message);
 
-        errors.push({
-          row: rowNumber,
-          error: error.message
-        });
-        failedCount++;
+          await query(
+            `UPDATE attendance_upload_rows 
+             SET status = 'ignored', error_message = $1
+             WHERE upload_id = $2 AND row_number = $3`,
+            [msg, uploadId, rowNumber]
+          );
+
+          ignoredCount++;
+        } else {
+          console.error(`Error processing row ${rowNumber}:`, error);
+          
+          await query(
+            `UPDATE attendance_upload_rows 
+             SET status = 'failed', error_message = $1
+             WHERE upload_id = $2 AND row_number = $3`,
+            [error.message.substring(0, 500), uploadId, rowNumber]
+          );
+
+          errors.push({
+            row: rowNumber,
+            error: error.message
+          });
+          failedCount++;
+        }
       }
 
       processedCount++;
@@ -527,6 +542,28 @@ async function createTimesheetEntryFromAttendance(normalized, uploadId, rowNumbe
     ]
   );
 
+  const timesheetEntryId = entryResult.rows[0].id;
+
+  // Also create synthetic attendance_events so analytics dashboards see uploaded data
+  // Use start_time_utc as IN event, end_time_utc (if present) as OUT event
+  if (normalized.start_time_utc) {
+    await query(
+      `INSERT INTO attendance_events (
+        tenant_id, employee_id, raw_timestamp, event_type, device_id, metadata, created_by, paired_timesheet_entry_id, work_type
+      ) VALUES ($1, $2, $3, 'IN', 'upload', NULL, NULL, $4, 'WFO')`,
+      [tenantId, normalized.employee_id, new Date(normalized.start_time_utc), timesheetEntryId]
+    );
+  }
+
+  if (normalized.end_time_utc) {
+    await query(
+      `INSERT INTO attendance_events (
+        tenant_id, employee_id, raw_timestamp, event_type, device_id, metadata, created_by, paired_timesheet_entry_id, work_type
+      ) VALUES ($1, $2, $3, 'OUT', 'upload', NULL, NULL, $4, 'WFO')`,
+      [tenantId, normalized.employee_id, new Date(normalized.end_time_utc), timesheetEntryId]
+    );
+  }
+
   // Update timesheet total hours
   await query(
     `UPDATE timesheets 
@@ -539,7 +576,7 @@ async function createTimesheetEntryFromAttendance(normalized, uploadId, rowNumbe
     [timesheetId]
   );
 
-  return entryResult.rows[0].id;
+  return timesheetEntryId;
 }
 
 /**
