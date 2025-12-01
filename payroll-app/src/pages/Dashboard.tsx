@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, Users, IndianRupee, FileText, LogOut, PlusCircle, Calendar, CheckCircle2, Clock, Key, Receipt } from "lucide-react";
+import { Building2, Users, IndianRupee, FileText, LogOut, PlusCircle, Calendar, CheckCircle2, Clock, Key, Receipt, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 // Define a type for the profile state
@@ -575,6 +575,25 @@ const Dashboard = () => {
             <CardContent>
               <Button className="w-full" variant="outline">
                 View Reports
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card
+            className="shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+            onClick={() => navigate("/advance-salary")}
+          >
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Wallet className="mr-2 h-5 w-5 text-orange-500" />
+                Advance Salary
+              </CardTitle>
+              <CardDescription>Manage employee salary advances and EMI deductions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" variant="outline" onClick={(e) => { e.stopPropagation(); navigate("/advance-salary"); }}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Manage Advances
               </Button>
             </CardContent>
           </Card>

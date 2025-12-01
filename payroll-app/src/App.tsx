@@ -17,6 +17,7 @@ import ForgotPin from "./pages/ForgotPin";
 import ResetPin from "./pages/ResetPin";
 import NotFound from "./pages/NotFound";
 import ApproveReimbursements from "./pages/ApproveReimbursements";
+import AdvanceSalary from "./pages/AdvanceSalary";
 import { AdminProtectedRoute } from "./components/routing/AdminProtectedRoute";
 
 const queryClient = new QueryClient();
@@ -46,6 +47,14 @@ const App = () => (
             element={
               <AdminProtectedRoute>
                 <ApproveReimbursements />
+              </AdminProtectedRoute>
+            }
+          />
+          <Route
+            path="/advance-salary"
+            element={
+              <AdminProtectedRoute>
+                <AdvanceSalary />
               </AdminProtectedRoute>
             }
           />

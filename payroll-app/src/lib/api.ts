@@ -336,6 +336,53 @@ export const api = {
       document.body.removeChild(a);
     },
   },
+
+  advanceSalary: {
+    list: (status?: string) => {
+      const params = new URLSearchParams();
+      if (status) {
+        params.set("status", status);
+      }
+      const queryString = params.toString();
+      const endpoint = `/api/advance-salary${queryString ? `?${queryString}` : ""}`;
+      return client.get(endpoint);
+    },
+
+    create: (data: {
+      employee_id: string;
+      amount_mode: 'fixed' | 'months';
+      value: number;
+      tenure_months: number;
+      start_month: string;
+      disbursement_date: string;
+      notes?: string;
+    }) => client.post("/api/advance-salary", data),
+
+    downloadSlip: async (advanceId: string) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/advance-salary/${advanceId}/slip`, {
+        method: "GET",
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to download advance slip" }));
+        throw new Error(error.error || "Failed to download advance slip");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `advance-salary-${advanceId.substring(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    },
+
+    cancel: (advanceId: string) =>
+      client.post(`/api/advance-salary/${advanceId}/cancel`, {}),
+  },
   
   payslips: {
     list: () =>
