@@ -95,6 +95,39 @@ const ensureDocumentInfra = async () => {
     )
   `);
 
+  // Ensure background_checks table exists before creating background_check_documents
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'background_check_kind_enum') THEN
+        CREATE TYPE background_check_kind_enum AS ENUM ('prehire','rehire','periodic');
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'background_check_status_enum') THEN
+        CREATE TYPE background_check_status_enum AS ENUM ('pending','in_progress','vendor_delay','completed_green','completed_amber','completed_red','cancelled');
+      END IF;
+    END$$;
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS background_checks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+      candidate_id UUID,
+      employee_id UUID REFERENCES employees(id),
+      type background_check_kind_enum NOT NULL DEFAULT 'prehire',
+      status background_check_status_enum NOT NULL DEFAULT 'pending',
+      vendor_id UUID,
+      consent_snapshot JSONB DEFAULT '{}'::jsonb,
+      request_payload JSONB DEFAULT '{}'::jsonb,
+      result_summary JSONB DEFAULT '{}'::jsonb,
+      raw_report_url TEXT,
+      retention_until DATE,
+      initiated_by UUID REFERENCES profiles(id),
+      created_at TIMESTAMPTZ DEFAULT now(),
+      completed_at TIMESTAMPTZ
+    )
+  `);
+
   await query(`
     CREATE TABLE IF NOT EXISTS background_check_documents (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -125,21 +158,28 @@ const ensureDocumentInfra = async () => {
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
   `);
+  
+  // Handle migration from onboarding_document_id to document_id if column exists
   await query(`
-    ALTER TABLE background_check_documents
-      ALTER COLUMN onboarding_document_id DROP NOT NULL
-  `);
-
-  await query(`
-    UPDATE background_check_documents
-    SET document_id = onboarding_document_id
-    WHERE document_id IS NULL AND onboarding_document_id IS NOT NULL
-  `);
-
-  await query(`
-    UPDATE background_check_documents
-    SET onboarding_document_id = document_id
-    WHERE onboarding_document_id IS NULL AND document_id IS NOT NULL
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'background_check_documents' 
+        AND column_name = 'onboarding_document_id'
+      ) THEN
+        ALTER TABLE background_check_documents
+          ALTER COLUMN onboarding_document_id DROP NOT NULL;
+        
+        UPDATE background_check_documents
+        SET document_id = onboarding_document_id
+        WHERE document_id IS NULL AND onboarding_document_id IS NOT NULL;
+        
+        UPDATE background_check_documents
+        SET onboarding_document_id = document_id
+        WHERE onboarding_document_id IS NULL AND document_id IS NOT NULL;
+      END IF;
+    END$$;
   `);
 
   await query(`
@@ -148,10 +188,20 @@ const ensureDocumentInfra = async () => {
     WHERE decision IS NOT NULL AND (verification_status IS NULL OR verification_status = '')
   `);
 
+  // Final migration update if onboarding_document_id column exists
   await query(`
-    UPDATE background_check_documents
-    SET document_id = onboarding_document_id
-    WHERE document_id IS NULL AND onboarding_document_id IS NOT NULL
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'background_check_documents' 
+        AND column_name = 'onboarding_document_id'
+      ) THEN
+        UPDATE background_check_documents
+        SET document_id = onboarding_document_id
+        WHERE document_id IS NULL AND onboarding_document_id IS NOT NULL;
+      END IF;
+    END$$;
   `);
 
   await query(`

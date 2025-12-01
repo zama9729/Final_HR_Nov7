@@ -288,6 +288,53 @@ export const api = {
     
     getCyclePayslips: (cycleId) =>
       client.get(`/api/payroll-cycles/${cycleId}/payslips`),
+    
+    getBankTransferPreview: async (cycleId: string) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/payroll-cycles/${cycleId}/export/bank-transfer/preview`, {
+        method: "GET",
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to fetch preview" }));
+        throw new Error(error.error || "Failed to fetch preview");
+      }
+      
+      return response.json();
+    },
+    
+    downloadBankTransferFile: async (cycleId: string) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/payroll-cycles/${cycleId}/export/bank-transfer`, {
+        method: "GET",
+        credentials: "include", // Include cookies for authentication
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to download bank transfer file" }));
+        throw new Error(error.error || "Failed to download bank transfer file");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      
+      // Get filename from Content-Disposition header or use default
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = `Salary_Payout_${cycleId.substring(0, 8)}.xlsx`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    },
   },
   
   payslips: {

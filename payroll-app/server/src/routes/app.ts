@@ -6,6 +6,7 @@ import multer from "multer";
 import fs from "fs";
 import path from "path";
 import XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import reimbursementsRouter from "./reimbursements.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
@@ -3083,6 +3084,352 @@ appRouter.get("/payroll-cycles/:cycleId/payslips", requireAuth, async (req, res)
   } catch (e: any) {
     console.error("Error fetching payslips for cycle:", e);
     res.status(500).json({ error: e.message || "Failed to fetch payslips" });
+  }
+});
+
+// Helper function to get payroll items for bank transfer (from payroll_items or calculated from preview)
+async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string, cycle: any) {
+  // First, try to get from payroll_items table (if already processed)
+  const existingItemsResult = await query(
+    `
+    SELECT 
+      e.employee_id as employee_code,
+      COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as employee_name,
+      COALESCE(od.bank_account_number, e.bank_account_number, 'N/A') as bank_account_number,
+      COALESCE(od.ifsc_code, e.bank_ifsc_code, 'N/A') as bank_ifsc_code,
+      COALESCE(od.bank_name, e.bank_name, 'N/A') as bank_name,
+      pi.net_salary
+    FROM payroll_items pi
+    JOIN employees e ON e.id = pi.employee_id
+    JOIN profiles p ON p.id = e.user_id
+    LEFT JOIN onboarding_data od ON od.employee_id = e.id
+    WHERE pi.payroll_cycle_id = $1 
+      AND pi.tenant_id = $2
+      AND pi.net_salary > 0
+    ORDER BY e.employee_id ASC
+    `,
+    [cycleId, tenantId]
+  );
+
+  // If items exist, return them
+  if (existingItemsResult.rows.length > 0) {
+    return existingItemsResult.rows;
+  }
+
+  // Otherwise, calculate from preview logic (before processing) - reuse the preview endpoint logic
+  const payrollMonth = cycle.month;
+  const payrollYear = cycle.year;
+  const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
+
+  // Get payroll settings
+  const settingsResult = await query(
+    "SELECT * FROM payroll_settings WHERE tenant_id = $1",
+    [tenantId]
+  );
+  
+  const settings = settingsResult.rows[0] || {
+    pf_rate: 12.00,
+    esi_rate: 3.25,
+    pt_rate: 200.00,
+    tds_threshold: 250000.00,
+  };
+
+  // Get all active employees who were employed by the payroll month
+  const employeesResult = await query(
+    `SELECT employee_id, full_name, email, employee_code
+     FROM payroll_employee_view
+     WHERE org_id = $1
+       AND employment_status = 'active'
+       AND (date_of_joining IS NULL OR date_of_joining <= $2)
+     ORDER BY date_of_joining ASC`,
+    [tenantId, payrollMonthEnd.toISOString()]
+  );
+
+  const employees = employeesResult.rows;
+  const calculatedItems: any[] = [];
+
+  const incentivesResult = await query(
+    `SELECT employee_id, amount
+     FROM payroll_incentives
+     WHERE tenant_id = $1
+       AND payroll_cycle_id = $2`,
+    [tenantId, cycleId]
+  );
+  const incentiveMap = new Map<string, number>();
+  incentivesResult.rows.forEach((row) => {
+    incentiveMap.set(row.employee_id, Number(row.amount || 0));
+  });
+
+  // Calculate salary for each employee (same logic as preview endpoint)
+  for (const employee of employees) {
+    // Get the latest compensation structure effective for the payroll month
+    const compResult = await query(
+      `SELECT * FROM compensation_structures
+       WHERE employee_id = $1 
+         AND tenant_id = $2
+         AND effective_from <= $3
+       ORDER BY effective_from DESC
+       LIMIT 1`,
+      [employee.employee_id, tenantId, payrollMonthEnd.toISOString()]
+    );
+
+    if (compResult.rows.length === 0) {
+      continue;
+    }
+
+    const compensation = compResult.rows[0];
+    
+    // All amounts are monthly
+    const monthlyBasic = Number(compensation.basic_salary) || 0;
+    const monthlyHRA = Number(compensation.hra) || 0;
+    const monthlySpecialAllowance = Number(compensation.special_allowance) || 0;
+    const monthlyDA = Number(compensation.da) || 0;
+    const monthlyLTA = Number(compensation.lta) || 0;
+    const monthlyBonus = Number(compensation.bonus) || 0;
+
+    // Gross salary = sum of all monthly earnings
+    const grossSalary = monthlyBasic + monthlyHRA + monthlySpecialAllowance + monthlyDA + monthlyLTA + monthlyBonus;
+
+    // Calculate LOP days and paid days for this month
+    const { lopDays, paidDays, totalWorkingDays } = await calculateLopAndPaidDays(
+      tenantId,
+      employee.employee_id,
+      payrollMonth,
+      payrollYear
+    );
+
+    // Adjust gross salary based on paid days (proportional deduction for LOP)
+    const dailyRate = grossSalary / totalWorkingDays;
+    const adjustedGrossSalary = dailyRate * paidDays;
+
+    // Recalculate components proportionally
+    const adjustmentRatio = paidDays / totalWorkingDays;
+    const adjustedBasic = monthlyBasic * adjustmentRatio;
+    const adjustedHRA = monthlyHRA * adjustmentRatio;
+    const adjustedSpecialAllowance = monthlySpecialAllowance * adjustmentRatio;
+    const adjustedDA = monthlyDA * adjustmentRatio;
+    const adjustedLTA = monthlyLTA * adjustmentRatio;
+    const adjustedBonus = monthlyBonus * adjustmentRatio;
+
+    // Calculate deductions based on adjusted gross
+    const pfWageCeiling = 15000;
+    const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+    const pfDeduction = (pfBasis * Number(settings.pf_rate)) / 100;
+    const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
+    const ptDeduction = Number(settings.pt_rate) || 200;
+    
+    const incentiveAmount = incentiveMap.get(employee.employee_id) || 0;
+    const grossWithIncentive = adjustedGrossSalary + incentiveAmount;
+    const annualIncome = grossWithIncentive * 12;
+    let tdsDeduction = 0;
+    if (annualIncome > Number(settings.tds_threshold)) {
+      const excessAmount = annualIncome - Number(settings.tds_threshold);
+      tdsDeduction = (excessAmount * 5) / 100 / 12;
+    }
+
+    const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
+    const netSalary = grossWithIncentive - totalDeductions;
+
+    if (netSalary <= 0) continue;
+
+    // Get bank details from onboarding_data (HR portal) or employees table as fallback
+    const employeeDetailsResult = await query(
+      `SELECT 
+        e.id,
+        e.employee_id,
+        COALESCE(od.bank_account_number, e.bank_account_number, 'N/A') as bank_account_number,
+        COALESCE(od.ifsc_code, e.bank_ifsc_code, 'N/A') as bank_ifsc_code,
+        COALESCE(od.bank_name, e.bank_name, 'N/A') as bank_name,
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as employee_name
+      FROM employees e
+      JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN onboarding_data od ON od.employee_id = e.id
+      WHERE e.id = $1 AND e.tenant_id = $2`,
+      [employee.employee_id, tenantId]
+    );
+
+    const empDetails = employeeDetailsResult.rows[0];
+    if (!empDetails) continue;
+
+    calculatedItems.push({
+      employee_code: employee.employee_code || empDetails.employee_id || 'N/A',
+      employee_name: empDetails.employee_name || employee.full_name || 'N/A',
+      bank_account_number: empDetails.bank_account_number || 'N/A',
+      bank_ifsc_code: empDetails.bank_ifsc_code || 'N/A',
+      bank_name: empDetails.bank_name || 'N/A',
+      net_salary: netSalary,
+    });
+  }
+
+  return calculatedItems;
+}
+
+// Get bank transfer preview data (JSON) for payroll cycle
+appRouter.get("/payroll-cycles/:cycleId/export/bank-transfer/preview", requireAuth, async (req, res) => {
+  try {
+    const tenantId = (req as any).tenantId as string;
+    const { cycleId } = req.params;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Get payroll cycle to verify it belongs to tenant
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Get payroll items (from payroll_items or calculated)
+    const payrollItems = await getPayrollItemsForBankTransfer(cycleId, tenantId, cycle);
+
+    // Format payment date
+    const paymentDate = cycle.payday 
+      ? new Date(cycle.payday).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : new Date(cycle.year, cycle.month, 0).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    const previewData = payrollItems.map((row: any) => ({
+      employee_code: row.employee_code || 'N/A',
+      employee_name: row.employee_name || 'N/A',
+      bank_account_number: row.bank_account_number || 'N/A',
+      bank_ifsc_code: row.bank_ifsc_code || 'N/A',
+      bank_name: row.bank_name || 'N/A',
+      net_salary: parseFloat(row.net_salary) || 0,
+      payment_date: paymentDate,
+    }));
+
+    return res.json({
+      cycle: {
+        id: cycle.id,
+        month: cycle.month,
+        year: cycle.year,
+        status: cycle.status,
+        payday: cycle.payday,
+      },
+      payment_date: paymentDate,
+      items: previewData,
+      total_employees: previewData.length,
+      total_amount: previewData.reduce((sum, item) => sum + item.net_salary, 0),
+    });
+  } catch (e: any) {
+    console.error("Error fetching bank transfer preview:", e);
+    res.status(500).json({ error: e.message || "Failed to fetch bank transfer preview" });
+  }
+});
+
+// Export bank transfer file for payroll cycle
+appRouter.get("/payroll-cycles/:cycleId/export/bank-transfer", requireAuth, async (req, res) => {
+  try {
+    const tenantId = (req as any).tenantId as string;
+    const { cycleId } = req.params;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Get payroll cycle to verify it belongs to tenant
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Get payroll items (from payroll_items or calculated from preview)
+    const payrollItems = await getPayrollItemsForBankTransfer(cycleId, tenantId, cycle);
+
+    if (payrollItems.length === 0) {
+      return res.status(404).json({ error: "No payroll items found for this cycle" });
+    }
+
+    // Debug: Log first item to verify bank details are present
+    if (payrollItems.length > 0) {
+      console.log('[BANK EXPORT] Sample item:', {
+        employee_code: payrollItems[0].employee_code,
+        bank_account_number: payrollItems[0].bank_account_number,
+        bank_ifsc_code: payrollItems[0].bank_ifsc_code,
+        bank_name: payrollItems[0].bank_name,
+      });
+    }
+
+    // Create Excel workbook
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Bank Transfer');
+
+    // Set column headers
+    worksheet.columns = [
+      { header: 'Employee Code', key: 'employee_code', width: 15 },
+      { header: 'Employee Name', key: 'employee_name', width: 30 },
+      { header: 'Bank Account Number', key: 'bank_account_number', width: 20 },
+      { header: 'IFSC Code', key: 'bank_ifsc_code', width: 15 },
+      { header: 'Bank Name', key: 'bank_name', width: 20 },
+      { header: 'Net Salary', key: 'net_salary', width: 15 },
+      { header: 'Payment Date', key: 'payment_date', width: 15 },
+    ];
+
+    // Style header row
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0E0E0' }
+    };
+
+    // Format payment date
+    const paymentDate = cycle.payday 
+      ? new Date(cycle.payday).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : new Date(cycle.year, cycle.month, 0).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    // Add data rows
+    payrollItems.forEach((row: any) => {
+      // Convert net_salary from main currency unit (already in main unit, not cents)
+      const netSalary = parseFloat(row.net_salary) || 0;
+      
+      // Ensure all bank details are properly extracted
+      const bankAccountNumber = row.bank_account_number || 'N/A';
+      const bankIfscCode = row.bank_ifsc_code || 'N/A';
+      const bankName = row.bank_name || 'N/A';
+      
+      worksheet.addRow({
+        employee_code: row.employee_code || 'N/A',
+        employee_name: row.employee_name || 'N/A',
+        bank_account_number: bankAccountNumber,
+        bank_ifsc_code: bankIfscCode,
+        bank_name: bankName,
+        net_salary: netSalary,
+        payment_date: paymentDate,
+      });
+    });
+
+    // Format Net Salary column as currency
+    worksheet.getColumn('net_salary').numFmt = '#,##0.00';
+    worksheet.getColumn('net_salary').alignment = { horizontal: 'right' };
+
+    // Generate filename
+    const monthName = new Date(cycle.year, cycle.month - 1).toLocaleString('default', { month: 'short' });
+    const filename = `Salary_Payout_${monthName}_${cycle.year}_${cycleId.substring(0, 8)}.xlsx`;
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Write workbook to response
+    await workbook.xlsx.write(res);
+    res.end();
+
+  } catch (e: any) {
+    console.error("Error exporting bank transfer file:", e);
+    res.status(500).json({ error: e.message || "Failed to export bank transfer file" });
   }
 });
 
