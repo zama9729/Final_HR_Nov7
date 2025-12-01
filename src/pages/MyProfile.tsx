@@ -9,7 +9,7 @@ import EmployeeSkillsEditor from '@/components/EmployeeSkillsEditor';
 import EmployeeCertificationsEditor from '@/components/EmployeeCertificationsEditor';
 import EmployeePastProjectsEditor from '@/components/EmployeePastProjectsEditor';
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -35,7 +35,9 @@ import {
   Clock,
   CalendarDays,
   CheckCircle2,
-  Camera
+  Camera,
+  Eye,
+  ArrowRight
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Progress as ProgressBar } from '@/components/ui/progress';
@@ -120,6 +122,69 @@ interface EmployeeData {
   };
 }
 
+// Helper component to display team members
+function TeamMembersList({ teamId, employeeId }: { teamId: string; employeeId: string }) {
+  const [members, setMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchMembers = async () => {
+      try {
+        const teamMembers = await api.getTeamMembers(teamId);
+        // Filter out the current employee
+        setMembers(teamMembers.filter((m: any) => m.employee_id !== employeeId));
+      } catch (error) {
+        console.error('Error fetching team members:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchMembers();
+  }, [teamId, employeeId]);
+
+  if (loading) {
+    return <div className="text-sm text-muted-foreground py-2">Loading members...</div>;
+  }
+
+  if (members.length === 0) {
+    return <p className="text-sm text-muted-foreground py-2">No other team members</p>;
+  }
+
+  return (
+    <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+      {members.map((member: any) => (
+        <div
+          key={member.id}
+          className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+          onClick={() => navigate(`/employees/${member.employee_id}`)}
+        >
+          <Avatar className="h-10 w-10">
+            <AvatarFallback>
+              {member.employee_name?.split(' ').map((n: string) => n[0]).join('').toUpperCase() || 'E'}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium truncate">{member.employee_name}</p>
+            <p className="text-sm text-muted-foreground truncate">
+              {member.position || member.department || 'Employee'}
+            </p>
+            {member.employee_email && (
+              <p className="text-xs text-muted-foreground truncate">{member.employee_email}</p>
+            )}
+            {member.role && (
+              <Badge variant="outline" className="mt-1 text-xs">
+                {member.role}
+              </Badge>
+            )}
+          </div>
+          <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Utility function to mask sensitive numbers (show only last 4 digits)
 const maskNumber = (value: string | undefined | null, showLastDigits: number = 4): string => {
   if (!value) return 'N/A';
@@ -186,6 +251,11 @@ export default function MyProfile() {
     email: '',
     phone: '',
   });
+  const [teamMemberships, setTeamMemberships] = useState<any[]>([]);
+  const [reportingLines, setReportingLines] = useState<any[]>([]);
+  const [teamDetails, setTeamDetails] = useState<Record<string, any>>({});
+  const [teamsLoading, setTeamsLoading] = useState(false);
+  const navigate = useNavigate();
 
   const tabParam = useMemo(() => {
     return new URLSearchParams(location.search).get('tab');
@@ -220,12 +290,61 @@ export default function MyProfile() {
       fetchUpcomingShifts(employeeId);
       fetchOnboardingProgress();
       fetchMissingData();
+      fetchTeamData();
     } else {
       setUpcomingShifts([]);
       setOnboardingProgress(null);
       setMissingData(null);
+      setTeamMemberships([]);
+      setReportingLines([]);
+      setTeamDetails({});
     }
   }, [employeeId]);
+
+  const fetchTeamData = async () => {
+    if (!employeeId) return;
+    setTeamsLoading(true);
+    try {
+      // Fetch team memberships
+      const teams = await api.getTeams();
+      const allMemberships: any[] = [];
+      const teamDetailsMap: Record<string, any> = {};
+      
+      for (const team of teams) {
+        try {
+          const members = await api.getTeamMembers(team.id);
+          const employeeMemberships = members.filter((m: any) => m.employee_id === employeeId && !m.end_date);
+          
+          if (employeeMemberships.length > 0) {
+            teamDetailsMap[team.id] = team;
+            for (const mem of employeeMemberships) {
+              allMemberships.push({
+                ...mem,
+                team_id: team.id,
+                team_name: team.name,
+                team_code: team.code,
+                team_type: team.team_type,
+                team_description: team.description,
+              });
+            }
+          }
+        } catch (err) {
+          // Team might not exist or no access
+        }
+      }
+      
+      setTeamMemberships(allMemberships);
+      setTeamDetails(teamDetailsMap);
+      
+      // Fetch reporting lines
+      const reporting = await api.getEmployeeReportingLines(employeeId);
+      setReportingLines(reporting);
+    } catch (error: any) {
+      console.error('Error fetching team data:', error);
+    } finally {
+      setTeamsLoading(false);
+    }
+  };
 
   const fetchMissingData = async () => {
     // Only check for own profile (not when viewing someone else's profile)
@@ -799,6 +918,10 @@ export default function MyProfile() {
               <Info className="mr-2 h-4 w-4" />
               About
             </TabsTrigger>
+            <TabsTrigger value="teams">
+              <Users className="mr-2 h-4 w-4" />
+              Teams
+            </TabsTrigger>
             <TabsTrigger value="skills">
               <Award className="mr-2 h-4 w-4" />
               Skills
@@ -1266,6 +1389,169 @@ export default function MyProfile() {
               <Card>
                 <CardContent className="py-10 text-center text-muted-foreground">
                   Shifts are available only for employees with active records. Please contact HR if you need access.
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="teams">
+            {employeeId ? (
+              <div className="space-y-6">
+                {/* Teams the Employee Belongs To */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Building className="h-5 w-5" />
+                      Teams ({teamMemberships.length})
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {teamsLoading ? (
+                      <div className="text-center py-4 text-muted-foreground">Loading teams...</div>
+                    ) : teamMemberships.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        You are not part of any teams
+                      </p>
+                    ) : (
+                      <div className="space-y-4">
+                        {teamMemberships.map((membership) => {
+                          const team = teamDetails[membership.team_id];
+                          return (
+                            <div key={membership.id} className="border rounded-lg p-4 space-y-3">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <h3 className="font-semibold text-lg">{membership.team_name}</h3>
+                                    <Badge variant={membership.is_primary ? 'default' : 'secondary'}>
+                                      {membership.is_primary ? 'Primary' : 'Secondary'}
+                                    </Badge>
+                                    <Badge variant="outline">{membership.team_type}</Badge>
+                                    <Badge variant="outline">{membership.role}</Badge>
+                                  </div>
+                                  {membership.team_code && (
+                                    <p className="text-sm text-muted-foreground mb-2">
+                                      Code: {membership.team_code}
+                                    </p>
+                                  )}
+                                  {membership.team_description && (
+                                    <p className="text-sm text-muted-foreground mb-2">
+                                      {membership.team_description}
+                                    </p>
+                                  )}
+                                  <p className="text-xs text-muted-foreground">
+                                    Member since {format(new Date(membership.start_date), 'MMM dd, yyyy')}
+                                  </p>
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => navigate(`/teams/${membership.team_id}`)}
+                                >
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View Team
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Reporting Manager */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <User className="h-5 w-5" />
+                      Reporting Manager
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {teamsLoading ? (
+                      <div className="text-center py-4 text-muted-foreground">Loading...</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {reportingLines
+                          .filter((rl) => rl.relationship_type === 'PRIMARY_MANAGER' && !rl.end_date)
+                          .map((manager) => (
+                            <div key={manager.id} className="flex items-center gap-3 p-3 border rounded-lg">
+                              <Avatar className="h-10 w-10">
+                                <AvatarFallback>
+                                  {manager.manager_name?.split(' ').map((n: string) => n[0]).join('').toUpperCase() || 'M'}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1">
+                                <p className="font-medium">{manager.manager_name}</p>
+                                {manager.manager_email && (
+                                  <p className="text-sm text-muted-foreground">{manager.manager_email}</p>
+                                )}
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Primary Manager
+                                  {manager.start_date && ` • Since ${format(new Date(manager.start_date), 'MMM dd, yyyy')}`}
+                                </p>
+                              </div>
+                              {manager.manager_id && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => navigate(`/employees/${manager.manager_id}`)}
+                                >
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View Profile
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        {reportingLines.filter((rl) => rl.relationship_type === 'PRIMARY_MANAGER' && !rl.end_date).length === 0 && (
+                          <p className="text-sm text-muted-foreground text-center py-4">
+                            No reporting manager assigned
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Team Members (if employee manages any teams) */}
+                {teamMemberships.some((tm) => ['MANAGER', 'LEAD'].includes(tm.role)) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Users className="h-5 w-5" />
+                        Team Members
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {teamsLoading ? (
+                        <div className="text-center py-4 text-muted-foreground">Loading team members...</div>
+                      ) : (
+                        <div className="space-y-4">
+                          {Object.values(teamDetails).map((team: any) => {
+                            const membership = teamMemberships.find((tm) => tm.team_id === team.id);
+                            if (!membership || !['MANAGER', 'LEAD'].includes(membership.role)) return null;
+                            
+                            return (
+                              <div key={team.id} className="space-y-3">
+                                <div className="flex items-center gap-2">
+                                  <Building className="h-4 w-4 text-muted-foreground" />
+                                  <h4 className="font-medium">{team.name}</h4>
+                                  <Badge variant="outline">{membership.role}</Badge>
+                                </div>
+                                <TeamMembersList teamId={team.id} employeeId={employeeId} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="py-10 text-center text-muted-foreground">
+                  Team information is available only for employees with active records.
                 </CardContent>
               </Card>
             )}

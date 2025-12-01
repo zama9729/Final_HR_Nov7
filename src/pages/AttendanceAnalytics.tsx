@@ -39,6 +39,7 @@ import {
   Area,
   AreaChart,
 } from "recharts";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface OverviewData {
   total_employees: number;
@@ -77,6 +78,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function AttendanceAnalytics() {
   const { toast } = useToast();
+  const { userRole } = useAuth();
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [histogram, setHistogram] = useState<HistogramData[]>([]);
@@ -86,11 +88,19 @@ export default function AttendanceAnalytics() {
   });
   const [selectedPeriod, setSelectedPeriod] = useState("30");
 
+  const allowedRoles = ["admin", "hr", "ceo", "director"];
+  const canViewAnalytics = userRole ? allowedRoles.includes(userRole) : false;
+
   useEffect(() => {
-    fetchData();
-  }, [dateRange]);
+    if (canViewAnalytics) {
+      fetchData();
+    } else {
+      setLoading(false);
+    }
+  }, [dateRange, canViewAnalytics]);
 
   const fetchData = async () => {
+    if (!canViewAnalytics) return;
     setLoading(true);
     try {
       const fromStr = format(dateRange.from, "yyyy-MM-dd");
@@ -177,6 +187,27 @@ export default function AttendanceAnalytics() {
     maxPresent: Math.max(...histogram.map(h => h.present)),
     minPresent: Math.min(...histogram.map(h => h.present)),
   } : null;
+
+  if (!canViewAnalytics) {
+    return (
+      <AppLayout>
+        <div className="p-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Attendance Analytics</CardTitle>
+              <CardDescription>Access restricted</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Attendance analytics are available only to HR, Directors, and Executive roles. If you
+                believe you need access, please contact HR or an administrator.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>

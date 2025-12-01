@@ -1111,11 +1111,30 @@ class ApiClient {
     });
   }
 
-  async uploadAttendance(file: File, mapping?: any) {
+  async uploadAttendance(file: File, etlConfig?: any) {
     const formData = new FormData();
     formData.append('file', file);
-    if (mapping) {
-      formData.append('mapping', JSON.stringify(mapping));
+    
+    // Support both old format (just mapping) and new format (full ETL config)
+    if (etlConfig) {
+      if (etlConfig.mapping) {
+        formData.append('mapping', JSON.stringify(etlConfig.mapping));
+      } else if (typeof etlConfig === 'object' && !etlConfig.transformations) {
+        // Old format - just mapping object
+        formData.append('mapping', JSON.stringify(etlConfig));
+      }
+      
+      if (etlConfig.transformations && Array.isArray(etlConfig.transformations)) {
+        formData.append('transformations', JSON.stringify(etlConfig.transformations));
+      }
+      
+      if (etlConfig.validations && Array.isArray(etlConfig.validations)) {
+        formData.append('validations', JSON.stringify(etlConfig.validations));
+      }
+
+      if (typeof etlConfig.matrixDetected === 'boolean') {
+        formData.append('matrixDetected', JSON.stringify(etlConfig.matrixDetected));
+      }
     }
 
     return this.request('/api/v1/attendance/upload', {
@@ -1127,6 +1146,23 @@ class ApiClient {
 
   async getUploadStatus(uploadId: string) {
     return this.request(`/api/v1/attendance/upload/${uploadId}/status`);
+  }
+
+  async getAttendanceMappingTemplates() {
+    return this.request('/api/v1/attendance/mapping-templates');
+  }
+
+  async saveAttendanceMappingTemplate(template: any) {
+    return this.request('/api/v1/attendance/mapping-templates', {
+      method: 'POST',
+      body: JSON.stringify(template),
+    });
+  }
+
+  async deleteAttendanceMappingTemplate(templateId: string) {
+    return this.request(`/api/v1/attendance/mapping-templates/${templateId}`, {
+      method: 'DELETE',
+    });
   }
 
   async retryUpload(uploadId: string, force?: boolean) {

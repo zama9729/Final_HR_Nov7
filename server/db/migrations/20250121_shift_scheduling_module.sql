@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS generated_schedules (
   week_start_date DATE NOT NULL,
   week_end_date DATE NOT NULL,
   rule_set_id UUID NOT NULL REFERENCES scheduling_rule_sets(id) ON DELETE RESTRICT,
-  algorithm_used TEXT NOT NULL CHECK (algorithm_used IN ('greedy', 'ilp', 'simulated_annealing', 'genetic', 'manual')),
+  algorithm_used TEXT NOT NULL CHECK (algorithm_used IN ('greedy', 'ilp', 'simulated_annealing', 'genetic', 'manual', 'score_rank')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending_approval', 'approved', 'rejected', 'active', 'archived')),
   score DECIMAL(10,2), -- Objective function value
   violated_hard_constraints JSONB DEFAULT '[]'::jsonb, -- Array of violated hard constraint IDs
@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS schedule_assignments (
   shift_template_id UUID NOT NULL REFERENCES shift_templates(id) ON DELETE RESTRICT,
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
+  shift_type TEXT DEFAULT 'day',
   assigned_by TEXT NOT NULL CHECK (assigned_by IN ('algorithm', 'manual', 'system')),
   assigned_by_user_id UUID REFERENCES profiles(id),
   role TEXT, -- Role required for this shift

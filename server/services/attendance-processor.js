@@ -8,7 +8,12 @@ import { selectEmployeeHolidays } from './holidays.js';
  * Process attendance upload file (CSV or Excel)
  * This function handles parsing, validation, normalization, and creating timesheet entries
  */
-export async function processAttendanceUpload(uploadId, fileBuffer, filename, tenantId, mappingConfig) {
+const DATE_COLUMN_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const MATRIX_WORKING_CODES = ['P', 'PR', 'PRESENT', 'WFH', 'OD', 'ON DUTY', 'ONDUTY', 'TRAVEL', 'FIELD'];
+const DEFAULT_MATRIX_TIME_IN = process.env.DEFAULT_MATRIX_TIME_IN || '09:00';
+const DEFAULT_MATRIX_TIME_OUT = process.env.DEFAULT_MATRIX_TIME_OUT || '18:00';
+
+export async function processAttendanceUpload(uploadId, fileBuffer, filename, tenantId, etlConfig) {
   try {
     // Update status to processing
     await query(
@@ -44,6 +49,20 @@ export async function processAttendanceUpload(uploadId, fileBuffer, filename, te
       'UPDATE attendance_uploads SET total_rows = $1 WHERE id = $2',
       [rows.length, uploadId]
     );
+
+    let mappingConfig = etlConfig?.mapping || null;
+
+    // Detect and convert matrix-style datasets (one row per employee, date columns)
+    const matrixResult = convertMatrixDataset(rows, tenantTimezone);
+    if (matrixResult) {
+      rows = matrixResult.rows;
+      mappingConfig = mappingConfig || matrixResult.mapping;
+
+      await query(
+        'UPDATE attendance_uploads SET total_rows = $1 WHERE id = $2',
+        [rows.length, uploadId]
+      );
+    }
 
     // Get or infer column mapping
     const mapping = mappingConfig || inferColumnMapping(rows[0]);
@@ -621,6 +640,93 @@ function parseDateTime(workDate, timeStr, timezone) {
   }
 
   return null;
+}
+
+function normalizeHeaderLabel(header) {
+  return (header || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function findHeader(headers, candidates) {
+  const normalized = headers.map((header) => ({
+    raw: header,
+    norm: normalizeHeaderLabel(header),
+  }));
+  const target = candidates.map(normalizeHeaderLabel);
+  const match = normalized.find((entry) => target.includes(entry.norm));
+  return match?.raw || null;
+}
+
+function normalizeStatusValue(value) {
+  return (value || '').replace(/[^a-z]/gi, '').toUpperCase();
+}
+
+function isWorkingMatrixStatus(value) {
+  const normalized = normalizeStatusValue(value);
+  return MATRIX_WORKING_CODES.some((code) =>
+    normalized.includes(code.replace(/\s/g, ''))
+  );
+}
+
+function convertMatrixDataset(rows, tenantTimezone) {
+  if (!rows.length) return null;
+  const headers = Object.keys(rows[0]);
+  const dateColumns = headers.filter((header) =>
+    DATE_COLUMN_REGEX.test((header || '').trim())
+  );
+  if (dateColumns.length === 0) {
+    return null;
+  }
+
+  const identifierHeader = findHeader(headers, [
+    'employee code',
+    'employee_id',
+    'employee id',
+    'emp id',
+    'emp code',
+    'code',
+  ]);
+  if (!identifierHeader) return null;
+
+  const emailHeader = findHeader(headers, ['employee email', 'email']);
+  const timezoneHeader = findHeader(headers, ['timezone', 'tz', 'time zone']);
+
+  const expandedRows = [];
+  rows.forEach((row) => {
+    const identifier = (row[identifierHeader] || '').toString().trim();
+    if (!identifier) return;
+
+    dateColumns.forEach((dateCol) => {
+      const statusValue = (row[dateCol] || '').toString().trim();
+      if (!statusValue || !isWorkingMatrixStatus(statusValue)) return;
+
+      expandedRows.push({
+        employee_identifier: identifier,
+        employee_email: emailHeader ? (row[emailHeader] || '').toString().trim() : '',
+        date: dateCol,
+        time_in: DEFAULT_MATRIX_TIME_IN,
+        time_out: DEFAULT_MATRIX_TIME_OUT,
+        timezone: timezoneHeader ? (row[timezoneHeader] || tenantTimezone) : tenantTimezone,
+        notes: `Status: ${statusValue}`,
+      });
+    });
+  });
+
+  if (!expandedRows.length) return null;
+
+  return {
+    rows: expandedRows,
+    mapping: {
+      employee_identifier: 'employee_identifier',
+      employee_email: 'employee_email',
+      date: 'date',
+      time_in: 'time_in',
+      time_out: 'time_out',
+      timezone: 'timezone',
+      notes: 'notes',
+    },
+  };
 }
 
 /**
