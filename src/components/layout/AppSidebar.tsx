@@ -132,7 +132,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
       id: "admin-attendance",
       label: "Attendance & Leave",
       items: [
-        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
+        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -188,7 +188,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
       id: "hr-attendance",
       label: "Attendance & Leave",
       items: [
-        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
+        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -245,7 +245,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
       id: "ceo-attendance",
       label: "Attendance & Leave",
       items: [
-        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
+        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -296,7 +296,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
       id: "manager-attendance",
       label: "Attendance & Leave",
       items: [
-        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
+        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
