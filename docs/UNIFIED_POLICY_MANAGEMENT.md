@@ -192,3 +192,5 @@ const policy = await api.getMyPolicy(policyId);
 - All queries are scoped by `org_id` via RLS
 - PDFs are generated on-the-fly if not stored (fallback)
 
+
+

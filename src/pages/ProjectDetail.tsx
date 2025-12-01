@@ -74,7 +74,7 @@ export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { userRole, user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(false);
   const [addAllocationDialogOpen, setAddAllocationDialogOpen] = useState(false);
@@ -99,13 +99,25 @@ export default function ProjectDetail() {
   });
   const [teams, setTeams] = useState<any[]>([]);
 
-  const isHrUser = user?.roles?.some(r => ['hr', 'director', 'ceo', 'admin'].includes(r.role));
+  // Check if user has HR/admin permissions (case-insensitive)
+  // Check both userRole from context and user.role as fallback
+  const roleToCheck = userRole || user?.role || '';
+  const isHrUser = roleToCheck ? ['hr', 'director', 'ceo', 'admin', 'super_user'].includes(roleToCheck.toLowerCase()) : false;
+  
+  // Debug: Log role check (remove in production)
+  useEffect(() => {
+    if (id) {
+      console.log('ProjectDetail - userRole:', userRole, 'user?.role:', user?.role, 'isHrUser:', isHrUser);
+    }
+  }, [userRole, user?.role, isHrUser, id]);
 
   useEffect(() => {
     if (id) {
       fetchProject();
+      // Always fetch employees so they're available in the dropdown
+      // The button visibility is controlled by isHrUser
+      fetchEmployees();
       if (isHrUser) {
-        fetchEmployees();
         fetchTeams();
       }
     }
@@ -150,7 +162,14 @@ export default function ProjectDetail() {
   const handleEditProject = async () => {
     if (!id) return;
     try {
-      await api.updateProject(id, editFormData);
+      // Convert __none__ back to empty string or null for the API
+      const dataToSave = {
+        ...editFormData,
+        project_manager_id: editFormData.project_manager_id === '__none__' ? '' : editFormData.project_manager_id,
+        team_id: editFormData.team_id === '__none__' ? '' : editFormData.team_id,
+      };
+      
+      await api.updateProject(id, dataToSave);
       toast({
         title: 'Success',
         description: 'Project updated successfully',
@@ -176,9 +195,26 @@ export default function ProjectDetail() {
   };
 
   const handleAddAllocation = async () => {
-    if (!id || !formData.employee_id) return;
+    if (!id || !formData.employee_id) {
+      toast({
+        title: 'Error',
+        description: 'Please select an employee',
+        variant: 'destructive',
+      });
+      return;
+    }
     try {
-      await api.createProjectAllocation(id, formData);
+      // Prepare data, converting empty strings to null/undefined for optional fields
+      const allocationData = {
+        employee_id: formData.employee_id,
+        allocation_type: formData.allocation_type,
+        percent_allocation: formData.percent_allocation || undefined,
+        start_date: formData.start_date || new Date().toISOString().split('T')[0],
+        end_date: formData.end_date || undefined,
+        role_on_project: formData.role_on_project || undefined,
+      };
+      
+      await api.createProjectAllocation(id, allocationData);
       toast({
         title: 'Success',
         description: 'Employee allocated to project successfully',
@@ -194,6 +230,7 @@ export default function ProjectDetail() {
       });
       fetchProject();
     } catch (error: any) {
+      console.error('Error adding allocation:', error);
       toast({
         title: 'Error',
         description: error.message || 'Failed to add allocation',
@@ -410,8 +447,17 @@ export default function ProjectDetail() {
                   </TableBody>
                 </Table>
               ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  No allocations yet
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground mb-4">No allocations yet</p>
+                  {isHrUser && (
+                    <Button
+                      onClick={() => setAddAllocationDialogOpen(true)}
+                      variant="outline"
+                    >
+                      <UserPlus className="mr-2 h-4 w-4" />
+                      Add First Employee
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -622,7 +668,7 @@ export default function ProjectDetail() {
                       <SelectValue placeholder="Select project manager" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None</SelectItem>
+                      <SelectItem value="__none__">None</SelectItem>
                       {employees.map((emp) => (
                         <SelectItem key={emp.id} value={emp.id}>
                           {emp.profiles?.first_name} {emp.profiles?.last_name} ({emp.profiles?.email})
@@ -643,7 +689,7 @@ export default function ProjectDetail() {
                       <SelectValue placeholder="Select team" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None</SelectItem>
+                      <SelectItem value="__none__">None</SelectItem>
                       {teams.map((team) => (
                         <SelectItem key={team.id} value={team.id}>
                           {team.name} ({team.code})

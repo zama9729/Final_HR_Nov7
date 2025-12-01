@@ -63,7 +63,7 @@ export default function TeamDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { userRole, user } = useAuth();
   const [team, setTeam] = useState<Team | null>(null);
   const [loading, setLoading] = useState(false);
   const [addMemberDialogOpen, setAddMemberDialogOpen] = useState(false);
@@ -73,9 +73,20 @@ export default function TeamDetail() {
     role: 'MEMBER' as 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR',
     is_primary: false,
     start_date: new Date().toISOString().split('T')[0],
+    manual_override: false,
   });
 
-  const isHrUser = user?.roles?.some(r => ['hr', 'director', 'ceo', 'admin'].includes(r.role));
+  // Check if user has HR/admin permissions (case-insensitive)
+  // Check both userRole from context and user.role as fallback
+  const roleToCheck = userRole || user?.role || '';
+  const isHrUser = roleToCheck ? ['hr', 'director', 'ceo', 'admin', 'super_user'].includes(roleToCheck.toLowerCase()) : false;
+  
+  // Debug: Log role check (remove in production)
+  useEffect(() => {
+    if (id) {
+      console.log('TeamDetail - userRole:', userRole, 'user?.role:', user?.role, 'isHrUser:', isHrUser);
+    }
+  }, [userRole, user?.role, isHrUser, id]);
 
   useEffect(() => {
     if (id) {
@@ -104,18 +115,45 @@ export default function TeamDetail() {
   };
 
   const fetchEmployees = async () => {
+    if (!id) return;
     try {
-      const data = await api.getEmployees();
+      // Use the new endpoint that includes project allocation info
+      const data = await api.getAvailableEmployeesForTeam(id);
       setEmployees(data);
     } catch (error) {
       console.error('Failed to fetch employees:', error);
+      // Fallback to regular getEmployees if the new endpoint fails
+      try {
+        const fallbackData = await api.getEmployees();
+        setEmployees(fallbackData);
+      } catch (fallbackError) {
+        console.error('Failed to fetch employees (fallback):', fallbackError);
+      }
     }
   };
 
   const handleAddMember = async () => {
     if (!id || !formData.employee_id) return;
+    
+    // Check if employee has active project allocation (unless manual override)
+    const selectedEmployee = employees.find(emp => emp.id === formData.employee_id);
+    if (!formData.manual_override && selectedEmployee?.has_active_project_allocation) {
+      toast({
+        title: 'Warning',
+        description: 'This employee is already allocated to a project. Enable "Manual Override" to add them anyway.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     try {
-      await api.addTeamMember(id, formData);
+      await api.addTeamMember(id, {
+        employee_id: formData.employee_id,
+        role: formData.role,
+        is_primary: formData.is_primary,
+        start_date: formData.start_date,
+        manual_override: formData.manual_override,
+      });
       toast({
         title: 'Success',
         description: 'Member added successfully',
@@ -126,8 +164,10 @@ export default function TeamDetail() {
         role: 'MEMBER',
         is_primary: false,
         start_date: new Date().toISOString().split('T')[0],
+        manual_override: false,
       });
       fetchTeam();
+      fetchEmployees(); // Refresh available employees
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -289,8 +329,21 @@ export default function TeamDetail() {
                   </TableBody>
                 </Table>
               ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  No members yet
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground mb-4">No members yet</p>
+                  {isHrUser ? (
+                    <Button
+                      onClick={() => setAddMemberDialogOpen(true)}
+                      variant="outline"
+                    >
+                      <UserPlus className="mr-2 h-4 w-4" />
+                      Add First Member
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Contact HR/Admin to add members to this team
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -320,16 +373,27 @@ export default function TeamDetail() {
                   </SelectTrigger>
                   <SelectContent>
                     {employees
-                      .filter(
-                        (emp) =>
-                          !team.members?.some(
-                            (m) => m.employee_id === emp.id && !m.end_date
-                          )
-                      )
+                      .filter((emp) => {
+                        // Filter out employees already in the team
+                        const alreadyInTeam = team.members?.some(
+                          (m) => m.employee_id === emp.id && !m.end_date
+                        );
+                        if (alreadyInTeam) return false;
+                        
+                        // If manual override is not enabled, hide employees with active project allocations
+                        if (!formData.manual_override && emp.has_active_project_allocation) {
+                          return false;
+                        }
+                        
+                        return true;
+                      })
                       .map((emp) => (
                         <SelectItem key={emp.id} value={emp.id}>
-                          {emp.profiles?.first_name} {emp.profiles?.last_name} (
-                          {emp.profiles?.email})
+                          {emp.name || `${emp.profiles?.first_name} ${emp.profiles?.last_name}`} (
+                          {emp.email || emp.profiles?.email})
+                          {emp.has_active_project_allocation && (
+                            <span className="text-xs text-muted-foreground ml-2">(In Project)</span>
+                          )}
                         </SelectItem>
                       ))}
                   </SelectContent>
@@ -368,6 +432,20 @@ export default function TeamDetail() {
                   <Label htmlFor="is_primary">Set as primary team</Label>
                 </div>
               )}
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="manual_override"
+                  checked={formData.manual_override}
+                  onChange={(e) =>
+                    setFormData({ ...formData, manual_override: e.target.checked })
+                  }
+                  className="rounded"
+                />
+                <Label htmlFor="manual_override">
+                  Manual Override (allow adding employees already in projects)
+                </Label>
+              </div>
               <div>
                 <Label htmlFor="start_date">Start Date</Label>
                 <Input
@@ -395,4 +473,5 @@ export default function TeamDetail() {
     </AppLayout>
   );
 }
+
 

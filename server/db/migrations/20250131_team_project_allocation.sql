@@ -305,3 +305,5 @@ COMMENT ON TABLE team_memberships IS 'Employee-team relationships with primary/s
 COMMENT ON TABLE reporting_lines IS 'Manager-employee reporting relationships (primary, secondary, project managers)';
 COMMENT ON TABLE project_allocations IS 'Employee project allocations with allocation percentages and roles';
 
+
+

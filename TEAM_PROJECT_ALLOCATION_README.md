@@ -207,3 +207,5 @@ These policies use `current_setting('app.org_id', true)::uuid` to filter by orga
 - [ ] Test business rule enforcement (single primary team, single primary manager)
 - [ ] Test data migration from existing structure
 
+
+

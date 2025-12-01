@@ -750,5 +750,95 @@ router.patch('/:id/members/:memberId', authenticateToken, setTenantContext, requ
   }
 });
 
+// GET /api/teams/:id/available-employees - Get employees available for team assignment
+router.get('/:id/available-employees', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
+  try {
+    await ensureTeamInfra();
+    const { id } = req.params;
+    const orgId = req.orgId;
+    
+    // Verify team exists
+    const teamResult = await queryWithOrg(
+      'SELECT * FROM teams WHERE id = $1 AND org_id = $2',
+      [id, orgId],
+      orgId
+    );
+    
+    if (teamResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Team not found' });
+    }
+    
+    // Get all employees in the organization
+    // Check if project_allocations table exists
+    const paTableCheck = await query(`
+      SELECT table_name FROM information_schema.tables 
+      WHERE table_name = 'project_allocations'
+    `);
+    const hasProjectAllocations = paTableCheck.rows.length > 0;
+    
+    // Get current team members to exclude them
+    const tmTableCheck = await query(`
+      SELECT table_name FROM information_schema.tables 
+      WHERE table_name = 'team_memberships'
+    `);
+    const hasTeamMemberships = tmTableCheck.rows.length > 0;
+    
+    let projectAllocSubquery = '';
+    if (hasProjectAllocations) {
+      projectAllocSubquery = `
+        , EXISTS(
+          SELECT 1 FROM project_allocations pa
+          WHERE pa.employee_id = e.id 
+          AND pa.org_id = $1
+          AND (pa.end_date IS NULL OR pa.end_date >= CURRENT_DATE)
+        ) as has_active_project_allocation
+      `;
+    } else {
+      projectAllocSubquery = ', false as has_active_project_allocation';
+    }
+    
+    let excludeTeamMembers = '';
+    let paramIndex = 1;
+    const params = [orgId];
+    
+    if (hasTeamMemberships) {
+      paramIndex++;
+      params.push(id);
+      excludeTeamMembers = `
+        AND NOT EXISTS(
+          SELECT 1 FROM team_memberships tm
+          WHERE tm.employee_id = e.id 
+          AND tm.team_id = $${paramIndex}
+          AND tm.org_id = $1
+          AND tm.end_date IS NULL
+        )
+      `;
+    }
+    
+    const result = await queryWithOrg(
+      `SELECT 
+         e.id,
+         p.first_name || ' ' || p.last_name as name,
+         p.email,
+         e.position,
+         e.department
+         ${projectAllocSubquery}
+       FROM employees e
+       JOIN profiles p ON p.id = e.user_id
+       WHERE e.tenant_id = $1
+         AND e.status = 'active'
+         ${excludeTeamMembers}
+       ORDER BY p.first_name, p.last_name`,
+      params,
+      orgId
+    );
+    
+    res.json({ employees: result.rows });
+  } catch (error) {
+    console.error('Error fetching available employees:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch available employees' });
+  }
+});
+
 export default router;
 

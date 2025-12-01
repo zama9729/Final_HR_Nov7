@@ -2153,11 +2153,17 @@ class ApiClient {
     return response.members || [];
   }
 
+  async getAvailableEmployeesForTeam(teamId: string) {
+    const response = await this.request(`/api/teams/${teamId}/available-employees`);
+    return response.employees || [];
+  }
+
   async addTeamMember(teamId: string, data: {
     employee_id: string;
     role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
     is_primary?: boolean;
     start_date?: string;
+    manual_override?: boolean;
   }) {
     return this.request(`/api/teams/${teamId}/members`, {
       method: 'POST',

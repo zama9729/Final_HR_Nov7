@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api';
 import { Plus, Search, Users, Building2, Edit, Trash2, Eye, UserPlus } from 'lucide-react';
@@ -44,7 +45,7 @@ interface Team {
 export default function Teams() {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, userRole } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -60,15 +61,20 @@ export default function Teams() {
     owner_manager_id: '',
   });
   const [employees, setEmployees] = useState<any[]>([]);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<Set<string>>(new Set());
+  const [employeeSearch, setEmployeeSearch] = useState('');
 
-  const isHrUser = user?.roles?.some(r => ['hr', 'director', 'ceo', 'admin'].includes(r.role));
+  const isHrUser = userRole ? ['hr', 'director', 'ceo', 'admin'].includes(userRole) : false;
 
   useEffect(() => {
     fetchTeams();
-    if (isHrUser) {
+  }, [activeTab, searchQuery]);
+
+  useEffect(() => {
+    if (dialogOpen && isHrUser) {
       fetchEmployees();
     }
-  }, [activeTab, searchQuery, isHrUser]);
+  }, [dialogOpen, isHrUser]);
 
   const fetchTeams = async () => {
     setLoading(true);
@@ -106,6 +112,8 @@ export default function Teams() {
       parent_team_id: '',
       owner_manager_id: '',
     });
+    setSelectedEmployeeIds(new Set());
+    setEmployeeSearch('');
     setDialogOpen(true);
   };
 
@@ -124,20 +132,54 @@ export default function Teams() {
 
   const handleSave = async () => {
     try {
+      // Convert __none__ back to empty string or null for the API
+      const dataToSave = {
+        ...formData,
+        owner_manager_id: formData.owner_manager_id === '__none__' ? '' : formData.owner_manager_id,
+      };
+      
       if (editingTeam) {
-        await api.updateTeam(editingTeam.id, formData);
+        await api.updateTeam(editingTeam.id, dataToSave);
         toast({
           title: 'Success',
           description: 'Team updated successfully',
         });
       } else {
-        await api.createTeam(formData);
-        toast({
-          title: 'Success',
-          description: 'Team created successfully',
-        });
+        const newTeam = await api.createTeam(dataToSave);
+        const teamId = newTeam?.id || (newTeam as any)?.id;
+        
+        // Add selected employees to the team
+        if (selectedEmployeeIds.size > 0 && teamId) {
+          const addEmployeePromises = Array.from(selectedEmployeeIds).map((employeeId) =>
+            api.addTeamMember(teamId, {
+              employee_id: employeeId,
+              role: 'MEMBER',
+              is_primary: false,
+            }).catch((error) => {
+              console.error(`Failed to add employee ${employeeId}:`, error);
+              return null;
+            })
+          );
+          
+          const results = await Promise.all(addEmployeePromises);
+          const successCount = results.filter(r => r !== null).length;
+          
+          toast({
+            title: 'Success',
+            description: successCount === selectedEmployeeIds.size
+              ? `Team created and ${successCount} employee(s) added`
+              : `Team created and ${successCount} of ${selectedEmployeeIds.size} employee(s) added`,
+          });
+        } else {
+          toast({
+            title: 'Success',
+            description: 'Team created successfully',
+          });
+        }
       }
       setDialogOpen(false);
+      setSelectedEmployeeIds(new Set());
+      setEmployeeSearch('');
       fetchTeams();
     } catch (error: any) {
       toast({
@@ -147,6 +189,26 @@ export default function Teams() {
       });
     }
   };
+
+  const handleToggleEmployee = (employeeId: string) => {
+    setSelectedEmployeeIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(employeeId)) {
+        newSet.delete(employeeId);
+      } else {
+        newSet.add(employeeId);
+      }
+      return newSet;
+    });
+  };
+
+  const filteredEmployees = employees.filter((emp) => {
+    const searchLower = employeeSearch.toLowerCase();
+    const fullName = `${emp.profiles?.first_name || ''} ${emp.profiles?.last_name || ''}`.toLowerCase();
+    const email = (emp.profiles?.email || '').toLowerCase();
+    const employeeId = (emp.employee_id || '').toLowerCase();
+    return fullName.includes(searchLower) || email.includes(searchLower) || employeeId.includes(searchLower);
+  });
 
   const handleView = (teamId: string) => {
     navigate(`/teams/${teamId}`);
@@ -389,7 +451,7 @@ export default function Teams() {
                     <SelectValue placeholder="Select manager" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="__none__">None</SelectItem>
                     {employees.map((emp) => (
                       <SelectItem key={emp.id} value={emp.id}>
                         {emp.profiles?.first_name} {emp.profiles?.last_name} ({emp.profiles?.email})
@@ -398,6 +460,67 @@ export default function Teams() {
                   </SelectContent>
                 </Select>
               </div>
+              {!editingTeam && (
+                <div>
+                  <Label>Add Employees</Label>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search employees..."
+                        value={employeeSearch}
+                        onChange={(e) => setEmployeeSearch(e.target.value)}
+                        className="pl-8"
+                      />
+                    </div>
+                    <div className="rounded-md border max-h-[250px] overflow-y-auto">
+                      <div className="p-2 space-y-2">
+                        {filteredEmployees.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-4">
+                            {employeeSearch ? 'No employees found matching your search.' : 'No employees available.'}
+                          </p>
+                        ) : (
+                          filteredEmployees.map((emp) => (
+                            <div
+                              key={emp.id}
+                              className="flex items-center space-x-3 p-2 rounded-md hover:bg-accent transition-colors cursor-pointer"
+                              onClick={() => handleToggleEmployee(emp.id)}
+                            >
+                              <Checkbox
+                                id={`employee-${emp.id}`}
+                                checked={selectedEmployeeIds.has(emp.id)}
+                                onCheckedChange={() => handleToggleEmployee(emp.id)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              <label
+                                htmlFor={`employee-${emp.id}`}
+                                className="flex-1 text-sm cursor-pointer"
+                              >
+                                <div className="font-medium">
+                                  {emp.profiles?.first_name} {emp.profiles?.last_name}
+                                  {emp.employee_id && (
+                                    <span className="text-muted-foreground ml-2">
+                                      · {emp.employee_id}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {emp.profiles?.email}
+                                </div>
+                              </label>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    {selectedEmployeeIds.size > 0 && (
+                      <p className="text-sm text-muted-foreground">
+                        {selectedEmployeeIds.size} employee(s) selected
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
@@ -413,4 +536,5 @@ export default function Teams() {
     </AppLayout>
   );
 }
+
 

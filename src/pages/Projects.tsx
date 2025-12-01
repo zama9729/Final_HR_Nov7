@@ -40,13 +40,13 @@ interface Project {
 export default function Projects() {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { userRole } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  const isHrUser = user?.roles?.some(r => ['hr', 'director', 'ceo', 'admin'].includes(r.role));
+  const isHrUser = userRole ? ['hr', 'director', 'ceo', 'admin'].includes(userRole) : false;
 
   useEffect(() => {
     fetchProjects();
@@ -231,4 +231,5 @@ export default function Projects() {
     </AppLayout>
   );
 }
+
 
