@@ -45,6 +45,7 @@ interface PayrollItem {
   esi_deduction: number;
   pt_deduction: number;
   tds_deduction: number;
+  advance_deduction?: number;
   deductions: number;
   net_salary: number;
   lop_days?: number;
@@ -467,7 +468,14 @@ export const PayrollReviewDialog = ({
                             {formatCurrency(item.gross_salary)}
                           </TableCell>
                           <TableCell className="text-right">
-                            {formatCurrency(item.deductions)}
+                            <div className="flex flex-col items-end gap-1">
+                              <span>{formatCurrency(item.deductions)}</span>
+                              {item.advance_deduction && item.advance_deduction > 0 && (
+                                <span className="text-xs text-muted-foreground">
+                                  (EMI: {formatCurrency(item.advance_deduction)})
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right font-semibold text-primary">
                             {formatCurrency(item.net_salary)}
@@ -557,7 +565,14 @@ export const PayrollReviewDialog = ({
                             {formatCurrency(item.gross_salary)}
                           </TableCell>
                           <TableCell className="text-right">
-                            {formatCurrency(item.deductions)}
+                            <div className="flex flex-col items-end gap-1">
+                              <span>{formatCurrency(item.deductions)}</span>
+                              {item.advance_deduction && item.advance_deduction > 0 && (
+                                <span className="text-xs text-muted-foreground">
+                                  (EMI: {formatCurrency(item.advance_deduction)})
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right font-semibold text-primary">
                             {formatCurrency(item.net_salary)}

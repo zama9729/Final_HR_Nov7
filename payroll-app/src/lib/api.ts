@@ -559,6 +559,35 @@ export const api = {
     submit: (formData: FormData) => client.upload("/api/v1/reimbursements/submit", formData),
     myClaims: () => client.get<{ reimbursements: any[] }>("/api/v1/reimbursements/my-claims"),
     pending: () => client.get<{ reimbursements: any[] }>("/api/v1/reimbursements/pending"),
+    pendingCount: () => client.get<{ count: number }>("/api/v1/reimbursements/pending/count"),
+    history: (params?: {
+      status?: string;
+      employee_id?: string;
+      employee_name?: string;
+      from_date?: string;
+      to_date?: string;
+      sort_by?: string;
+      sort_order?: "asc" | "desc";
+    }) => {
+      const queryParams = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && value !== "") {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      const queryString = queryParams.toString();
+      return client.get<{
+        reimbursements: any[];
+        summary: {
+          total_count: number;
+          total_amount: number;
+          paid_amount: number;
+          approved_amount: number;
+        };
+      }>(`/api/v1/reimbursements/history${queryString ? `?${queryString}` : ""}`);
+    },
     approve: (id: string) => client.post(`/api/v1/reimbursements/${id}/approve`, {}),
     reject: (id: string) => client.post(`/api/v1/reimbursements/${id}/reject`, {}),
   },

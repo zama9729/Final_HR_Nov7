@@ -3466,34 +3466,75 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
     const payrollYear = cycle.year;
     const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
 
-    const existingItemsResult = await query(
-      `SELECT 
-         pi.employee_id,
-         pi.gross_salary,
-         pi.deductions,
-         pi.net_salary,
-         pi.basic_salary,
-         pi.hra,
-         pi.special_allowance,
-         pi.incentive_amount,
-         pi.pf_deduction,
-         pi.esi_deduction,
-         pi.pt_deduction,
-         pi.tds_deduction,
-         pi.metadata,
-         pi.lop_days,
-         pi.paid_days,
-         pi.total_working_days,
-         e.employee_code,
-         e.full_name,
-         e.email
-       FROM payroll_items pi
-       JOIN payroll_employee_view e ON e.employee_id = pi.employee_id AND (e.org_id = $2 OR e.org_id IS NULL)
-       WHERE pi.payroll_cycle_id = $1
-         AND pi.tenant_id = $2
-       ORDER BY e.full_name`,
-      [cycleId, tenantId]
-    );
+    // Try to get existing payroll items (if cycle is already processed)
+    let existingItemsResult: any;
+    try {
+      existingItemsResult = await query(
+        `SELECT 
+           pi.employee_id,
+           pi.gross_salary,
+           pi.deductions,
+           pi.net_salary,
+           pi.basic_salary,
+           pi.hra,
+           pi.special_allowance,
+           pi.incentive_amount,
+           pi.pf_deduction,
+           pi.esi_deduction,
+           pi.pt_deduction,
+           pi.tds_deduction,
+           pi.metadata,
+           pi.lop_days,
+           pi.paid_days,
+           pi.total_working_days,
+           e.employee_code,
+           e.full_name,
+           e.email
+         FROM payroll_items pi
+         JOIN payroll_employee_view e ON e.employee_id = pi.employee_id AND (e.org_id = $2 OR e.org_id IS NULL)
+         WHERE pi.payroll_cycle_id = $1
+           AND pi.tenant_id = $2
+         ORDER BY e.full_name`,
+        [cycleId, tenantId]
+      );
+    } catch (viewError: any) {
+      // Fallback if payroll_employee_view doesn't exist
+      console.warn('[PAYROLL PREVIEW] payroll_employee_view not available for existing items, using employees table:', viewError.message);
+      try {
+        existingItemsResult = await query(
+          `SELECT 
+             pi.employee_id,
+             pi.gross_salary,
+             pi.deductions,
+             pi.net_salary,
+             pi.basic_salary,
+             pi.hra,
+             pi.special_allowance,
+             pi.incentive_amount,
+             pi.pf_deduction,
+             pi.esi_deduction,
+             pi.pt_deduction,
+             pi.tds_deduction,
+             pi.metadata,
+             pi.lop_days,
+             pi.paid_days,
+             pi.total_working_days,
+             COALESCE(e.employee_id::text, 'N/A') as employee_code,
+             COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as full_name,
+             COALESCE(p.email, e.email, '') as email
+           FROM payroll_items pi
+           JOIN employees e ON e.id = pi.employee_id
+           LEFT JOIN profiles p ON p.id = e.user_id
+           WHERE pi.payroll_cycle_id = $1
+             AND pi.tenant_id = $2
+           ORDER BY full_name`,
+          [cycleId, tenantId]
+        );
+      } catch (fallbackError: any) {
+        console.error('[PAYROLL PREVIEW] Error fetching existing items:', fallbackError.message);
+        existingItemsResult = { rows: [] };
+      }
+    }
 
     if (existingItemsResult.rows.length > 0) {
       const incentiveRows = await query(
@@ -3504,11 +3545,11 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
         [tenantId, cycleId]
       );
       const incentiveMap = new Map<string, number>();
-      incentiveRows.rows.forEach((row) => {
+      incentiveRows.rows.forEach((row: any) => {
         incentiveMap.set(row.employee_id, Number(row.amount || 0));
       });
 
-      const items = existingItemsResult.rows.map((row) => {
+      const items = existingItemsResult.rows.map((row: any) => {
         // Extract advance deduction from metadata if exists
         let advanceDeduction = 0;
         try {
@@ -3566,17 +3607,43 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
     };
 
     // Get all active employees who were employed by the payroll month
-    const employeesResult = await query(
-      `SELECT employee_id, full_name, email, employee_code
-       FROM payroll_employee_view
-       WHERE org_id = $1
-         AND employment_status = 'active'
-         AND (date_of_joining IS NULL OR date_of_joining <= $2)
-       ORDER BY date_of_joining ASC`,
-      [tenantId, payrollMonthEnd.toISOString()]
-    );
-
-    const employees = employeesResult.rows;
+    // Try payroll_employee_view first, fallback to employees table if view doesn't exist
+    let employees: any[] = [];
+    try {
+      const employeesResult = await query(
+        `SELECT employee_id, full_name, email, employee_code
+         FROM payroll_employee_view
+         WHERE org_id = $1
+           AND employment_status = 'active'
+           AND (date_of_joining IS NULL OR date_of_joining <= $2)
+         ORDER BY date_of_joining ASC`,
+        [tenantId, payrollMonthEnd.toISOString()]
+      );
+      employees = employeesResult.rows;
+    } catch (viewError: any) {
+      // Fallback to employees table with profiles join
+      console.warn('[PAYROLL PREVIEW] payroll_employee_view not available, using employees table:', viewError.message);
+      try {
+        const fallbackResult = await query(
+          `SELECT 
+            e.id as employee_id,
+            COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as full_name,
+            COALESCE(p.email, e.email, '') as email,
+            COALESCE(e.employee_id::text, 'N/A') as employee_code
+           FROM employees e
+           LEFT JOIN profiles p ON p.id = e.user_id
+           WHERE e.tenant_id = $1
+             AND e.status = 'active'
+             AND (e.join_date IS NULL OR e.join_date <= $2)
+           ORDER BY e.join_date ASC`,
+          [tenantId, payrollMonthEnd.toISOString()]
+        );
+        employees = fallbackResult.rows;
+      } catch (fallbackError: any) {
+        console.error('[PAYROLL PREVIEW] Error fetching employees:', fallbackError.message);
+        employees = [];
+      }
+    }
     const payrollItems: any[] = [];
 
     const incentivesResult = await query(
@@ -3605,6 +3672,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       );
 
       if (compResult.rows.length === 0) {
+        console.warn(`[PAYROLL PREVIEW] No compensation structure found for employee ${employee.employee_id}, skipping`);
         continue;
       }
 
@@ -5610,12 +5678,50 @@ appRouter.post("/advance-salary", requireAuth, async (req, res) => {
   try {
     const tenantId = (req as any).tenantId as string;
     const userId = (req as any).userId as string;
+    const hrUserId = (req as any).hrUserId as string | null;
 
     if (!tenantId) {
       return res.status(403).json({ error: "User tenant not found" });
     }
 
     const { employee_id, amount_mode, value, tenure_months, start_month, disbursement_date, notes } = req.body;
+    
+    // Get the profile ID (hr_user_id) for created_by field
+    // The salary_advances.created_by references profiles(id), not users(id)
+    let createdByProfileId: string | null = hrUserId || null;
+    
+    if (!createdByProfileId && userId) {
+      try {
+        // Try to get profile ID from users table's hr_user_id field
+        const userResult = await query(
+          `SELECT hr_user_id FROM users WHERE id = $1 LIMIT 1`,
+          [userId]
+        );
+        if (userResult.rows[0]?.hr_user_id) {
+          createdByProfileId = userResult.rows[0].hr_user_id;
+        } else {
+          // Try to find profile by email
+          const email = (req as any).userEmail as string;
+          if (email) {
+            const profileResult = await query(
+              `SELECT id FROM profiles WHERE email = $1 LIMIT 1`,
+              [email]
+            );
+            if (profileResult.rows[0]?.id) {
+              createdByProfileId = profileResult.rows[0].id;
+            }
+          }
+        }
+      } catch (fetchError: any) {
+        console.warn('[CREATE ADVANCE SALARY] Could not fetch profile ID:', fetchError.message);
+        // created_by can be null, so we'll continue
+        createdByProfileId = null;
+      }
+    }
+    
+    if (!createdByProfileId) {
+      console.warn('[CREATE ADVANCE SALARY] No profile ID found for user:', userId, '- setting created_by to null');
+    }
 
     // Validation
     if (!employee_id || !amount_mode || value === undefined || !tenure_months || !start_month || !disbursement_date) {
@@ -5717,10 +5823,10 @@ appRouter.post("/advance-salary", requireAuth, async (req, res) => {
       totalAmount = netSalary * numMonths;
     }
 
-    // Calculate monthly EMI (0% interest)
-    const monthlyEmi = totalAmount / tenure_months;
+    // Calculate monthly EMI (0% interest) - round to 2 decimal places
+    const monthlyEmi = Math.round((totalAmount / tenure_months) * 100) / 100;
 
-    // Parse dates
+    // Parse dates - ensure they're valid Date objects
     const startMonthDate = new Date(start_month);
     const disbursementDate = new Date(disbursement_date);
 
@@ -5728,14 +5834,35 @@ appRouter.post("/advance-salary", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Invalid date format for start_month or disbursement_date" });
     }
 
+    // Format dates as YYYY-MM-DD for PostgreSQL DATE type
+    const formatDateForDB = (date: Date): string => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Round totalAmount to 2 decimal places
+    const roundedTotalAmount = Math.round(totalAmount * 100) / 100;
+
     // Insert advance
     const result = await query(
       `INSERT INTO salary_advances (
         employee_id, tenant_id, total_amount, tenure_months, monthly_emi,
         start_month, disbursement_date, notes, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ) VALUES ($1, $2, $3, $4, $5, $6::date, $7::date, $8, $9)
       RETURNING *`,
-      [employee_id, tenantId, totalAmount, tenure_months, monthlyEmi, startMonthDate, disbursementDate, notes || null, userId]
+      [
+        employee_id, 
+        tenantId, 
+        roundedTotalAmount, 
+        tenure_months, 
+        monthlyEmi, 
+        formatDateForDB(startMonthDate), 
+        formatDateForDB(disbursementDate), 
+        notes || null, 
+        createdByProfileId
+      ]
     );
 
     res.status(201).json({

@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, Users, IndianRupee, FileText, LogOut, PlusCircle, Calendar, CheckCircle2, Clock, Key, Receipt, Wallet } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Building2, Users, IndianRupee, FileText, LogOut, PlusCircle, Calendar, CheckCircle2, Clock, Key, Receipt, Wallet, Bell } from "lucide-react";
 import { toast } from "sonner";
 
 // Define a type for the profile state
@@ -53,6 +54,7 @@ const Dashboard = () => {
   });
   const [recentCycles, setRecentCycles] = useState<any[]>([]);
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const [pendingReimbursementCount, setPendingReimbursementCount] = useState<number>(0);
 
   useEffect(() => {
     // Use API call to check authentication instead of reading cookies
@@ -82,11 +84,16 @@ const Dashboard = () => {
           
           // Load dashboard data (tenant, stats, cycles) - profile already fetched above
           try {
-            const [tenantRes, statsRes, cyclesRes] = await Promise.all([
+            const [tenantRes, statsRes, cyclesRes, reimbursementCountRes] = await Promise.all([
               api.dashboard.tenant(),
               api.dashboard.stats(),
               api.dashboard.cycles(),
+              api.reimbursements.pendingCount().catch(() => ({ count: 0 })),
             ]);
+            
+            if (reimbursementCountRes?.count !== undefined) {
+              setPendingReimbursementCount(reimbursementCountRes.count);
+            }
 
             // Use tenant data from backend (which should have HR data if backend fetched it)
             // Backend handles HR API calls to avoid CORS issues
@@ -603,9 +610,17 @@ const Dashboard = () => {
             onClick={() => navigate("/approve-reimbursements")}
           >
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <Receipt className="mr-2 h-5 w-5 text-purple-500" />
-                Reimbursements
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Receipt className="mr-2 h-5 w-5 text-purple-500" />
+                  Reimbursements
+                </div>
+                {pendingReimbursementCount > 0 && (
+                  <Badge variant="destructive" className="flex items-center gap-1">
+                    <Bell className="h-3 w-3" />
+                    {pendingReimbursementCount}
+                  </Badge>
+                )}
               </CardTitle>
               <CardDescription>Review and approve expense claims</CardDescription>
             </CardHeader>
@@ -618,7 +633,9 @@ const Dashboard = () => {
                   navigate("/approve-reimbursements");
                 }}
               >
-                Pending Claims
+                {pendingReimbursementCount > 0
+                  ? `View ${pendingReimbursementCount} Pending Claim${pendingReimbursementCount > 1 ? "s" : ""}`
+                  : "Pending Claims"}
               </Button>
             </CardContent>
           </Card>
