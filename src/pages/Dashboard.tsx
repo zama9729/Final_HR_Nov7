@@ -470,53 +470,55 @@ export default function Dashboard() {
         return;
       }
 
-      // Get last 30 days of attendance data
+      // Get last 4 weeks of attendance data for this specific employee
       const today = startOfDay(new Date());
-      const thirtyDaysAgo = subDays(today, 30);
-      
-      // Fetch timesheet data for the last 30 days
-      const weekStart = format(thirtyDaysAgo, 'yyyy-MM-dd');
-      const weekEnd = format(today, 'yyyy-MM-dd');
-      
-      // Group by week for better visualization
       const trends: Array<{ date: string; hours: number }> = [];
-      const weeks: Record<string, number> = {};
       
-      // Fetch data week by week
+      // Fetch data week by week - this is employee-specific via getTimesheet()
       for (let i = 0; i < 4; i++) {
         const weekStartDate = subDays(today, (i + 1) * 7);
         const weekEndDate = subDays(today, i * 7);
         const weekKey = format(weekStartDate, 'MMM d');
         
         try {
+          // getTimesheet() automatically uses the logged-in employee's ID
           const timesheet = await api.getTimesheet(
             format(weekStartDate, 'yyyy-MM-dd'),
             format(weekEndDate, 'yyyy-MM-dd')
           );
           
           let totalHours = 0;
+          // Calculate total hours worked by this employee in this week
           if (timesheet.total_hours !== undefined && timesheet.total_hours !== null) {
             totalHours = parseFloat(timesheet.total_hours) || 0;
           } else if (timesheet.entries && Array.isArray(timesheet.entries)) {
+            // Sum hours from all entries (excluding holidays) for this employee
             totalHours = timesheet.entries
-              .filter((entry: any) => !entry.is_holiday)
+              .filter((entry: any) => !entry.is_holiday && entry.hours > 0)
               .reduce((total: number, entry: any) => {
                 return total + (parseFloat(entry.hours || 0));
               }, 0);
           }
           
-          weeks[weekKey] = Math.round(totalHours);
+          // Store weekly total hours for this employee
+          trends.push({
+            date: weekKey,
+            hours: Math.round(totalHours * 10) / 10, // Round to 1 decimal place
+          });
         } catch (error) {
           console.error(`Error fetching timesheet for week ${weekKey}:`, error);
-          weeks[weekKey] = 0;
+          // Add zero hours for weeks with errors
+          trends.push({
+            date: weekKey,
+            hours: 0,
+          });
         }
       }
       
-      // Convert to array format for chart (already sorted by week order)
-      const sortedWeeks = Object.entries(weeks)
-        .map(([date, hours]) => ({ date, hours }));
+      // Reverse to show chronological order (oldest to newest)
+      const sortedTrends = trends.reverse();
       
-      setAttendanceTrends(sortedWeeks);
+      setAttendanceTrends(sortedTrends);
     } catch (error) {
       console.error('Error fetching attendance trends:', error);
       setAttendanceTrends([]);
@@ -771,89 +773,84 @@ export default function Dashboard() {
         </div>
 
         {/* Projects, Announcements and Attendance Trends */}
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Projects + Announcements */}
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              {/* My Projects */}
-              <Card className="shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                    <Briefcase className="h-5 w-5 text-primary" />
-                    My Projects
-                  </CardTitle>
-                  <Link to="/projects" className="text-sm text-blue-600 hover:underline">
-                    View All
-                  </Link>
-                </CardHeader>
-                <CardContent>
-                  {stats.projects.length > 0 ? (
-                    <div className="space-y-3">
-                      {stats.projects.map((project) => (
-                        <div 
-                          key={project.id}
-                          className="p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-                          onClick={() => navigate(`/projects/${project.id}`)}
-                        >
-                          <p className="font-medium">{project.name}</p>
-                          <p className="text-sm text-muted-foreground">{project.category}</p>
-                        </div>
-                      ))}
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* My Projects */}
+          <Card className="shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Briefcase className="h-5 w-5 text-primary" />
+                My Projects
+              </CardTitle>
+              <Link to="/projects" className="text-sm text-blue-600 hover:underline">
+                View All
+              </Link>
+            </CardHeader>
+            <CardContent>
+              {stats.projects.length > 0 ? (
+                <div className="space-y-3">
+                  {stats.projects.map((project) => (
+                    <div 
+                      key={project.id}
+                      className="p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/projects/${project.id}`)}
+                    >
+                      <p className="font-medium">{project.name}</p>
+                      <p className="text-sm text-muted-foreground">{project.category}</p>
                     </div>
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <p className="text-sm">No projects assigned</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p className="text-sm">No projects assigned</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-              {/* Announcements */}
-              <Card className="shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                    <Megaphone className="h-5 w-5 text-amber-600" />
-                    Announcements
-                  </CardTitle>
-                  {(userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') && (
-                    <Link to="/announcements" className="text-sm text-blue-600 hover:underline">
-                      View All
-                    </Link>
-                  )}
-                </CardHeader>
-                <CardContent>
-                  {stats.announcements.length === 0 ? (
-                    <div className="text-center py-6 text-muted-foreground text-sm">
-                      No announcements yet.
+          {/* Announcements */}
+          <Card className="shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-amber-600" />
+                Announcements
+              </CardTitle>
+              {(userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') && (
+                <Link to="/announcements" className="text-sm text-blue-600 hover:underline">
+                  View All
+                </Link>
+              )}
+            </CardHeader>
+            <CardContent>
+              {stats.announcements.length === 0 ? (
+                <div className="text-center py-6 text-muted-foreground text-sm">
+                  No announcements yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {stats.announcements.map((a) => (
+                    <div
+                      key={a.id}
+                      className={`p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
+                        a.priority === 'urgent' ? 'border-red-300 bg-red-50/70' : 'border-border'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium text-sm line-clamp-1">{a.title}</p>
+                        {a.priority === 'urgent' && (
+                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                            Urgent
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                        {a.body}
+                      </p>
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {stats.announcements.map((a) => (
-                        <div
-                          key={a.id}
-                          className={`p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
-                            a.priority === 'urgent' ? 'border-red-300 bg-red-50/70' : 'border-border'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="font-medium text-sm line-clamp-1">{a.title}</p>
-                            {a.priority === 'urgent' && (
-                              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                                Urgent
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                            {a.body}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Attendance Trends */}
           <Card className="shadow-sm">
@@ -880,10 +877,15 @@ export default function Dashboard() {
                   <LineChart data={attendanceTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
                     <XAxis 
-                      hide={true}
+                      dataKey="date"
+                      tick={{ fontSize: 10 }}
+                      angle={-45}
+                      textAnchor="end"
+                      height={60}
                     />
                     <YAxis 
-                      hide={true}
+                      tick={{ fontSize: 10 }}
+                      label={{ value: 'Hours', angle: -90, position: 'insideLeft' }}
                     />
                     <Tooltip 
                       contentStyle={{ 
@@ -892,17 +894,17 @@ export default function Dashboard() {
                         borderRadius: '6px',
                         fontSize: '12px'
                       }}
-                      formatter={(value: any) => [`${value} hours`, 'Hours']}
-                      labelFormatter={() => ''}
+                      formatter={(value: any) => [`${value} hrs`, 'Average']}
+                      labelFormatter={(label) => `Week: ${label}`}
                     />
                     <Line 
                       type="monotone" 
                       dataKey="hours" 
                       stroke="#3b82f6" 
                       strokeWidth={3}
-                      dot={false}
+                      dot={{ r: 4 }}
                       activeDot={{ r: 6, fill: "#3b82f6" }}
-                      name="Hours"
+                      name="Average Hours"
                     />
                   </LineChart>
                 </ResponsiveContainer>

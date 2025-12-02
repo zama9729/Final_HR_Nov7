@@ -489,6 +489,98 @@ router.post('/:candidateId/background-check/documents/:docId/hold',
 );
 
 /**
+ * POST /api/onboarding/:candidateId/background-check/documents/:docId/unhold
+ * Clear HOLD and move document back to pending
+ */
+router.post('/:candidateId/background-check/documents/:docId/unhold',
+  authenticateToken,
+  ensureHrAccess,
+  async (req, res) => {
+    try {
+      const { candidateId, docId } = req.params;
+      const { comment } = req.body || {};
+
+      const tenantId = await getTenantIdForUser(req.user.id);
+      if (!tenantId) {
+        return res.status(403).json({ error: 'No organization found' });
+      }
+
+      // Verify document
+      const docResult = await query(
+        `SELECT d.*, COALESCE(d.tenant_id, e.tenant_id) as tenant_id
+         FROM onboarding_documents d
+         LEFT JOIN employees e ON e.id = d.employee_id
+         WHERE d.id = $1 AND (d.employee_id = $2 OR d.candidate_id = $2)`,
+        [docId, candidateId]
+      );
+
+      if (docResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Document not found' });
+      }
+
+      const document = docResult.rows[0];
+      if (document.tenant_id !== tenantId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      // Get background check
+      const bgCheckResult = await query(
+        'SELECT id FROM background_checks WHERE employee_id = $1',
+        [candidateId]
+      );
+
+      if (bgCheckResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Background check not found' });
+      }
+
+      const bgCheckId = bgCheckResult.rows[0].id;
+
+      // Reset document verification status back to PENDING
+      await query(
+        `UPDATE background_check_documents
+         SET verification_status = 'PENDING',
+             hr_comment = COALESCE($1, hr_comment),
+             verified_by = NULL,
+             verified_at = NULL
+         WHERE background_check_id = $2 AND document_id = $3`,
+        [comment || null, bgCheckId, docId]
+      );
+
+      // If background check was on_hold, move it back to in_progress
+      await query(
+        `UPDATE background_checks
+         SET status = 'in_progress',
+             updated_at = now()
+         WHERE id = $1 AND status = 'on_hold'`,
+        [bgCheckId]
+      );
+
+      // Reset onboarding document status back to 'uploaded' (pending review)
+      await query(
+        `UPDATE onboarding_documents
+         SET status = 'uploaded',
+             hr_notes = COALESCE($1, hr_notes)
+         WHERE id = $2`,
+        [comment || null, docId]
+      );
+
+      await audit({
+        actorId: req.user.id,
+        action: 'background_check_document_unhold',
+        entityType: 'onboarding_document',
+        entityId: docId,
+        details: { candidate_id: candidateId, comment },
+      }).catch(() => {});
+
+      res.json({ success: true, message: 'Document moved back to pending' });
+    } catch (error) {
+      console.error('Error unholding document:', error);
+      res.status(500).json({ error: error.message || 'Failed to unhold document' });
+    }
+  }
+);
+
+/**
  * POST /api/onboarding/:candidateId/background-check/complete
  * Mark background check as complete (for prior background check scenario)
  */

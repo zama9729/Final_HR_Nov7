@@ -5,6 +5,8 @@ import crypto from 'crypto';
 import { query, queryWithOrg } from '../db/pool.js';
 import { rebuildSegmentsForEmployee } from '../services/assignment-segmentation.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { createJoiningEvent, createHikeEvent } from '../utils/employee-events.js';
+import { audit } from '../utils/auditLog.js';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import { sendInviteEmail } from '../services/email.js';
@@ -745,6 +747,16 @@ router.post('/', authenticateToken, async (req, res) => {
       );
       const createdEmployee = empResult.rows[0];
 
+      // Create JOINING event
+      try {
+        if (createdEmployee.join_date) {
+          await createJoiningEvent(tenantId, createdEmployee.id, createdEmployee.join_date);
+        }
+      } catch (eventError) {
+        console.error('Error creating joining event:', eventError);
+        // Don't fail employee creation if event creation fails
+      }
+
       if (homeBranchId || homeDepartmentId || homeTeamId) {
         await queryWithOrg(
           `INSERT INTO employee_assignments (
@@ -932,7 +944,8 @@ router.patch('/:id', authenticateToken, async (req, res) => {
       workLocation,
       joinDate,
       reportingManagerId,
-      status
+      status,
+      ctc
     } = req.body;
 
     await query('BEGIN');
@@ -1008,19 +1021,91 @@ router.patch('/:id', authenticateToken, async (req, res) => {
           employeeUpdates.push(`status = $${paramIndex++}`);
           employeeParams.push(status);
         }
+        if (ctc !== undefined) {
+          employeeUpdates.push(`ctc = $${paramIndex++}`);
+          employeeParams.push(ctc);
+        }
 
         if (employeeUpdates.length > 0) {
           employeeUpdates.push(`updated_at = now()`);
           employeeParams.push(id);
           
+          // Get old values for audit diff
+          const oldEmpResult = await query(
+            'SELECT position, department, ctc, status, reporting_manager_id FROM employees WHERE id = $1',
+            [id]
+          );
+          const oldValues = oldEmpResult.rows[0] || {};
+          
           await query(
             `UPDATE employees SET ${employeeUpdates.join(', ')} WHERE id = $${paramIndex}`,
             employeeParams
           );
+          
+          // Get new values for audit diff
+          const newEmpResult = await query(
+            'SELECT position, department, ctc, status, reporting_manager_id FROM employees WHERE id = $1',
+            [id]
+          );
+          const newValues = newEmpResult.rows[0] || {};
+          
+          // Create audit log for employee update
+          const diff = {};
+          if (position !== undefined && oldValues.position !== newValues.position) {
+            diff.position = { old: oldValues.position, new: newValues.position };
+          }
+          if (department !== undefined && oldValues.department !== newValues.department) {
+            diff.department = { old: oldValues.department, new: newValues.department };
+          }
+          if (ctc !== undefined && oldValues.ctc !== newValues.ctc) {
+            diff.ctc = { old: oldValues.ctc, new: newValues.ctc };
+          }
+          if (status !== undefined && oldValues.status !== newValues.status) {
+            diff.status = { old: oldValues.status, new: newValues.status };
+          }
+          if (reportingManagerId !== undefined && oldValues.reporting_manager_id !== newValues.reporting_manager_id) {
+            diff.reporting_manager_id = { old: oldValues.reporting_manager_id, new: newValues.reporting_manager_id };
+          }
+          
+          if (Object.keys(diff).length > 0) {
+            try {
+              await audit({
+                actorId: req.user.id,
+                action: 'employee_update',
+                entityType: 'employee',
+                entityId: id,
+                diff: diff,
+                details: {
+                  updatedFields: Object.keys(diff),
+                  employeeId: employeeId || id,
+                },
+                scope: 'org',
+              });
+            } catch (auditError) {
+              console.error('Error creating audit log:', auditError);
+              // Don't fail the update if audit logging fails
+            }
+          }
         }
       }
 
       await query('COMMIT');
+
+      // Create HIKE event if CTC was updated and increased
+      if (ctc !== undefined && oldCTC !== null && ctc > oldCTC) {
+        try {
+          await createHikeEvent(tenantId, id, {
+            oldCTC: oldCTC,
+            newCTC: ctc,
+            effectiveDate: new Date().toISOString().split('T')[0],
+            sourceTable: 'employees',
+            sourceId: id,
+          });
+        } catch (eventError) {
+          console.error('Error creating hike event:', eventError);
+          // Don't fail employee update if event creation fails
+        }
+      }
 
       // Check for auto-promotion if reporting_manager_id was updated
       if (reportingManagerId !== undefined) {

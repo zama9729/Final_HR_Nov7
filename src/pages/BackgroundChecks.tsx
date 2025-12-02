@@ -106,7 +106,7 @@ export default function BackgroundChecks() {
   const [reportLoading, setReportLoading] = useState(false);
   const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false);
   const [selectedAttachment, setSelectedAttachment] = useState<BackgroundCheckAttachment | null>(null);
-  const [attachmentAction, setAttachmentAction] = useState<"approve" | "hold" | null>(null);
+  const [attachmentAction, setAttachmentAction] = useState<"approve" | "hold" | "unhold" | null>(null);
   const [attachmentComment, setAttachmentComment] = useState("");
   const [attachmentProcessing, setAttachmentProcessing] = useState(false);
   const [onboardingCounts, setOnboardingCounts] = useState({ total: 0, notStarted: 0, inProgress: 0, completed: 0 });
@@ -328,7 +328,7 @@ export default function BackgroundChecks() {
     }
   };
 
-  const handleAttachmentAction = (attachment: BackgroundCheckAttachment, action: "approve" | "hold") => {
+  const handleAttachmentAction = (attachment: BackgroundCheckAttachment, action: "approve" | "hold" | "unhold") => {
     setSelectedAttachment(attachment);
     setAttachmentAction(action);
     setAttachmentComment(action === "hold" ? "" : attachment.notes || "");
@@ -353,7 +353,11 @@ export default function BackgroundChecks() {
       setAttachmentProcessing(true);
       const endpoint =
         `/api/onboarding/${report.employee_id}/background-check/documents/${selectedAttachment.id}/` +
-        (attachmentAction === "approve" ? "approve" : "hold");
+        (attachmentAction === "approve"
+          ? "approve"
+          : attachmentAction === "unhold"
+          ? "unhold"
+          : "hold");
 
       await api.customRequest(endpoint, {
         method: "POST",
@@ -362,7 +366,12 @@ export default function BackgroundChecks() {
 
       toast({
         title: "Updated",
-        description: `Document ${attachmentAction === "approve" ? "approved" : "placed on hold"}.`,
+        description:
+          attachmentAction === "approve"
+            ? "Document approved."
+            : attachmentAction === "hold"
+            ? "Document placed on hold."
+            : "Document moved back to pending.",
       });
 
       setAttachmentDialogOpen(false);
@@ -680,7 +689,7 @@ export default function BackgroundChecks() {
           if (!open) closeReport();
         }}
       >
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-hidden">
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Background Check Report</DialogTitle>
             <DialogDescription>Timeline of actions and every document submitted for this check.</DialogDescription>
@@ -688,7 +697,7 @@ export default function BackgroundChecks() {
           {reportLoading ? (
             <div className="py-10 text-center text-muted-foreground">Loading report…</div>
           ) : report ? (
-            <div className="grid gap-6 md:grid-cols-[1fr,1.3fr]">
+            <div className="grid gap-6 md:grid-cols-[1fr,1.3fr] max-h-[75vh] overflow-y-auto pr-1">
               <div className="space-y-4">
                 <div className="rounded border bg-muted/30 p-3 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -754,7 +763,7 @@ export default function BackgroundChecks() {
                     <div className="space-y-3">
                       {report.attachments.map((doc, index) => {
                         const decision = (doc.decision || doc.status || "pending").toUpperCase();
-                        const canAct = report.employee_id && (decision === "PENDING" || decision === "HOLD");
+                        const canAct = !!report.employee_id && (decision === "PENDING" || decision === "HOLD");
 
                         return (
                           <div key={doc.id} className="rounded-lg border bg-muted/20 p-3 space-y-2">
@@ -787,6 +796,15 @@ export default function BackgroundChecks() {
                             )}
                             {canAct && (
                               <div className="flex flex-wrap gap-2">
+                                {decision === "HOLD" && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleAttachmentAction(doc, "unhold")}
+                                  >
+                                    Unhold
+                                  </Button>
+                                )}
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -794,13 +812,15 @@ export default function BackgroundChecks() {
                                 >
                                   Approve
                                 </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleAttachmentAction(doc, "hold")}
-                                >
-                                  Hold
-                                </Button>
+                                {decision === "PENDING" && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleAttachmentAction(doc, "hold")}
+                                  >
+                                    Hold
+                                  </Button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -840,11 +860,17 @@ export default function BackgroundChecks() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {attachmentAction === "approve" ? "Approve document" : "Put document on hold"}
+              {attachmentAction === "approve"
+                ? "Approve document"
+                : attachmentAction === "unhold"
+                ? "Move document back to pending"
+                : "Put document on hold"}
             </DialogTitle>
             <DialogDescription>
               {attachmentAction === "approve"
                 ? "Confirm this document looks good. You can leave an optional note."
+                : attachmentAction === "unhold"
+                ? "Move this document from On Hold back to Pending so it can be reviewed again."
                 : "Share why this document needs clarification. The candidate will be notified."}
             </DialogDescription>
           </DialogHeader>
@@ -872,7 +898,11 @@ export default function BackgroundChecks() {
             </Button>
             <Button onClick={submitAttachmentAction} disabled={attachmentProcessing}>
               {attachmentProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-              {attachmentAction === "approve" ? "Approve" : "Hold"}
+              {attachmentAction === "approve"
+                ? "Approve"
+                : attachmentAction === "unhold"
+                ? "Unhold"
+                : "Hold"}
             </Button>
           </DialogFooter>
         </DialogContent>

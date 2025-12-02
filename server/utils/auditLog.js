@@ -172,37 +172,37 @@ export async function getAuditLogs(filters = {}) {
     let paramIndex = 1;
 
     if (tenantId) {
-      conditions.push(`tenant_id = $${paramIndex++}`);
+      conditions.push(`al.tenant_id = $${paramIndex++}`);
       params.push(tenantId);
     }
 
     if (actorId) {
-      conditions.push(`actor_id = $${paramIndex++}`);
+      conditions.push(`al.actor_id = $${paramIndex++}`);
       params.push(actorId);
     }
 
     if (entityType) {
-      conditions.push(`entity_type = $${paramIndex++}`);
+      conditions.push(`al.entity_type = $${paramIndex++}`);
       params.push(entityType);
     }
 
     if (entityId) {
-      conditions.push(`entity_id = $${paramIndex++}`);
+      conditions.push(`al.entity_id = $${paramIndex++}`);
       params.push(entityId);
     }
 
     if (action) {
-      conditions.push(`action = $${paramIndex++}`);
+      conditions.push(`al.action = $${paramIndex++}`);
       params.push(action);
     }
 
     if (from) {
-      conditions.push(`created_at >= $${paramIndex++}`);
+      conditions.push(`al.created_at >= $${paramIndex++}`);
       params.push(from);
     }
 
     if (to) {
-      conditions.push(`created_at <= $${paramIndex++}`);
+      conditions.push(`al.created_at <= $${paramIndex++}`);
       params.push(to);
     }
 

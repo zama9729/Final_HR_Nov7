@@ -23,6 +23,9 @@ import {
   Upload,
   ChevronDown,
   Briefcase,
+  GitBranch,
+  ArrowUpCircle,
+  ShieldAlert,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -126,6 +129,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
         { title: "Background Checks", url: "/background-checks", icon: UserCheck },
+        { title: "Workflows", url: "/workflows", icon: GitBranch, roles: ["admin", "hr", "ceo"] },
+        { title: "Audit Logs", url: "/audit-logs", icon: ShieldAlert, roles: ["admin", "hr", "ceo"] },
       ],
     },
     {
@@ -182,6 +187,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
         { title: "Background Checks", url: "/background-checks", icon: UserCheck },
+        { title: "Workflows", url: "/workflows", icon: GitBranch, roles: ["admin", "hr", "ceo"] },
+        { title: "Audit Logs", url: "/audit-logs", icon: ShieldAlert, roles: ["admin", "hr", "ceo"] },
       ],
     },
     {
@@ -195,6 +202,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
         { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
         { title: "Leave Policies", url: "/policies", icon: FileText },
+        { title: "Probation Policies", url: "/probation-policies", icon: UserCheck, roles: ["admin", "hr", "ceo"] },
       ],
     },
     {
@@ -239,6 +247,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
+        { title: "Workflows", url: "/workflows", icon: GitBranch, roles: ["admin", "hr", "ceo"] },
+        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle, roles: ["admin", "hr", "ceo", "director", "manager"] },
       ],
     },
     {
@@ -252,6 +262,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
         { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
         { title: "Leave Policies", url: "/policies", icon: FileText },
+        { title: "Probation Policies", url: "/probation-policies", icon: UserCheck, roles: ["admin", "hr", "ceo"] },
       ],
     },
     {
@@ -290,6 +301,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "My Profile", url: "/my/profile", icon: Users },
         { title: "Employees", url: "/employees", icon: Users },
         { title: "Org Chart", url: "/org-chart", icon: Network },
+        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle, roles: ["admin", "hr", "ceo", "director", "manager"] },
       ],
     },
     {

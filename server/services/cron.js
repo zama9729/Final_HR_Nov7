@@ -306,6 +306,47 @@ export async function scheduleProbationJobs() {
         }
       }
 
+      // Notify HR when probation ends (today or yesterday)
+      const endedProbations = await query(
+        `
+        SELECT p.*, e.employee_id, e.tenant_id,
+               json_build_object(
+                 'first_name', prof.first_name,
+                 'last_name', prof.last_name
+               ) as employee_profile
+        FROM probations p
+        JOIN employees e ON e.id = p.employee_id
+        JOIN profiles prof ON prof.id = e.user_id
+        WHERE p.status = ANY($1::text[])
+          AND p.probation_end::date >= CURRENT_DATE - INTERVAL '1 day'
+          AND p.probation_end::date <= CURRENT_DATE
+        `,
+        [['in_probation', 'extended']]
+      );
+
+      for (const probation of endedProbations.rows) {
+        // Get HR users for this tenant
+        const hrUsers = await query(
+          `SELECT DISTINCT p.id as user_id
+           FROM profiles p
+           JOIN user_roles ur ON ur.user_id = p.id
+           WHERE p.tenant_id = $1
+             AND ur.role IN ('hr', 'ceo', 'admin', 'director')`,
+          [probation.tenant_id]
+        );
+
+        const employeeName = `${probation.employee_profile?.first_name || ''} ${probation.employee_profile?.last_name || ''}`.trim() || probation.employee_id;
+
+        for (const hr of hrUsers.rows) {
+          await notifyUser(
+            probation.tenant_id,
+            hr.user_id,
+            'Probation Period Ended - Action Required',
+            `Probation period for ${employeeName} (${probation.employee_id}) ended on ${probation.probation_end}. ${probation.auto_confirm_at_end ? 'Auto-confirmed.' : 'Please review and confirm full-time employment.'}`
+          );
+        }
+      }
+
       const autoConfirm = await query(
         `
         SELECT * FROM probations

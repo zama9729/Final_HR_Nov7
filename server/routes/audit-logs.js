@@ -4,7 +4,7 @@ import { getAuditLogs } from '../utils/auditLog.js';
 
 const router = express.Router();
 
-router.get('/', requireRole('ceo', 'hr'), async (req, res) => {
+router.get('/', requireRole('ceo', 'hr', 'admin'), async (req, res) => {
   try {
     const tenantId = req.orgId || req.user?.org_id;
     if (!tenantId) {

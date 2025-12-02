@@ -2,6 +2,7 @@ import express from 'express';
 import { query, queryWithOrg } from '../db/pool.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
+import { createProjectAssignmentEvent, createProjectEndEvent } from '../utils/employee-events.js';
 
 const router = express.Router();
 
@@ -611,6 +612,15 @@ router.post('/:id/allocations', authenticateToken, setTenantContext, requireRole
       orgId
     );
     
+    // Create PROJECT_ASSIGNMENT event
+    try {
+      const project = projectRes.rows[0];
+      await createProjectAssignmentEvent(orgId, employee_id, result.rows[0], project);
+    } catch (eventError) {
+      console.error('Error creating project assignment event:', eventError);
+      // Don't fail allocation creation if event creation fails
+    }
+    
     // The trigger will automatically create PROJECT_MANAGER reporting line
     
     res.status(201).json(result.rows[0]);
@@ -696,14 +706,33 @@ router.patch('/:id/allocations/:allocId', authenticateToken, setTenantContext, r
     updates.push(`updated_at = now()`);
     params.push(allocId, id, orgId);
     
+    const oldAllocation = allocResult.rows[0];
+    
     const result = await queryWithOrg(
-      `UPDATE project_allocations
+      `UPDATE project_allocations 
        SET ${updates.join(', ')}
        WHERE id = $${paramIndex++} AND project_id = $${paramIndex++} AND org_id = $${paramIndex++}
        RETURNING *`,
       params,
       orgId
     );
+    
+    // If end_date was set and allocation is ending, create PROJECT_END event
+    if (end_date !== undefined && end_date && !oldAllocation.end_date) {
+      try {
+        const projectRes = await queryWithOrg(
+          'SELECT * FROM projects WHERE id = $1 AND org_id = $2',
+          [id, orgId],
+          orgId
+        );
+        if (projectRes.rows.length > 0) {
+          await createProjectEndEvent(orgId, oldAllocation.employee_id, result.rows[0], projectRes.rows[0]);
+        }
+      } catch (eventError) {
+        console.error('Error creating project end event:', eventError);
+        // Don't fail update if event creation fails
+      }
+    }
     
     res.json(result.rows[0]);
   } catch (error) {

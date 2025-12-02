@@ -309,6 +309,7 @@ export function OnboardingDocsUploader({
               )}
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => document.getElementById(`file-${doc.type}`)?.click()}
@@ -355,12 +356,13 @@ export function OnboardingDocsUploader({
               <p className="font-medium">Uploads in progress</p>
               <p className="text-xs text-muted-foreground">Please stay on this page until uploads finish.</p>
             </div>
-            {inProgressUploads.map((upload) => (
+                {inProgressUploads.map((upload) => (
               <div key={upload.id} className="border rounded-lg p-3 space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span>{upload.file.name}</span>
                   {upload.status === "error" ? (
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
                       onClick={() => startUpload(upload.type, upload.file)}

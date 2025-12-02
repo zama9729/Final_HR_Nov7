@@ -62,13 +62,16 @@ import auditLogsRoutes from './routes/audit-logs.js';
 import schedulingRoutes from './routes/scheduling.js';
 import rosterRoutes from './routes/roster.js';
 import probationRoutes from './routes/probation.js';
+import probationPoliciesRoutes from './routes/probation-policies.js';
 import documentUploadRoutes from './routes/document-upload.js';
 import backgroundCheckRoutes from './routes/background-check.js';
+import employeeHistoryRoutes from './routes/employee-history.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders } from './services/cron.js';
 import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
 import { scheduleAutoLogout } from './services/attendance-auto-logout.js';
+import { schedulePromotionApplication } from './services/promotion-cron.js';
 import { createAttendanceTables } from './utils/createAttendanceTables.js';
 import { createSchedulingTables } from './utils/createSchedulingTables.js';
 import { ensureAdminRole } from './utils/runMigration.js';
@@ -190,6 +193,7 @@ app.use('/api/offboarding', authenticateToken, offboardingRoutes);
 app.use('/api/rehire', authenticateToken, rehireRoutes);
 app.use('/api/audit-logs', authenticateToken, setTenantContext, auditLogsRoutes);
 app.use('/api/probation', authenticateToken, probationRoutes);
+app.use('/api/probation-policies', authenticateToken, setTenantContext, probationPoliciesRoutes);
 app.use('/api/setup', setupRoutes);
 app.use('/api/branches', branchesRoutes);
 app.use('/api/super', superRoutes);
@@ -201,6 +205,7 @@ app.use('/api/policy-management', authenticateToken, setTenantContext, policyMan
 app.use('/api/unified-policies', unifiedPoliciesRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/promotion', authenticateToken, setTenantContext, promotionsRoutes);
+app.use('/api', authenticateToken, setTenantContext, employeeHistoryRoutes);
 // Payroll SSO integration (separate from payroll routes)
 app.use('/api/payroll/sso', payrollSsoRoutes);
 app.use('/api/tax/declarations', taxDeclarationsRoutes);
@@ -499,6 +504,7 @@ createPool().then(async () => {
   await scheduleAutoLogout();
   await scheduleProbationJobs();
   await scheduleTimesheetReminders();
+  schedulePromotionApplication();
   console.log('✅ Cron jobs scheduled');
 
   // SSL/HTTPS Configuration

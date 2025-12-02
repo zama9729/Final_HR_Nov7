@@ -37,6 +37,9 @@ import HrProfileRequests from "./pages/HrProfileRequests";
 import NotFound from "./pages/NotFound";
 import AddEmployee from "./pages/AddEmployee";
 import LeavePolicies from "./pages/LeavePolicies";
+import ProbationPolicies from "./pages/ProbationPolicies";
+import Promotions from "./pages/Promotions";
+import PromotionForm from "./pages/PromotionForm";
 import LeaveRequests from "./pages/LeaveRequests";
 import Onboarding from "./pages/Onboarding";
 import OnboardingNextStep from "./pages/OnboardingNextStep";
@@ -115,10 +118,14 @@ const App = () => (
             <Route path="/workflows/new" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><WorkflowEditor /></ProtectedRoute>} />
             <Route path="/workflows/:id/edit" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><WorkflowEditor /></ProtectedRoute>} />
             <Route path="/policies" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><LeavePolicies /></ProtectedRoute>} />
+            <Route path="/probation-policies" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><ProbationPolicies /></ProtectedRoute>} />
+            <Route path="/promotions" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'director', 'manager']}><Promotions /></ProtectedRoute>} />
+            <Route path="/promotions/new" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'director', 'manager']}><PromotionForm /></ProtectedRoute>} />
+            <Route path="/promotions/:id/edit" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'director', 'manager']}><PromotionForm /></ProtectedRoute>} />
             <Route path="/holidays" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><HolidayManagement /></ProtectedRoute>} />
             <Route path="/analytics" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'manager']}><Analytics /></ProtectedRoute>} />
             <Route path="/employee-stats" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'manager']}><EmployeeStats /></ProtectedRoute>} />
-            <Route path="/audit-logs" element={<ProtectedRoute allowedRoles={['ceo', 'hr']}><AuditLogs /></ProtectedRoute>} />
+            <Route path="/audit-logs" element={<ProtectedRoute allowedRoles={['ceo', 'hr', 'admin']}><AuditLogs /></ProtectedRoute>} />
             <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin','manager']}><CEODashboard /></ProtectedRoute>} />
             <Route path="/projects/new" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectNew /></ProtectedRoute>} />
             <Route path="/projects/:id/suggestions" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectSuggestions /></ProtectedRoute>} />

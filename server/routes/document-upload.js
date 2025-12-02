@@ -278,12 +278,17 @@ router.post('/complete', authenticateToken, async (req, res) => {
     // Audit log
     if (documentId) {
       await audit({
-        tenantId,
-        userId,
+        actorId: userId,
         action: 'document_uploaded',
-        resourceType: 'document',
-        resourceId: documentId,
-        metadata: { filename, size, objectKey: key },
+        entityType: 'document',
+        entityId: documentId,
+        details: {
+          tenantId,
+          filename,
+          size,
+          objectKey: key,
+          docType: docType ? docType.toUpperCase() : null,
+        },
       });
     }
 

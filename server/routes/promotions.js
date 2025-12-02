@@ -1,389 +1,566 @@
 import express from 'express';
 import { query, queryWithOrg } from '../db/pool.js';
-import { audit } from '../utils/auditLog.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
+import { audit } from '../utils/auditLog.js';
+
+// Helper to send notification to employee
+async function notifyEmployee(tenantId, employeeId, title, message, type = 'promotion') {
+  try {
+    const empResult = await query(
+      'SELECT user_id FROM employees WHERE id = $1',
+      [employeeId]
+    );
+    if (empResult.rows.length === 0) return;
+    
+    const userId = empResult.rows[0].user_id;
+    await query(
+      `INSERT INTO notifications (tenant_id, user_id, title, message, type, created_at)
+       VALUES ($1, $2, $3, $4, $5, now())`,
+      [tenantId, userId, title, message, type]
+    );
+  } catch (error) {
+    console.error('Failed to send promotion notification:', error);
+    // Don't fail the request if notification fails
+  }
+}
 
 const router = express.Router();
 
-// Promote all existing employees with 2+ direct reports (one-time fix)
-router.post('/promote-existing-managers', authenticateToken, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
-  try {
-    // Run the promotion function
-    const result = await query('SELECT promote_existing_managers() as promoted_count');
-    const promotedCount = result.rows[0]?.promoted_count || 0;
-    
-    res.json({ 
-      success: true, 
-      promoted_count: promotedCount,
-      message: `Promoted ${promotedCount} employees to manager role based on direct reports`
-    });
-  } catch (error) {
-    console.error('Error promoting existing managers:', error);
-    res.status(500).json({ error: error.message || 'Failed to promote existing managers' });
-  }
-});
+// Helper to get tenant ID
+async function getTenantId(userId) {
+  const result = await query(
+    'SELECT tenant_id FROM profiles WHERE id = $1',
+    [userId]
+  );
+  return result.rows[0]?.tenant_id || null;
+}
 
-// Get employees eligible for promotion (for admin view)
-router.get('/eligible', authenticateToken, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
+// GET /api/promotions - List promotions (HR/Admin/Manager)
+router.get('/', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
-    // Get user's tenant_id
-    const tenantResult = await query(
-      'SELECT tenant_id FROM profiles WHERE id = $1',
-      [req.user.id]
-    );
-    const tenantId = tenantResult.rows[0]?.tenant_id;
-
+    const tenantId = await getTenantId(req.user.id);
     if (!tenantId) {
       return res.status(403).json({ error: 'No organization found' });
     }
 
-    // Find employees with 2+ direct reports who are not managers
-    const result = await query(
-      `SELECT 
-        e.id,
-        e.employee_id,
-        e.user_id,
-        COUNT(dr.id) as direct_reports_count,
+    const { status, employeeId, year } = req.query;
+    
+    let queryStr = `
+      SELECT 
+        p.*,
         json_build_object(
-          'first_name', p.first_name,
-          'last_name', p.last_name,
-          'email', p.email
-        ) as profiles
-      FROM employees e
-      JOIN profiles p ON p.id = e.user_id
-      LEFT JOIN employees dr ON dr.reporting_manager_id = e.id AND dr.status = 'active'
-      WHERE e.status = 'active' AND e.tenant_id = $1
-      GROUP BY e.id, e.employee_id, e.user_id, p.first_name, p.last_name, p.email
-      HAVING COUNT(dr.id) >= 2
-      AND NOT EXISTS (
-        SELECT 1 FROM user_roles
-        WHERE user_id = e.user_id
-        AND role IN ('manager', 'hr', 'director', 'ceo', 'admin')
-      )
-      ORDER BY direct_reports_count DESC`,
-      [tenantId]
-    );
-
-    res.json(result.rows);
+          'id', e.id,
+          'employee_id', e.employee_id,
+          'first_name', pr.first_name,
+          'last_name', pr.last_name,
+          'email', pr.email
+        ) as employee,
+        json_build_object(
+          'id', appr.id,
+          'cycle_name', ac.cycle_name,
+          'cycle_year', ac.cycle_year,
+          'rating', appr.rating
+        ) as appraisal,
+        json_build_object(
+          'id', rec.id,
+          'first_name', rec.first_name,
+          'last_name', rec.last_name
+        ) as recommended_by_profile,
+        json_build_object(
+          'id', app.id,
+          'first_name', app.first_name,
+          'last_name', app.last_name
+        ) as approved_by_profile
+      FROM promotions p
+      JOIN employees e ON e.id = p.employee_id
+      JOIN profiles pr ON pr.id = e.user_id
+      LEFT JOIN performance_reviews appr ON appr.id = p.appraisal_id
+      LEFT JOIN appraisal_cycles ac ON ac.id = appr.appraisal_cycle_id
+      LEFT JOIN profiles rec ON rec.id = p.recommendation_by_id
+      LEFT JOIN profiles app ON app.id = p.approved_by_id
+      WHERE p.org_id = $1
+    `;
+    
+    const params = [tenantId];
+    let paramIndex = 2;
+    
+    if (status) {
+      queryStr += ` AND p.status = $${paramIndex++}`;
+      params.push(status);
+    }
+    
+    if (employeeId) {
+      queryStr += ` AND p.employee_id = $${paramIndex++}`;
+      params.push(employeeId);
+    }
+    
+    if (year) {
+      queryStr += ` AND EXTRACT(YEAR FROM p.effective_date) = $${paramIndex++}`;
+      params.push(parseInt(year));
+    }
+    
+    queryStr += ` ORDER BY p.created_at DESC`;
+    
+    const result = await queryWithOrg(queryStr, params, tenantId);
+    res.json({ promotions: result.rows });
   } catch (error) {
-    console.error('Error fetching eligible employees:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch eligible employees' });
+    console.error('Error fetching promotions:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch promotions' });
   }
 });
 
-// Health endpoint - check active cycle and pending evaluations
-router.get('/health', authenticateToken, setTenantContext, async (req, res) => {
+// GET /api/promotions/:id - Get single promotion
+router.get('/:id', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
-    const orgId = req.orgId || req.user?.org_id;
-    if (!orgId) {
-      return res.status(400).json({ error: 'Organization not found' });
+    const tenantId = await getTenantId(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
     }
 
-    const now = new Date().toISOString().split('T')[0];
-
-    // Check for active cycle
-    const cycleResult = await queryWithOrg(
-      `SELECT COUNT(*) as count 
-       FROM promotion_cycles 
-       WHERE org_id = $1 
-         AND status IN ('OPEN', 'REVIEW', 'APPROVAL')
-         AND start_date <= $2::date 
-         AND end_date >= $2::date`,
-      [orgId, now],
-      orgId
-    );
-
-    const activeCycle = parseInt(cycleResult.rows[0]?.count || '0') > 0;
-
-    // Count pending evaluations
-    const pendingResult = await queryWithOrg(
-      `SELECT COUNT(*) as count
-       FROM promotion_evaluations pe
-       JOIN promotion_cycles pc ON pc.id = pe.cycle_id
-       WHERE pc.org_id = $1
-         AND pc.status IN ('OPEN', 'REVIEW', 'APPROVAL')`,
-      [orgId],
-      orgId
-    );
-
-    const pendingEvaluations = parseInt(pendingResult.rows[0]?.count || '0');
-
-    res.json({
-      activeCycle,
-      pendingEvaluations
-    });
-  } catch (error) {
-    console.error('Error checking promotion health:', error);
-    res.status(500).json({ error: error.message || 'Failed to check promotion health' });
-  }
-});
-
-// Create promotion cycle (HR/CEO/Admin)
-router.post('/cycles', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
-  try {
-    const orgId = req.orgId || req.user?.org_id;
-    if (!orgId) {
-      return res.status(400).json({ error: 'Organization not found' });
-    }
-
-    const { name, period, start_date, end_date, criteria } = req.body;
-
-    if (!name || !period || !start_date || !end_date) {
-      return res.status(400).json({ error: 'name, period, start_date, and end_date are required' });
-    }
-
+    const { id } = req.params;
+    
     const result = await queryWithOrg(
-      `INSERT INTO promotion_cycles (org_id, name, period, start_date, end_date, status, criteria)
-       VALUES ($1, $2, $3, $4, $5, 'DRAFT', $6)
-       RETURNING id, org_id, name, period, start_date, end_date, status, criteria, created_at`,
-      [orgId, name, period, start_date, end_date, JSON.stringify(criteria || {})],
-      orgId
+      `SELECT 
+        p.*,
+        json_build_object(
+          'id', e.id,
+          'employee_id', e.employee_id,
+          'first_name', pr.first_name,
+          'last_name', pr.last_name,
+          'email', pr.email
+        ) as employee,
+        json_build_object(
+          'id', appr.id,
+          'cycle_name', ac.cycle_name,
+          'cycle_year', ac.cycle_year,
+          'rating', appr.rating
+        ) as appraisal
+      FROM promotions p
+      JOIN employees e ON e.id = p.employee_id
+      JOIN profiles pr ON pr.id = e.user_id
+      LEFT JOIN performance_reviews appr ON appr.id = p.appraisal_id
+      LEFT JOIN appraisal_cycles ac ON ac.id = appr.appraisal_cycle_id
+      WHERE p.id = $1 AND p.org_id = $2`,
+      [id, tenantId],
+      tenantId
     );
-
-    // Log audit
-    await audit({
-      actorId: req.user.id,
-      action: 'promotion_cycle_create',
-      entityType: 'promotion_cycle',
-      entityId: result.rows[0].id,
-      details: {
-        orgId,
-        name,
-        period,
-        start_date,
-        end_date,
-      },
-      scope: 'org',
-    });
-
-    res.status(201).json(result.rows[0]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Promotion not found' });
+    }
+    
+    res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error creating promotion cycle:', error);
-    res.status(500).json({ error: error.message || 'Failed to create promotion cycle' });
+    console.error('Error fetching promotion:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch promotion' });
   }
 });
 
-// Get current promotion cycles
-router.get('/cycles/current', authenticateToken, setTenantContext, async (req, res) => {
+// POST /api/promotions - Create promotion
+router.post('/', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
-    const orgId = req.orgId || req.user?.org_id;
-    if (!orgId) {
-      return res.status(400).json({ error: 'Organization not found' });
+    const tenantId = await getTenantId(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
     }
 
-    const now = new Date().toISOString().split('T')[0];
-
+    const {
+      employee_id,
+      appraisal_id,
+      old_designation,
+      old_grade,
+      old_department_id,
+      old_ctc,
+      new_designation,
+      new_grade,
+      new_department_id,
+      new_ctc,
+      reason_text,
+      effective_date,
+      status = 'DRAFT'
+    } = req.body;
+    
+    if (!employee_id || !new_designation || !effective_date) {
+      return res.status(400).json({ error: 'employee_id, new_designation, and effective_date are required' });
+    }
+    
+    // Get current employee details if not provided
+    let oldDesig = old_designation;
+    let oldGrade = old_grade;
+    let oldDept = old_department_id;
+    let oldCTC = old_ctc;
+    
+    if (!oldDesig || !oldGrade) {
+      const empResult = await queryWithOrg(
+        'SELECT position, department FROM employees WHERE id = $1 AND tenant_id = $2',
+        [employee_id, tenantId],
+        tenantId
+      );
+      
+      if (empResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Employee not found' });
+      }
+      
+      oldDesig = oldDesig || empResult.rows[0].position;
+      oldDept = oldDept || empResult.rows[0].department;
+    }
+    
     const result = await queryWithOrg(
-      `SELECT id, org_id, name, period, start_date, end_date, status, criteria, created_at
-       FROM promotion_cycles
-       WHERE org_id = $1
-         AND status IN ('OPEN', 'REVIEW', 'APPROVAL')
-         AND start_date <= $2::date
-         AND end_date >= $2::date
-       ORDER BY created_at DESC`,
-      [orgId, now],
-      orgId
-    );
-
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching current promotion cycles:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch promotion cycles' });
-  }
-});
-
-// Submit promotion evaluation (Manager)
-router.post('/evaluations', authenticateToken, setTenantContext, requireRole('manager', 'hr', 'ceo', 'admin', 'director'), async (req, res) => {
-  try {
-    const orgId = req.orgId || req.user?.org_id;
-    if (!orgId) {
-      return res.status(400).json({ error: 'Organization not found' });
-    }
-
-    const { cycle_id, employee_id, rating, remarks, recommendation, attachments } = req.body;
-
-    if (!cycle_id || !employee_id || !rating) {
-      return res.status(400).json({ error: 'cycle_id, employee_id, and rating are required' });
-    }
-
-    // Verify cycle belongs to org
-    const cycleCheck = await queryWithOrg(
-      'SELECT id FROM promotion_cycles WHERE id = $1 AND org_id = $2',
-      [cycle_id, orgId],
-      orgId
-    );
-
-    if (cycleCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Promotion cycle not found' });
-    }
-
-    // Get manager_id from request user
-    const managerId = req.user.id;
-
-    const result = await queryWithOrg(
-      `INSERT INTO promotion_evaluations (cycle_id, employee_id, manager_id, rating, remarks, recommendation, attachments)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (cycle_id, employee_id) 
-       DO UPDATE SET 
-         manager_id = EXCLUDED.manager_id,
-         rating = EXCLUDED.rating,
-         remarks = EXCLUDED.remarks,
-         recommendation = EXCLUDED.recommendation,
-         attachments = EXCLUDED.attachments,
-         submitted_at = now()
-       RETURNING id, cycle_id, employee_id, manager_id, rating, remarks, recommendation, attachments, submitted_at`,
+      `INSERT INTO promotions (
+        org_id, employee_id, appraisal_id,
+        old_designation, old_grade, old_department_id, old_ctc,
+        new_designation, new_grade, new_department_id, new_ctc,
+        reason_text, recommendation_by_id, status, effective_date
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING *`,
       [
-        cycle_id,
-        employee_id,
-        managerId,
-        rating,
-        remarks || null,
-        recommendation || 'NONE',
-        JSON.stringify(attachments || {})
+        tenantId, employee_id, appraisal_id || null,
+        oldDesig, oldGrade || null, oldDept || null, oldCTC || null,
+        new_designation, new_grade || null, new_department_id || null, new_ctc || null,
+        reason_text || null, req.user.id, status, effective_date
       ],
-      orgId
+      tenantId
     );
-
-    // Log audit
-    await audit({
-      actorId: managerId,
-      action: 'promotion_evaluation_submit',
-      entityType: 'promotion_evaluation',
-      entityId: result.rows[0].id,
-      details: {
-        orgId,
-        cycle_id,
-        employee_id,
-        rating,
-        recommendation,
-      },
-      scope: 'org',
-    });
-
-    res.status(201).json(result.rows[0]);
+    
+    const promotion = result.rows[0];
+    
+    // Create audit log
+    try {
+      await audit({
+        actorId: req.user.id,
+        action: 'promotion_create',
+        entityType: 'promotion',
+        entityId: promotion.id,
+        details: {
+          employeeId: promotion.employee_id,
+          newDesignation: promotion.new_designation,
+          effectiveDate: promotion.effective_date,
+          status: promotion.status,
+        },
+        scope: 'org',
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log:', auditError);
+    }
+    
+    res.status(201).json(promotion);
   } catch (error) {
-    console.error('Error submitting promotion evaluation:', error);
-    res.status(500).json({ error: error.message || 'Failed to submit promotion evaluation' });
+    console.error('Error creating promotion:', error);
+    res.status(500).json({ error: error.message || 'Failed to create promotion' });
   }
 });
 
-// Review promotion evaluation (HR)
-router.post('/review/:id', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
+// PATCH /api/promotions/:id - Update promotion (only if DRAFT or PENDING_APPROVAL)
+router.patch('/:id', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
+    const tenantId = await getTenantId(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
     const { id } = req.params;
-    const orgId = req.orgId || req.user?.org_id;
+    const updates = req.body;
     
-    if (!orgId) {
-      return res.status(400).json({ error: 'Organization not found' });
-    }
-
-    // Verify evaluation belongs to org
-    const evalCheck = await queryWithOrg(
-      `SELECT pe.id, pe.cycle_id 
-       FROM promotion_evaluations pe
-       JOIN promotion_cycles pc ON pc.id = pe.cycle_id
-       WHERE pe.id = $1 AND pc.org_id = $2`,
-      [id, orgId],
-      orgId
+    // Check current status
+    const current = await queryWithOrg(
+      'SELECT status FROM promotions WHERE id = $1 AND org_id = $2',
+      [id, tenantId],
+      tenantId
     );
-
-    if (evalCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Promotion evaluation not found' });
+    
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Promotion not found' });
     }
-
-    // Update cycle status to REVIEW if needed
-    await queryWithOrg(
-      `UPDATE promotion_cycles 
-       SET status = 'REVIEW'
-       WHERE id = $1 AND status = 'OPEN'`,
-      [evalCheck.rows[0].cycle_id],
-      orgId
+    
+    if (!['DRAFT', 'PENDING_APPROVAL'].includes(current.rows[0].status)) {
+      return res.status(400).json({ error: 'Can only update promotions in DRAFT or PENDING_APPROVAL status' });
+    }
+    
+    // Build update query dynamically
+    const allowedFields = [
+      'new_designation', 'new_grade', 'new_department_id', 'new_ctc',
+      'reason_text', 'effective_date', 'appraisal_id'
+    ];
+    
+    const setClauses = [];
+    const values = [];
+    let paramIndex = 1;
+    
+    for (const field of allowedFields) {
+      if (updates[field] !== undefined) {
+        setClauses.push(`${field} = $${paramIndex++}`);
+        values.push(updates[field]);
+      }
+    }
+    
+    if (setClauses.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+    
+    values.push(id, tenantId);
+    
+    const result = await queryWithOrg(
+      `UPDATE promotions 
+       SET ${setClauses.join(', ')}, updated_at = now()
+       WHERE id = $${paramIndex++} AND org_id = $${paramIndex++}
+       RETURNING *`,
+      values,
+      tenantId
     );
-
-    // Log audit
-    await audit({
-      actorId: req.user.id,
-      action: 'promotion_evaluation_review',
-      entityType: 'promotion_evaluation',
-      entityId: id,
-      details: {
-        orgId,
-        cycle_id: evalCheck.rows[0].cycle_id,
-      },
-      scope: 'org',
-    });
-
-    res.json({ success: true, message: 'Promotion evaluation reviewed' });
+    
+    res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error reviewing promotion evaluation:', error);
-    res.status(500).json({ error: error.message || 'Failed to review promotion evaluation' });
+    console.error('Error updating promotion:', error);
+    res.status(500).json({ error: error.message || 'Failed to update promotion' });
   }
 });
 
-// Approve promotion (CEO)
-router.post('/approve/:id', authenticateToken, setTenantContext, requireRole('ceo', 'admin'), async (req, res) => {
+// POST /api/promotions/:id/submit - Submit for approval
+router.post('/:id/submit', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
+    const tenantId = await getTenantId(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
     const { id } = req.params;
-    const orgId = req.orgId || req.user?.org_id;
     
-    if (!orgId) {
-      return res.status(400).json({ error: 'Organization not found' });
-    }
-
-    // Get evaluation with cycle info
-    const evalResult = await queryWithOrg(
-      `SELECT pe.id, pe.cycle_id, pe.employee_id, pe.recommendation, pe.rating
-       FROM promotion_evaluations pe
-       JOIN promotion_cycles pc ON pc.id = pe.cycle_id
-       WHERE pe.id = $1 AND pc.org_id = $2`,
-      [id, orgId],
-      orgId
+    const result = await queryWithOrg(
+      `UPDATE promotions 
+       SET status = 'PENDING_APPROVAL', updated_at = now()
+       WHERE id = $1 AND org_id = $2 AND status = 'DRAFT'
+       RETURNING *`,
+      [id, tenantId],
+      tenantId
     );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Promotion not found or cannot be submitted' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error submitting promotion:', error);
+    res.status(500).json({ error: error.message || 'Failed to submit promotion' });
+  }
+});
 
-    if (evalResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Promotion evaluation not found' });
+// POST /api/promotions/:id/approve - Approve promotion
+router.post('/:id/approve', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
+  try {
+    const tenantId = await getTenantId(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
     }
 
-    const evaluation = evalResult.rows[0];
-
-    // If recommendation is PROMOTE, update employee record
-    if (evaluation.recommendation === 'PROMOTE') {
-      // Update employee designation, pay grade, CTC (if these fields exist)
-      // For now, we'll just log the approval
-      // In production, you'd update employees table with new designation, pay_grade, ctc
-    }
-
-    // Update cycle status to APPROVAL
-    await queryWithOrg(
-      `UPDATE promotion_cycles 
-       SET status = 'APPROVAL'
-       WHERE id = $1`,
-      [evaluation.cycle_id],
-      orgId
+    const { id } = req.params;
+    
+    // Get promotion details
+    const promoQuery = await queryWithOrg(
+      'SELECT * FROM promotions WHERE id = $1 AND org_id = $2',
+      [id, tenantId],
+      tenantId
     );
-
-    // Log audit
-    await audit({
-      actorId: req.user.id,
-      action: 'promotion_evaluation_approve',
-      entityType: 'promotion_evaluation',
-      entityId: id,
-      details: {
-        orgId,
-        cycle_id: evaluation.cycle_id,
-        employee_id: evaluation.employee_id,
-        recommendation: evaluation.recommendation,
-      },
-      scope: 'org',
-    });
-
-    res.json({ success: true, message: 'Promotion approved' });
+    
+    if (promoQuery.rows.length === 0) {
+      return res.status(404).json({ error: 'Promotion not found' });
+    }
+    
+    const promo = promoQuery.rows[0];
+    
+    if (promo.status !== 'PENDING_APPROVAL') {
+      return res.status(400).json({ error: 'Only promotions in PENDING_APPROVAL can be approved' });
+    }
+    
+    // Update promotion status
+    const result = await queryWithOrg(
+      `UPDATE promotions 
+       SET status = 'APPROVED', 
+           approved_by_id = $1,
+           approved_at = now(),
+           updated_at = now()
+       WHERE id = $2 AND org_id = $3
+       RETURNING *`,
+      [req.user.id, id, tenantId],
+      tenantId
+    );
+    
+    const approvedPromotion = result.rows[0];
+    
+    // Send notification to employee
+    await notifyEmployee(
+      tenantId,
+      approvedPromotion.employee_id,
+      'Promotion Approved',
+      `Your promotion to ${approvedPromotion.new_designation}${approvedPromotion.new_grade ? ` (${approvedPromotion.new_grade})` : ''} has been approved. Effective date: ${approvedPromotion.effective_date}`,
+      'promotion'
+    );
+    
+    // Apply promotion if effective_date is today or in the past
+    const effectiveDate = new Date(promo.effective_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    effectiveDate.setHours(0, 0, 0, 0);
+    
+    if (effectiveDate <= today) {
+      // Apply immediately
+      await applyPromotion(promo, tenantId);
+    }
+    // Otherwise, the cron job will apply it on the effective date
+    
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Error approving promotion:', error);
     res.status(500).json({ error: error.message || 'Failed to approve promotion' });
   }
 });
 
-export default router;
+// POST /api/promotions/:id/reject - Reject promotion
+router.post('/:id/reject', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
+  try {
+    const tenantId = await getTenantId(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
 
+    const { id } = req.params;
+    const { rejection_reason } = req.body;
+    
+    const result = await queryWithOrg(
+      `UPDATE promotions 
+       SET status = 'REJECTED',
+           rejected_at = now(),
+           rejection_reason = $1,
+           updated_at = now()
+       WHERE id = $2 AND org_id = $3 AND status = 'PENDING_APPROVAL'
+       RETURNING *`,
+      [rejection_reason || null, id, tenantId],
+      tenantId
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Promotion not found or cannot be rejected' });
+    }
+    
+    const rejectedPromotion = result.rows[0];
+    
+    // Create audit log for rejection
+    try {
+      await audit({
+        actorId: req.user.id,
+        action: 'promotion_reject',
+        entityType: 'promotion',
+        entityId: rejectedPromotion.id,
+        reason: rejection_reason || 'No reason provided',
+        details: {
+          employeeId: rejectedPromotion.employee_id,
+          newDesignation: rejectedPromotion.new_designation,
+        },
+        scope: 'org',
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log:', auditError);
+    }
+    
+    // Send notification to employee
+    await notifyEmployee(
+      tenantId,
+      rejectedPromotion.employee_id,
+      'Promotion Rejected',
+      `Your promotion to ${rejectedPromotion.new_designation} has been rejected.${rejection_reason ? ` Reason: ${rejection_reason}` : ''}`,
+      'promotion'
+    );
+    
+    res.json(rejectedPromotion);
+  } catch (error) {
+    console.error('Error rejecting promotion:', error);
+    res.status(500).json({ error: error.message || 'Failed to reject promotion' });
+  }
+});
+
+// Helper function to apply promotion to employee profile
+async function applyPromotion(promotion, tenantId) {
+  try {
+    // Get current employee data for old CTC if not set
+    const empResult = await queryWithOrg(
+      'SELECT ctc, designation, grade FROM employees WHERE id = $1 AND tenant_id = $2',
+      [promotion.employee_id, tenantId],
+      tenantId
+    );
+    const currentEmployee = empResult.rows[0];
+    
+    // Update employee profile
+    const updateFields = [];
+    const values = [];
+    let paramIndex = 1;
+    
+    if (promotion.new_designation) {
+      updateFields.push(`position = $${paramIndex++}`);
+      values.push(promotion.new_designation);
+      // Also update designation if column exists
+      updateFields.push(`designation = $${paramIndex++}`);
+      values.push(promotion.new_designation);
+    }
+    
+    if (promotion.new_grade) {
+      updateFields.push(`grade = $${paramIndex++}`);
+      values.push(promotion.new_grade);
+    }
+    
+    if (promotion.new_department_id) {
+      updateFields.push(`department = (SELECT name FROM org_branches WHERE id = $${paramIndex++})`);
+      values.push(promotion.new_department_id);
+    }
+    
+    // Update CTC if provided
+    if (promotion.new_ctc !== null && promotion.new_ctc !== undefined) {
+      updateFields.push(`ctc = $${paramIndex++}`);
+      values.push(promotion.new_ctc);
+    }
+    
+    if (updateFields.length > 0) {
+      values.push(promotion.employee_id, tenantId);
+      await queryWithOrg(
+        `UPDATE employees 
+         SET ${updateFields.join(', ')}, updated_at = now()
+         WHERE id = $${paramIndex++} AND tenant_id = $${paramIndex++}`,
+        values,
+        tenantId
+      );
+    }
+    
+    // Create HIKE event if CTC changed
+    if (promotion.new_ctc && promotion.old_ctc && promotion.new_ctc !== promotion.old_ctc) {
+      try {
+        const { createHikeEvent } = await import('../utils/employee-events.js');
+        await createHikeEvent(tenantId, promotion.employee_id, {
+          oldCTC: promotion.old_ctc,
+          newCTC: promotion.new_ctc,
+          effectiveDate: promotion.effective_date,
+          sourceTable: 'promotions',
+          sourceId: promotion.id,
+        });
+      } catch (eventError) {
+        console.error('Error creating hike event:', eventError);
+        // Don't fail promotion application if event creation fails
+      }
+    }
+    
+    // Mark promotion as applied
+    await queryWithOrg(
+      `UPDATE promotions 
+       SET applied = true, applied_at = now()
+       WHERE id = $1 AND org_id = $2`,
+      [promotion.id, tenantId],
+      tenantId
+    );
+    
+    console.log(`Promotion ${promotion.id} applied to employee ${promotion.employee_id}`);
+  } catch (error) {
+    console.error('Error applying promotion:', error);
+    throw error;
+  }
+}
+
+export default router;

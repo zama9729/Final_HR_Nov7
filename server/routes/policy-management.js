@@ -2,6 +2,7 @@ import express from 'express';
 import { query, queryWithOrg } from '../db/pool.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
+import { audit } from '../utils/auditLog.js';
 
 const router = express.Router();
 
@@ -197,7 +198,29 @@ router.post('/policies', authenticateToken, setTenantContext, requireRole('hr', 
       orgId
     );
 
-    res.status(201).json(result.rows[0]);
+    const policy = result.rows[0];
+    
+    // Create audit log
+    try {
+      await audit({
+        actorId: req.user.id,
+        action: 'policy_create',
+        entityType: 'policy',
+        entityId: policy.id,
+        details: {
+          key: policy.key,
+          title: policy.title,
+          type: policy.type,
+          status: policy.status,
+          branchId: policy.branch_id,
+        },
+        scope: 'org',
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log:', auditError);
+    }
+
+    res.status(201).json(policy);
   } catch (error) {
     console.error('Error creating policy:', error);
     res.status(500).json({ error: error.message || 'Failed to create policy' });
@@ -302,7 +325,40 @@ router.patch('/policies/:id', authenticateToken, setTenantContext, requireRole('
       );
     }
 
-    res.json(result.rows[0]);
+    const updatedPolicy = result.rows[0];
+    
+    // Create audit log
+    try {
+      const diff = {};
+      if (title !== undefined && current.title !== title) {
+        diff.title = { old: current.title, new: title };
+      }
+      if (status !== undefined && current.status !== status) {
+        diff.status = { old: current.status, new: status };
+      }
+      if (status === 'published' && current.status !== 'published') {
+        diff.version = { old: current.version, new: newVersion };
+      }
+      
+      await audit({
+        actorId: req.user.id,
+        action: status === 'published' && current.status !== 'published' ? 'policy_publish' : 'policy_update',
+        entityType: 'policy',
+        entityId: updatedPolicy.id,
+        diff: Object.keys(diff).length > 0 ? diff : null,
+        details: {
+          key: updatedPolicy.key,
+          title: updatedPolicy.title,
+          status: updatedPolicy.status,
+          version: updatedPolicy.version,
+        },
+        scope: 'org',
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log:', auditError);
+    }
+
+    res.json(updatedPolicy);
   } catch (error) {
     console.error('Error updating policy:', error);
     res.status(500).json({ error: error.message || 'Failed to update policy' });
@@ -324,6 +380,22 @@ router.delete('/policies/:id', authenticateToken, setTenantContext, requireRole(
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Policy not found' });
+    }
+
+    // Create audit log
+    try {
+      await audit({
+        actorId: req.user.id,
+        action: 'policy_delete',
+        entityType: 'policy',
+        entityId: id,
+        details: {
+          policyId: id,
+        },
+        scope: 'org',
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log:', auditError);
     }
 
     res.json({ success: true, message: 'Policy deleted' });
@@ -379,7 +451,28 @@ router.post('/policies/:id/publish', authenticateToken, setTenantContext, requir
       );
     }
 
-    res.json(result.rows[0]);
+    const updatedPolicy = result.rows[0];
+
+    // Create audit log
+    try {
+      await audit({
+        actorId: req.user.id,
+        action: 'policy_publish',
+        entityType: 'policy',
+        entityId: updatedPolicy.id,
+        details: {
+          key: updatedPolicy.key,
+          title: updatedPolicy.title,
+          version: updatedPolicy.version,
+          changeNote: change_note,
+        },
+        scope: 'org',
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log:', auditError);
+    }
+
+    res.json(updatedPolicy);
   } catch (error) {
     console.error('Error publishing policy:', error);
     res.status(500).json({ error: error.message || 'Failed to publish policy' });

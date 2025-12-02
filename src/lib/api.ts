@@ -697,6 +697,17 @@ class ApiClient {
     return this.request('/api/onboarding/me/progress');
   }
 
+  async getMyAbout() {
+    return this.request('/api/onboarding/me/about');
+  }
+
+  async updateMyAbout(payload: { about_me?: string | null; job_love?: string | null; hobbies?: string | null }) {
+    return this.request('/api/onboarding/me/about', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getBackgroundCheck(candidateId: string) {
     return this.request(`/api/onboarding/${candidateId}/background-check`);
   }
@@ -802,6 +813,35 @@ class ApiClient {
     return this.request(`/api/probation/validate?${params.toString()}`);
   }
 
+  // Probation Policies
+  async listProbationPolicies() {
+    return this.request('/api/probation-policies');
+  }
+
+  async getActiveProbationPolicy() {
+    return this.request('/api/probation-policies/active');
+  }
+
+  async createProbationPolicy(data: any) {
+    return this.request('/api/probation-policies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProbationPolicy(id: string, data: any) {
+    return this.request(`/api/probation-policies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProbationPolicy(id: string) {
+    return this.request(`/api/probation-policies/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Timesheet methods
   async getEmployeeId() {
     return this.request('/api/timesheets/employee-id');
@@ -874,6 +914,10 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async getEmployeePerformanceReviews(employeeId: string) {
+    return this.request(`/api/performance-reviews/employee/${employeeId}`);
   }
 
   async getPerformanceReviews(cycleId?: string) {
@@ -1448,6 +1492,147 @@ class ApiClient {
     const suffix = search.toString() ? `?${search.toString()}` : '';
     const res = await this.request(`/api/policy-management/policies${suffix}`);
     return res?.policies ?? [];
+  }
+
+  async publishManagedPolicy(id: string, change_note?: string) {
+    return this.request(`/api/policy-management/policies/${id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ change_note }),
+    });
+  }
+
+  // Promotions API
+  async getPromotions(params?: { status?: string; employeeId?: string; year?: number }) {
+    const search = new URLSearchParams();
+    if (params?.status) search.append('status', params.status);
+    if (params?.employeeId) search.append('employeeId', params.employeeId);
+    if (params?.year) search.append('year', params.year.toString());
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return this.request(`/api/promotion${suffix}`);
+  }
+
+  async getPromotion(id: string) {
+    return this.request(`/api/promotions/${id}`);
+  }
+
+  async createPromotion(data: {
+    employee_id: string;
+    appraisal_id?: string;
+    old_designation?: string;
+    old_grade?: string;
+    old_department_id?: string;
+    old_ctc?: number;
+    new_designation: string;
+    new_grade?: string;
+    new_department_id?: string;
+    new_ctc?: number;
+    reason_text?: string;
+    effective_date: string;
+    status?: string;
+  }) {
+    return this.request('/api/promotion', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePromotion(id: string, data: Partial<{
+    new_designation: string;
+    new_grade: string;
+    new_department_id: string;
+    new_ctc: number;
+    reason_text: string;
+    effective_date: string;
+    appraisal_id: string;
+  }>) {
+    return this.request(`/api/promotion/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async submitPromotion(id: string) {
+    return this.request(`/api/promotion/${id}/submit`, {
+      method: 'POST',
+    });
+  }
+
+  async approvePromotion(id: string) {
+    return this.request(`/api/promotion/${id}/approve`, {
+      method: 'POST',
+    });
+  }
+
+  async rejectPromotion(id: string, rejection_reason?: string) {
+    return this.request(`/api/promotion/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ rejection_reason }),
+    });
+  }
+
+  // Employee History API
+  async getMyHistory(params?: { year?: number; types?: string[] }) {
+    const search = new URLSearchParams();
+    if (params?.year) search.append('year', params.year.toString());
+    if (params?.types) search.append('types', params.types.join(','));
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return this.request(`/api/me/history${suffix}`);
+  }
+
+  async getEmployeeHistory(employeeId: string, params?: { year?: number; types?: string[] }) {
+    const search = new URLSearchParams();
+    if (params?.year) search.append('year', params.year.toString());
+    if (params?.types) search.append('types', params.types.join(','));
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return this.request(`/api/employees/${employeeId}/history${suffix}`);
+  }
+
+  async getHistoryEvent(eventId: string) {
+    return this.request(`/api/history/events/${eventId}`);
+  }
+
+  async downloadOrgPolicyPDF(policyId: string): Promise<Blob> {
+    const url = `/api/policies/org/${policyId}/download`;
+    
+    const headers: HeadersInit = {};
+    if (this._token) {
+      headers['Authorization'] = `Bearer ${this._token}`;
+    }
+    
+    const response = await fetch(`${this.baseURL}${url}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+      throw new Error(error.error || 'Failed to download PDF');
+    }
+
+    return await response.blob();
+  }
+
+  async downloadPolicyPDF(policyId: string, version?: string): Promise<Blob> {
+    const url = version 
+      ? `/api/policy-management/policies/${policyId}/download?version=${version}`
+      : `/api/policy-management/policies/${policyId}/download`;
+    
+    const headers: HeadersInit = {};
+    if (this._token) {
+      headers['Authorization'] = `Bearer ${this._token}`;
+    }
+    
+    const response = await fetch(`${this.baseURL}${url}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+      throw new Error(error.error || 'Failed to download PDF');
+    }
+
+    return await response.blob();
   }
 
   // Promotion methods

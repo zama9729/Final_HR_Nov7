@@ -1828,5 +1828,82 @@ router.get('/me/progress', authenticateToken, async (req, res) => {
   }
 });
 
+// Ensure custom about fields exist on onboarding_data
+const ensureAboutFields = async () => {
+  await query(`
+    ALTER TABLE onboarding_data
+      ADD COLUMN IF NOT EXISTS about_me TEXT,
+      ADD COLUMN IF NOT EXISTS job_love TEXT,
+      ADD COLUMN IF NOT EXISTS hobbies TEXT
+  `);
+};
+
+// Get current user's About / What I love / Hobbies
+router.get('/me/about', authenticateToken, async (req, res) => {
+  try {
+    await ensureAboutFields();
+
+    const empResult = await query(
+      'SELECT id FROM employees WHERE user_id = $1',
+      [req.user.id]
+    );
+
+    if (empResult.rows.length === 0) {
+      return res.json({ about_me: null, job_love: null, hobbies: null });
+    }
+
+    const employeeId = empResult.rows[0].id;
+
+    const dataResult = await query(
+      'SELECT about_me, job_love, hobbies FROM onboarding_data WHERE employee_id = $1',
+      [employeeId]
+    );
+
+    if (dataResult.rows.length === 0) {
+      return res.json({ about_me: null, job_love: null, hobbies: null });
+    }
+
+    res.json(dataResult.rows[0]);
+  } catch (error) {
+    console.error('Error fetching about section:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch about section' });
+  }
+});
+
+// Update current user's About / What I love / Hobbies
+router.post('/me/about', authenticateToken, async (req, res) => {
+  try {
+    await ensureAboutFields();
+    const { about_me, job_love, hobbies } = req.body || {};
+
+    const empResult = await query(
+      'SELECT id FROM employees WHERE user_id = $1',
+      [req.user.id]
+    );
+
+    if (empResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const employeeId = empResult.rows[0].id;
+
+    const result = await query(
+      `INSERT INTO onboarding_data (employee_id, about_me, job_love, hobbies)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (employee_id) DO UPDATE
+       SET about_me = COALESCE(EXCLUDED.about_me, onboarding_data.about_me),
+           job_love = COALESCE(EXCLUDED.job_love, onboarding_data.job_love),
+           hobbies = COALESCE(EXCLUDED.hobbies, onboarding_data.hobbies)
+       RETURNING about_me, job_love, hobbies`,
+      [employeeId, about_me ?? null, job_love ?? null, hobbies ?? null]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating about section:', error);
+    res.status(500).json({ error: error.message || 'Failed to update about section' });
+  }
+});
+
 export { ensureDocumentInfra };
 export default router;

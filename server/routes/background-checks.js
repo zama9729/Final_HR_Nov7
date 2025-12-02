@@ -428,7 +428,7 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
         d.file_path,
         d.uploaded_at,
         d.hr_notes,
-        bcd.decision,
+        COALESCE(bcd.verification_status::text, bcd.decision, d.status::text) AS decision,
         bcd.notes,
         bcd.verified_by,
         bcd.verified_at

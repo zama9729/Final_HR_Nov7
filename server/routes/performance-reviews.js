@@ -1,6 +1,7 @@
 import express from "express";
-import { query } from "../db/pool.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { query, queryWithOrg } from "../db/pool.js";
+import { authenticateToken, requireRole } from "../middleware/auth.js";
+import { createAppraisalEvent } from "../utils/employee-events.js";
 const router = express.Router();
 
 // Get reviews for a cycle
@@ -96,7 +97,7 @@ router.post("/", authenticateToken, async (req, res) => {
     const tenant_id = profile.rows[0]?.tenant_id;
     const reviewer_id = emp.rows[0]?.id;
     if (!tenant_id || !reviewer_id) return res.status(400).json({ error: "Invalid session" });
-    await query(
+    const result = await query(
       `INSERT INTO performance_reviews (
         appraisal_cycle_id, employee_id, reviewer_id, tenant_id, rating, performance_score, strengths, areas_of_improvement, goals, comments, status, updated_at
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'submitted', now())
@@ -108,6 +109,33 @@ router.post("/", authenticateToken, async (req, res) => {
         strengths=$7, areas_of_improvement=$8, goals=$9, comments=$10, status='submitted', updated_at=now()`,
       [appraisal_cycle_id, employee_id, reviewer_id, tenant_id, rating, performance_score, strengths, areas_of_improvement, goals, comments]
     );
+    
+    // Get the created/updated review with cycle info
+    const reviewResult = await query(
+      `SELECT pr.*, ac.cycle_name, ac.cycle_year, ac.end_date
+       FROM performance_reviews pr
+       LEFT JOIN appraisal_cycles ac ON ac.id = pr.appraisal_cycle_id
+       WHERE pr.appraisal_cycle_id = $1 AND pr.employee_id = $2`,
+      [appraisal_cycle_id, employee_id]
+    );
+    
+    if (reviewResult.rows.length > 0) {
+      const review = reviewResult.rows[0];
+      // Create employee event for appraisal
+      try {
+        await createAppraisalEvent(tenant_id, employee_id, {
+          ...review,
+          appraisal_cycle: {
+            cycle_name: review.cycle_name,
+            cycle_year: review.cycle_year,
+            end_date: review.end_date
+          }
+        });
+      } catch (eventError) {
+        console.error('Error creating appraisal event:', eventError);
+        // Don't fail the request if event creation fails
+      }
+    }
     
     // Check for promotion based on performance
     if (performance_score && performance_score >= 4.0) {
