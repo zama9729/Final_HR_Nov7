@@ -49,6 +49,11 @@ export async function withClient(fn, orgId) {
   const pool = getPool();
   const client = await pool.connect();
   try {
+    // When using orgId, we need a transaction so SET LOCAL works without warnings
+    if (orgId) {
+      await client.query('BEGIN');
+    }
+
     if (orgId) {
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(orgId)) {
@@ -60,7 +65,21 @@ export async function withClient(fn, orgId) {
       await client.query(`SET LOCAL app.current_org_id = '${escapedOrgId}'`);
     }
     const result = await fn(client);
+
+    if (orgId) {
+      await client.query('COMMIT');
+    }
+
     return result;
+  } catch (err) {
+    if (orgId) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {
+        // ignore rollback errors
+      }
+    }
+    throw err;
   } finally {
     client.release();
   }

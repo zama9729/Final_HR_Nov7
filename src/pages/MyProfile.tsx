@@ -12,6 +12,8 @@ import { Textarea } from '@/components/ui/textarea';
 import EmployeeSkillsEditor from '@/components/EmployeeSkillsEditor';
 import EmployeePastProjectsEditor from '@/components/EmployeePastProjectsEditor';
 import EmployeeHistoryTab from '@/components/EmployeeHistoryTab';
+import { CalendarDays, Clock } from 'lucide-react';
+import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
 
 interface SimpleEmployee {
   id: string;
@@ -52,13 +54,17 @@ export default function MyProfile() {
   const { toast } = useToast();
   const [employee, setEmployee] = useState<SimpleEmployee | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'personal' | 'skills' | 'projects' | 'history'>('summary');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'summary' | 'personal' | 'skills' | 'projects' | 'history' | 'shifts'
+  >('summary');
   const [about, setAbout] = useState('');
   const [jobLove, setJobLove] = useState('');
   const [hobbies, setHobbies] = useState('');
   const [aboutLoading, setAboutLoading] = useState(false);
   const [aboutEditing, setAboutEditing] = useState(false);
   const [aboutSaving, setAboutSaving] = useState(false);
+  const [upcomingShifts, setUpcomingShifts] = useState<any[]>([]);
+  const [loadingShifts, setLoadingShifts] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -124,6 +130,51 @@ export default function MyProfile() {
   const reportingTeam = employee?.reporting_team || [];
   const canEdit = ['employee', 'manager'].includes(userRole || '');
 
+  // Shifts helpers
+  const formatShiftTime = (time?: string | null) => {
+    if (!time) return '--';
+    const [hours, minutes] = time.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  const getShiftDateLabel = (dateStr: string) => {
+    const date = parseISO(dateStr);
+    if (isToday(date)) return 'Today';
+    if (isTomorrow(date)) return 'Tomorrow';
+    return format(date, 'EEE, MMM d, yyyy');
+  };
+
+  const fetchUpcomingShifts = async (employeeId: string) => {
+    if (!employeeId) return;
+    try {
+      setLoadingShifts(true);
+      const today = new Date();
+      const nextMonth = addDays(today, 30);
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/scheduling/employee/${employeeId}/shifts?start_date=${format(
+          today,
+          'yyyy-MM-dd',
+        )}&end_date=${format(nextMonth, 'yyyy-MM-dd')}`,
+        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } },
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setUpcomingShifts(data.shifts || []);
+      } else {
+        setUpcomingShifts([]);
+      }
+    } catch (error) {
+      console.error('Error fetching upcoming shifts:', error);
+      setUpcomingShifts([]);
+    } finally {
+      setLoadingShifts(false);
+    }
+  };
+
   // Load about/what I love/hobbies from backend once employee is known
   useEffect(() => {
     const fetchAbout = async () => {
@@ -147,6 +198,13 @@ export default function MyProfile() {
       fetchAbout();
     }
   }, [employee?.id]);
+
+  // Load shifts when user switches to shifts tab
+  useEffect(() => {
+    if (activeSubTab === 'shifts' && employee?.id) {
+      fetchUpcomingShifts(employee.id);
+    }
+  }, [activeSubTab, employee?.id]);
 
   if (loading) {
     return (
@@ -285,6 +343,7 @@ export default function MyProfile() {
                       { key: 'skills', label: 'Skills' },
                       { key: 'projects', label: 'Projects' },
                       { key: 'history', label: 'Employee history' },
+                      { key: 'shifts', label: 'Shifts assigned' },
                     ].map((tab) => (
                       <button
                         key={tab.key}
@@ -489,6 +548,59 @@ export default function MyProfile() {
                   {activeSubTab === 'history' && employee.id && (
                     <div className="mt-4">
                       <EmployeeHistoryTab employeeId={employee.id} isOwnProfile />
+                    </div>
+                  )}
+
+                  {activeSubTab === 'shifts' && (
+                    <div className="mt-4 space-y-3 text-sm text-gray-700">
+                      {loadingShifts ? (
+                        <p className="text-xs text-gray-400">Loading assigned shifts…</p>
+                      ) : upcomingShifts.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-6 text-center text-xs text-gray-400">
+                          No shifts assigned for the next 30 days.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {upcomingShifts.map((shift) => {
+                            const label = getShiftDateLabel(shift.shift_date);
+                            const type = shift.shift_type || 'day';
+                            return (
+                              <div
+                                key={shift.id}
+                                className="flex items-start justify-between rounded-xl border border-gray-100 bg-white px-3 py-2 shadow-sm"
+                              >
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-sm font-semibold text-gray-900">
+                                      {shift.template_name || 'Shift'}
+                                    </p>
+                                    <Badge variant="outline" className="text-[10px] capitalize">
+                                      {type}
+                                    </Badge>
+                                  </div>
+                                  <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-500">
+                                    <CalendarDays className="h-3 w-3" />
+                                    {label}
+                                  </p>
+                                </div>
+                                <div className="mt-1 flex flex-col items-end gap-1 text-xs text-gray-600">
+                                  <span className="inline-flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    {formatShiftTime(shift.start_time)} –{' '}
+                                    {formatShiftTime(shift.end_time)}
+                                  </span>
+                                  {shift.assigned_by && (
+                                    <span className="text-[10px] text-gray-400">
+                                      Assigned by:{' '}
+                                      {shift.assigned_by === 'algorithm' ? 'System' : 'Manager'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>

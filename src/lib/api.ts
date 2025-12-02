@@ -947,11 +947,12 @@ class ApiClient {
     return this.request('/api/employees?team=mine');
   }
 
-  // Employee project assignments
+  // Employee project assignments (past / profile projects)
   async getEmployeeProjects(employeeId: string, date?: string) {
+    // Endpoint is served from /api/v1/employees/:id/projects
     const url = date
-      ? `/api/timesheets/employee/${employeeId}/projects?date=${date}`
-      : `/api/timesheets/employee/${employeeId}/projects`;
+      ? `/api/v1/employees/${employeeId}/projects?date=${encodeURIComponent(date)}`
+      : `/api/v1/employees/${employeeId}/projects`;
     return this.request(url);
   }
 

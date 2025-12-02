@@ -27,6 +27,8 @@ const ensureProjectInfra = async () => {
 };
 
 // Get all projects for the organization
+// - HR/leadership see all org projects
+// - Managers/employees only see projects where they are allocated or are project manager
 router.get('/', authenticateToken, setTenantContext, async (req, res) => {
   try {
     await ensureProjectInfra();
@@ -47,8 +49,38 @@ router.get('/', authenticateToken, setTenantContext, async (req, res) => {
       params.push(`%${search}%`);
       paramIndex++;
     }
+
+    // Role-based visibility:
+    // - HR / leadership (hr, director, ceo, admin, super_user): see all org projects
+    // - Others: only projects where user is project manager or allocated employee
+    const roleResult = await query(
+      'SELECT role FROM user_roles WHERE user_id = $1 LIMIT 1',
+      [req.user.id]
+    );
+    const userRole = roleResult.rows[0]?.role?.toLowerCase?.() || '';
+    const privilegedRoles = ['hr', 'director', 'ceo', 'admin', 'super_user'];
+
+    if (!privilegedRoles.includes(userRole)) {
+      // restrict to projects where current user is PM or has an allocation
+      filters.push(`(
+        p.project_manager_id IN (
+          SELECT id FROM employees WHERE user_id = $${paramIndex} AND org_id = $1
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM project_allocations pa_user
+          JOIN employees e_user ON e_user.id = pa_user.employee_id
+          WHERE pa_user.project_id = p.id
+            AND e_user.user_id = $${paramIndex}
+            AND pa_user.org_id = $1
+            AND (pa_user.end_date IS NULL OR pa_user.end_date >= CURRENT_DATE)
+        )
+      )`);
+      params.push(req.user.id);
+      paramIndex++;
+    }
     
-    // Get all projects with assignment counts and manager info
+    // Get projects with assignment counts and manager info
     const projectsRes = await queryWithOrg(
       `SELECT 
         p.id,
@@ -98,7 +130,7 @@ router.post('/', authenticateToken, setTenantContext, requireRole('hr', 'directo
   try {
     await ensureProjectInfra();
     const orgId = req.orgId;
-    const { 
+    let { 
       name, 
       code,
       description,
@@ -163,15 +195,56 @@ router.post('/', authenticateToken, setTenantContext, requireRole('hr', 'directo
         return res.status(400).json({ error: 'Team must be of type PROJECT' });
       }
     } else {
-      // Create a project team automatically
-      const teamResult = await queryWithOrg(
-        `INSERT INTO teams (org_id, name, code, team_type, description, is_active)
-         VALUES ($1, $2, $3, 'PROJECT', $4, true)
-         RETURNING id`,
-        [orgId, `${name} Team`, `${projectCode}-TEAM`, description || null],
+      // Try to find an existing PROJECT team with the same name (case-insensitive)
+      const existingTeam = await queryWithOrg(
+        `SELECT id FROM teams 
+         WHERE org_id = $1 
+           AND branch_id IS NULL 
+           AND lower(name) = lower($2)
+           AND team_type = 'PROJECT'
+         LIMIT 1`,
+        [orgId, `${name} Team`],
         orgId
       );
-      team_id = teamResult.rows[0].id;
+
+      if (existingTeam.rows.length > 0) {
+        team_id = existingTeam.rows[0].id;
+      } else {
+        // Create a project team automatically
+        try {
+          const teamResult = await queryWithOrg(
+            `INSERT INTO teams (org_id, name, code, team_type, description, is_active)
+             VALUES ($1, $2, $3, 'PROJECT', $4, true)
+             RETURNING id`,
+            [orgId, `${name} Team`, `${projectCode}-TEAM`, description || null],
+            orgId
+          );
+          team_id = teamResult.rows[0].id;
+        } catch (e) {
+          // Handle duplicate team name gracefully
+          if (e && e.code === '23505') {
+            const fallback = await queryWithOrg(
+              `SELECT id FROM teams 
+               WHERE org_id = $1 
+                 AND branch_id IS NULL 
+                 AND lower(name) = lower($2)
+                 AND team_type = 'PROJECT'
+               LIMIT 1`,
+              [orgId, `${name} Team`],
+              orgId
+            );
+            if (fallback.rows.length > 0) {
+              team_id = fallback.rows[0].id;
+            } else {
+              return res.status(409).json({
+                error: 'A project team with this name already exists. Please choose a different project name or team.',
+              });
+            }
+          } else {
+            throw e;
+          }
+        }
+      }
     }
     
     const result = await queryWithOrg(
@@ -234,12 +307,45 @@ router.post('/:id/suggest-candidates', authenticateToken, async (req, res) => {
 });
 
 // Get project by ID
+// - HR/leadership see any org project
+// - Others only if they are PM or allocated on this project
 router.get('/:id', authenticateToken, setTenantContext, async (req, res) => {
   try {
     await ensureProjectInfra();
     const { id } = req.params;
     const orgId = req.orgId;
     
+    // Determine viewer role
+    const roleResult = await query(
+      'SELECT role FROM user_roles WHERE user_id = $1 LIMIT 1',
+      [req.user.id]
+    );
+    const userRole = roleResult.rows[0]?.role?.toLowerCase?.() || '';
+    const privilegedRoles = ['hr', 'director', 'ceo', 'admin', 'super_user'];
+
+    // Base project query
+    let visibilityFilter = 'p.org_id = $2';
+    const params = [id, orgId];
+
+    if (!privilegedRoles.includes(userRole)) {
+      // Restrict non-privileged users to PM or allocated employee on this project
+      visibilityFilter += ` AND (
+        p.project_manager_id IN (
+          SELECT id FROM employees WHERE user_id = $3 AND org_id = $2
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM project_allocations pa_user
+          JOIN employees e_user ON e_user.id = pa_user.employee_id
+          WHERE pa_user.project_id = p.id
+            AND pa_user.org_id = $2
+            AND e_user.user_id = $3
+            AND (pa_user.end_date IS NULL OR pa_user.end_date >= CURRENT_DATE)
+        )
+      )`;
+      params.push(req.user.id);
+    }
+
     const projectRes = await queryWithOrg(
       `SELECT 
          p.*,
@@ -252,8 +358,8 @@ router.get('/:id', authenticateToken, setTenantContext, async (req, res) => {
        LEFT JOIN employees pm_emp ON pm_emp.id = p.project_manager_id
        LEFT JOIN profiles pm ON pm.id = pm_emp.user_id
        LEFT JOIN teams t ON t.id = p.team_id
-       WHERE p.id = $1 AND p.org_id = $2`,
-      [id, orgId],
+       WHERE p.id = $1 AND ${visibilityFilter}`,
+      params,
       orgId
     );
     
