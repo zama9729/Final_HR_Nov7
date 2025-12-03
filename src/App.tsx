@@ -2,7 +2,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 import { AuthProvider } from "./contexts/AuthContext";
 import { OrgSetupProvider } from "./contexts/OrgSetupContext";
 import { ProtectedRoute, PublicRoute } from "./components/ProtectedRoute";
@@ -83,6 +84,30 @@ import AuditLogs from "./pages/AuditLogs";
 
 const queryClient = new QueryClient();
 
+// Scroll restoration component for hash navigation
+function ScrollToHash() {
+  const location = useLocation();
+
+  useEffect(() => {
+    // If there's a hash in the URL, scroll to that element
+    if (location.hash) {
+      const id = location.hash.substring(1); // Remove the #
+      const element = document.getElementById(id);
+      if (element) {
+        // Use setTimeout to ensure the element is rendered
+        setTimeout(() => {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      }
+    } else {
+      // Scroll to top on route change (without hash)
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [location]);
+
+  return null;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -91,6 +116,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <OrgSetupProvider>
+          <ScrollToHash />
           <Routes>
             {/* Public routes */}
             <Route path="/auth/login" element={<PublicRoute><Login /></PublicRoute>} />

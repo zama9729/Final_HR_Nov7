@@ -1,31 +1,6 @@
 import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  Calendar,
-  Clock,
   Settings,
-  BarChart3,
-  Building2,
-  Network,
-  UserCheck,
-  CalendarClock,
-  CalendarDays,
-  Award,
-  Bot,
-  CheckSquare,
-  History,
-  DollarSign,
-  Inbox,
-  LogOut,
-  ClipboardList,
-  Receipt,
-  Upload,
   ChevronDown,
-  Briefcase,
-  GitBranch,
-  ArrowUpCircle,
-  ShieldAlert,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -42,22 +17,7 @@ import { useOrgSetup } from "@/contexts/OrgSetupContext";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-
-type NavItem = {
-  title: string;
-  url: string;
-  icon: typeof LayoutDashboard;
-  showBadge?: boolean;
-  sso?: boolean;
-  feature?: "timesheets" | "clock";
-  roles?: string[];
-};
-
-type NavGroup = {
-  id: string;
-  label: string;
-  items: NavItem[];
-};
+import { getMenuItemsForProfile, type NavItem, type NavGroup } from "@/config/navigation";
 
 const roleNavItems: Record<string, NavGroup[]> = {
   employee: [
@@ -375,9 +335,21 @@ export function AppSidebar() {
   const [isSuperadmin, setIsSuperadmin] = useState(false);
   const [payrollIntegrationEnabled, setPayrollIntegrationEnabled] = useState(true); // Default to true
   const { attendanceSettings } = useOrgSetup();
-  const resolvedRoleKey = resolveRoleKey(userRole);
-  const navigationGroups = roleNavItems[resolvedRoleKey] || roleNavItems.employee;
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
+  const captureMethod = attendanceSettings?.capture_method === 'clock_in_out' ? 'clock_in_out' : 'timesheets';
+  const isClockMode = captureMethod === 'clock_in_out';
+  const isTimesheetMode = captureMethod !== 'clock_in_out';
+
+  // Get menu items using shared navigation config
+  const navigationGroups = useMemo(() => {
+    return getMenuItemsForProfile({
+      userRole,
+      payrollIntegrationEnabled,
+      isClockMode,
+      isTimesheetMode,
+    });
+  }, [userRole, payrollIntegrationEnabled, isClockMode, isTimesheetMode]);
 
   const fetchPendingCounts = useCallback(async () => {
     if (!user) return;
@@ -564,7 +536,7 @@ export function AppSidebar() {
       });
       return nextState;
     });
-  }, [resolvedRoleKey]);
+  }, [navigationGroups]);
 
   const toggleGroup = (groupId: string) => {
     setOpenGroups((prev) => ({

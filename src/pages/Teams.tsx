@@ -171,10 +171,10 @@ export default function Teams() {
               : `Team created and ${successCount} of ${selectedEmployeeIds.size} employee(s) added`,
           });
         } else {
-          toast({
-            title: 'Success',
-            description: 'Team created successfully',
-          });
+        toast({
+          title: 'Success',
+          description: 'Team created successfully',
+        });
         }
       }
       setDialogOpen(false);

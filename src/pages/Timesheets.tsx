@@ -1035,14 +1035,14 @@ export default function Timesheets() {
 
   return (
     <AppLayout>
-      <div className="space-y-8 p-6">
+      <div className="space-y-4 p-4">
       {/* Header Section */}
-      <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-6 pb-6 border-b border-border/40">
-        <div className="space-y-1">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+      <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-3 pb-3 border-b border-border/30">
+        <div className="space-y-0.5">
+          <h1 className="text-2xl font-bold text-foreground">
             Timesheets
           </h1>
-          <p className="text-muted-foreground text-lg">Track and manage your work hours for the week</p>
+          <p className="text-muted-foreground text-sm">Track and manage your work hours</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           <div className="flex flex-wrap gap-2 items-center">
@@ -1120,45 +1120,44 @@ export default function Timesheets() {
         )}
       </div>
 
-      <Card className="border-2 shadow-lg bg-card/50 backdrop-blur-sm">
-        <CardHeader className="bg-gradient-to-r from-primary/5 via-primary/3 to-transparent border-b-2 pb-4">
-          <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <span className="text-xl font-bold text-foreground">
+      <Card className="border shadow-sm bg-card/50 backdrop-blur-sm">
+        <CardHeader className="bg-gradient-to-r from-primary/5 via-primary/3 to-transparent border-b pb-3">
+          <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <span className="text-base font-semibold text-foreground">
               Week of {format(currentWeek, "MMM dd")} - {format(addDays(currentWeek, 6), "MMM dd, yyyy")}
             </span>
-            <div className="flex items-center gap-3 px-4 py-2 bg-primary/10 rounded-lg border border-primary/20">
-              <span className="text-sm font-medium text-muted-foreground">Total Hours:</span>
-              <span className="text-3xl font-bold text-primary">
-                {(totalHours || 0).toFixed(1)} hrs
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-md border border-primary/20">
+              <span className="text-xs font-medium text-muted-foreground">Total:</span>
+              <span className="text-xl font-bold text-primary">
+                {(totalHours || 0).toFixed(1)}h
               </span>
             </div>
           </CardTitle>
         </CardHeader>
-                        <CardContent className="p-6">
+                        <CardContent className="p-3">
           <div className="overflow-x-auto rounded-lg">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b-2 bg-muted/30">
-                  <th className="text-left p-4 font-bold w-32 sticky left-0 bg-muted/50 backdrop-blur-sm z-10 border-r">Entry</th>
+                <tr className="border-b bg-muted/20">
+                  <th className="text-left p-2 font-semibold text-xs w-24 sticky left-0 bg-muted/50 backdrop-blur-sm z-10 border-r">Entry</th>
                                     {weekDays.map((day) => {
                     const dateStr = format(day, "yyyy-MM-dd");
                     const hasShift = shifts[dateStr];
                     const isHoliday = isDateHoliday(dateStr);
                     return (
-                      <th key={dateStr} className={`text-center p-4 font-bold min-w-[200px] border-r last:border-r-0 ${isToday(day) ? "bg-primary/15 ring-2 ring-primary/30" : ""}`}>
-                        <div className="flex flex-col items-center gap-2">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-base">{format(day, "EEE")}</span>
+                      <th key={dateStr} className={`text-center p-2 font-semibold text-xs min-w-[140px] border-r last:border-r-0 ${isToday(day) ? "bg-primary/10 ring-1 ring-primary/20" : ""}`}>
+                        <div className="flex flex-col items-center gap-1">
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs">{format(day, "EEE")}</span>
                             {hasShift && (
-                              <CalendarIcon className="h-4 w-4 text-primary" />
+                              <CalendarIcon className="h-3 w-3 text-primary" />
                             )}
                           </div>
-                          <div className="text-sm font-medium text-muted-foreground">
+                          <div className="text-xs text-muted-foreground">
                             {format(day, "MMM dd")}
                           </div>
                           {isHoliday && (
-                            <Badge variant="outline" className="mt-1 text-xs bg-green-100 text-green-700 border-green-300 dark:bg-green-900/40 dark:text-green-400 dark:border-green-700">
-                              <CalendarIcon className="h-3 w-3 mr-1" />
+                            <Badge variant="outline" className="mt-0.5 text-[10px] px-1 py-0 h-4 bg-green-100 text-green-700 border-green-300">
                               Holiday
                             </Badge>
                           )}
@@ -1166,7 +1165,7 @@ export default function Timesheets() {
                       </th>
                     );
                   })}
-                  <th className="text-center p-4 font-bold w-28 bg-muted/30">Total</th>
+                  <th className="text-center p-2 font-semibold text-xs w-20 bg-muted/20">Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -1193,7 +1192,7 @@ export default function Timesheets() {
                         {/* Clock In/Out row - only show for first entry */}
                         {entryIndex === 0 && (
                           <tr className="border-b bg-muted/10 hover:bg-muted/20 transition-colors">
-                            <td className="p-2 font-medium text-sm sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
+                            <td className="p-1.5 font-medium text-xs sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
                               Clock In/Out
                             </td>
                             {weekDays.map((day) => {
@@ -1212,7 +1211,7 @@ export default function Timesheets() {
                               
                               if (isHoliday) {
                                 return (
-                                  <td key={dateStr} className={`p-2 align-top border-r text-center text-sm text-muted-foreground ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                  <td key={dateStr} className={`p-1.5 align-top border-r text-center text-xs text-muted-foreground ${isToday(day) ? "bg-primary/5" : ""}`}>
                                     Holiday
                                   </td>
                                 );
@@ -1224,15 +1223,15 @@ export default function Timesheets() {
                               
                               if (!clockIn && !clockOut) {
                                 return (
-                                  <td key={dateStr} className={`p-2 align-top border-r text-center text-sm text-muted-foreground ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                  <td key={dateStr} className={`p-1.5 align-top border-r text-center text-xs text-muted-foreground ${isToday(day) ? "bg-primary/5" : ""}`}>
                                     No clock in
                                   </td>
                                 );
                               }
                               
                               return (
-                                <td key={dateStr} className={`p-2 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}>
-                                  <div className="flex flex-col gap-1 text-xs">
+                                <td key={dateStr} className={`p-1.5 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                  <div className="flex flex-col gap-0.5 text-xs">
                                     {clockIn ? (
                                       <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
                                         <Clock className="h-3 w-3" />
@@ -1253,12 +1252,12 @@ export default function Timesheets() {
                                 </td>
                               );
                             })}
-                            <td className="p-2 border-l bg-muted/20"></td>
+                            <td className="p-1.5 border-l bg-muted/20"></td>
                           </tr>
                         )}
                                                  {/* Hours row */}
                          <tr className="border-b hover:bg-muted/20 transition-colors">
-                           <td className="p-3 font-bold sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
+                           <td className="p-1.5 font-semibold text-xs sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
                              {entryIndex === 0 ? "Hours" : ""}
                            </td>
                           {weekDays.map((day) => {
@@ -1271,9 +1270,9 @@ export default function Timesheets() {
                             if (!entry && entryIndex === 0) {
                               // Create empty entry for first row if missing
                               return (
-                                                               <td key={dateStr} className={`p-3 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                                               <td key={dateStr} className={`p-1.5 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}>
                                    {hasShift && (
-                                     <Badge variant="outline" className="mb-2 text-xs border-2">
+                                     <Badge variant="outline" className="mb-1 text-[10px] px-1 py-0 h-4 border">
                                        {shifts[dateStr].shift_type}
                                      </Badge>
                                    )}
@@ -1304,14 +1303,14 @@ export default function Timesheets() {
 
                                                          if (!entry) {
                                return (
-                                 <td key={dateStr} className={`p-3 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}></td>
+                                 <td key={dateStr} className={`p-1.5 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}></td>
                                );
                              }
 
                              return (
-                                                               <td key={dateStr} className={`p-3 align-top border-r ${isToday(day) ? "bg-primary/5" : ""} ${isHoliday && entry.is_holiday ? "bg-green-50/50 dark:bg-green-950/20" : ""}`}>
+                                                               <td key={dateStr} className={`p-1.5 align-top border-r ${isToday(day) ? "bg-primary/5" : ""} ${isHoliday && entry.is_holiday ? "bg-green-50/50 dark:bg-green-950/20" : ""}`}>
                                  {entryIndex === 0 && hasShift && (
-                                   <Badge variant="outline" className="mb-2 text-xs border-2">
+                                   <Badge variant="outline" className="mb-1 text-[10px] px-1 py-0 h-4 border">
                                      {shifts[dateStr].shift_type}
                                    </Badge>
                                  )}
@@ -1322,21 +1321,21 @@ export default function Timesheets() {
                                    max="24"
                                    value={entry.hours || ""}
                                    onChange={(e) => updateEntry(dateStr, entryIndex, "hours", e.target.value)}
-                                  className="text-center border-2 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
+                                  className="text-center text-xs border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
                                    disabled={!isEditable || (isHoliday && entry.is_holiday)}
                                    placeholder="0"
                                  />
                               </td>
                             );
                           })}
-                                                     <td className="p-3 text-center font-bold border-l bg-muted/20">
+                                                     <td className="p-1.5 text-center font-semibold text-xs border-l bg-muted/20">
                              {entryIndex === 0 ? (totalHours || 0).toFixed(1) : ""}
                            </td>
                         </tr>
 
                                                  {/* Project/Task row */}
                          <tr className="border-b hover:bg-muted/20 transition-colors">
-                           <td className="p-3 font-bold sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
+                           <td className="p-1.5 font-semibold text-xs sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
                              {entryIndex === 0 ? (
                                <div className="flex flex-col gap-1">
                                  <span>Project / Task</span>
@@ -1473,19 +1472,19 @@ export default function Timesheets() {
                 })()}
 
                                  {/* Day totals row */}
-                 <tr className="border-t-2 bg-muted/20 font-bold">
-                   <td className="p-4 text-right sticky left-0 bg-muted/50 backdrop-blur-sm z-10 border-r font-bold">Day Total</td>
+                 <tr className="border-t bg-muted/20 font-semibold">
+                   <td className="p-2 text-right sticky left-0 bg-muted/50 backdrop-blur-sm z-10 border-r font-semibold text-xs">Day Total</td>
                    {weekDays.map((day) => {
                      const dateStr = format(day, "yyyy-MM-dd");
                      const dayEntries = entries[dateStr] || [];
                      const dayTotal = dayEntries.reduce((sum, e) => sum + (Number(e.hours) || 0), 0);
                      return (
-                       <td key={dateStr} className="p-4 text-center text-xl border-r bg-background/50">
+                       <td key={dateStr} className="p-2 text-center text-sm border-r bg-background/50">
                          {dayTotal.toFixed(1)}
                        </td>
                      );
                    })}
-                   <td className="p-4 text-center text-xl bg-primary/10 font-bold text-primary">
+                   <td className="p-2 text-center text-sm bg-primary/10 font-semibold text-primary">
                      {(totalHours || 0).toFixed(1)}
                    </td>
                  </tr>
@@ -1494,7 +1493,7 @@ export default function Timesheets() {
           </div>
 
                      {isEditable && (
-             <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-border/40">
+             <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-border/30">
                <Button 
                  onClick={saveTimesheet} 
                  disabled={loading}

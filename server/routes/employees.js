@@ -481,6 +481,67 @@ router.post('/profile-picture/presign', authenticateToken, async (req, res) => {
   }
 });
 
+// Get presigned URL for viewing profile picture
+router.get('/profile-picture/:userId', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Get the profile picture URL from database
+    const profileResult = await query(
+      'SELECT profile_picture_url, tenant_id FROM profiles WHERE id = $1',
+      [userId]
+    );
+
+    if (!profileResult.rows.length) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    const profile = profileResult.rows[0];
+    
+    if (!profile.profile_picture_url) {
+      return res.status(404).json({ error: 'No profile picture found' });
+    }
+
+    // Extract object key from the stored URL
+    // URL format: http://localhost:9000/bucket/tenants/.../profile-pictures/.../filename.png
+    const urlParts = profile.profile_picture_url.split('/');
+    const bucketIndex = urlParts.findIndex(part => part.includes('tenants') || part === 'docshr' || part === 'hr-onboarding-docs');
+    
+    if (bucketIndex === -1) {
+      return res.status(400).json({ error: 'Invalid profile picture URL format' });
+    }
+
+    // Extract key (everything after bucket)
+    const key = urlParts.slice(bucketIndex + 1).join('/');
+
+    // Import storage functions
+    const { getPresignedGetUrl, getStorageProvider } = await import('../services/storage.js');
+    
+    // Check if S3/MinIO is available
+    const storageProvider = getStorageProvider();
+    if (storageProvider !== 's3') {
+      return res.status(400).json({ 
+        error: 'S3/MinIO storage is not configured.',
+        storage_provider: storageProvider,
+      });
+    }
+
+    // Generate presigned GET URL (1 hour expiry for viewing)
+    const presignedUrl = await getPresignedGetUrl({
+      objectKey: key,
+      expiresIn: 3600, // 1 hour
+    });
+
+    res.json({
+      url: presignedUrl,
+      expiresIn: 3600,
+    });
+  } catch (error) {
+    console.error('Error generating presigned GET URL:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate presigned URL' });
+  }
+});
+
 // Check if employee needs to change password
 router.get('/check-password-change', authenticateToken, async (req, res) => {
   try {

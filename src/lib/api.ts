@@ -2334,6 +2334,12 @@ class ApiClient {
     });
   }
 
+  async getProfilePictureUrl(userId: string) {
+    return this.request(`/api/employees/profile-picture/${userId}`, {
+      method: 'GET',
+    });
+  }
+
   // Check for missing onboarding data
   async getMissingOnboardingData() {
     return this.request('/api/onboarding/me/missing-data');

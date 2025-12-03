@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { ProfilePicture } from '@/components/ProfilePicture';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import EmployeeSkillsEditor from '@/components/EmployeeSkillsEditor';
 import EmployeePastProjectsEditor from '@/components/EmployeePastProjectsEditor';
 import EmployeeHistoryTab from '@/components/EmployeeHistoryTab';
-import { CalendarDays, Clock } from 'lucide-react';
+import { CalendarDays, Clock, Camera, Upload } from 'lucide-react';
 import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
 
 interface SimpleEmployee {
@@ -43,20 +44,12 @@ interface SimpleEmployee {
   }>;
 }
 
-const statusChipClasses: Record<string, string> = {
-  In: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-  Leave: 'bg-yellow-50 text-yellow-700 border border-yellow-200',
-  WFH: 'bg-orange-50 text-orange-700 border border-orange-200',
-};
-
 export default function MyProfile() {
   const { userRole } = useAuth();
   const { toast } = useToast();
   const [employee, setEmployee] = useState<SimpleEmployee | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<
-    'summary' | 'personal' | 'skills' | 'projects' | 'history' | 'shifts'
-  >('summary');
+  const [activeTab, setActiveTab] = useState<'personal' | 'skills' | 'projects' | 'certifications' | 'shifts' | 'history'>('personal');
   const [about, setAbout] = useState('');
   const [jobLove, setJobLove] = useState('');
   const [hobbies, setHobbies] = useState('');
@@ -65,12 +58,13 @@ export default function MyProfile() {
   const [aboutSaving, setAboutSaving] = useState(false);
   const [upcomingShifts, setUpcomingShifts] = useState<any[]>([]);
   const [loadingShifts, setLoadingShifts] = useState(false);
+  const [uploadingProfilePic, setUploadingProfilePic] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
-        // Prefer full employee record
         let me: { id: string } | null = null;
         try {
           me = await api.getEmployeeId();
@@ -82,7 +76,6 @@ export default function MyProfile() {
           const emp = await api.getEmployee(me.id);
           setEmployee(emp);
         } else {
-          // Fallback to profile-only
           const profile = await api.getProfile();
           setEmployee({
             id: profile.id,
@@ -130,7 +123,6 @@ export default function MyProfile() {
   const reportingTeam = employee?.reporting_team || [];
   const canEdit = ['employee', 'manager'].includes(userRole || '');
 
-  // Shifts helpers
   const formatShiftTime = (time?: string | null) => {
     if (!time) return '--';
     const [hours, minutes] = time.split(':');
@@ -175,7 +167,6 @@ export default function MyProfile() {
     }
   };
 
-  // Load about/what I love/hobbies from backend once employee is known
   useEffect(() => {
     const fetchAbout = async () => {
       if (!(api as any).getMyAbout) return;
@@ -196,21 +187,81 @@ export default function MyProfile() {
 
     if (employee?.id) {
       fetchAbout();
+      fetchUpcomingShifts(employee.id);
     }
   }, [employee?.id]);
 
-  // Load shifts when user switches to shifts tab
-  useEffect(() => {
-    if (activeSubTab === 'shifts' && employee?.id) {
-      fetchUpcomingShifts(employee.id);
+  const handleProfilePictureUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please select an image file (JPG, PNG)',
+        variant: 'destructive',
+      });
+      return;
     }
-  }, [activeSubTab, employee?.id]);
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: 'File too large',
+        description: 'Profile picture must be less than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUploadingProfilePic(true);
+    try {
+      const { url, key } = await api.getProfilePicturePresignedUrl(file.type);
+      const uploadResponse = await fetch(url, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          'Content-Type': file.type,
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload file to storage');
+      }
+
+      const result = await api.uploadProfilePicture(url, key);
+
+      if (employee) {
+        setEmployee({
+          ...employee,
+          profiles: {
+            ...employee.profiles,
+            profile_picture_url: result.profile_picture_url,
+          },
+        });
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Profile picture uploaded successfully',
+      });
+    } catch (error: any) {
+      console.error('Error uploading profile picture:', error);
+      toast({
+        title: 'Upload failed',
+        description: error.message || 'Failed to upload profile picture',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingProfilePic(false);
+    }
+  };
+
+  const handleTabChange = (newTab: 'personal' | 'skills' | 'projects' | 'certifications' | 'shifts' | 'history') => {
+    setActiveTab(newTab);
+  };
 
   if (loading) {
     return (
       <AppLayout>
-        <div className="min-h-screen bg-gray-50 px-4 py-6">
-          <div className="mx-auto max-w-6xl text-center text-sm text-muted-foreground">
+        <div className="min-h-screen bg-gray-50 px-6 py-4">
+          <div className="mx-auto max-w-7xl text-center text-sm text-gray-500">
             Loading profile…
           </div>
         </div>
@@ -221,8 +272,8 @@ export default function MyProfile() {
   if (!employee) {
     return (
       <AppLayout>
-        <div className="min-h-screen bg-gray-50 px-4 py-6">
-          <div className="mx-auto max-w-6xl text-center text-sm text-muted-foreground">
+        <div className="min-h-screen bg-gray-50 px-6 py-4">
+          <div className="mx-auto max-w-7xl text-center text-sm text-gray-500">
             Profile not found.
           </div>
         </div>
@@ -232,61 +283,93 @@ export default function MyProfile() {
 
   return (
     <AppLayout>
-      <div className="min-h-screen bg-gray-50 px-4 py-6">
-        <div className="mx-auto max-w-6xl">
+      <div className="min-h-screen bg-gray-50 px-6 py-4">
+        <div className="mx-auto max-w-7xl">
           {/* Header */}
-          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="mb-5 flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-gray-900">My Profile</h1>
-              <p className="text-sm text-gray-500">
-                View your profile, work details, and reporting team.
+              <h1 className="text-3xl font-bold text-gray-900">My Profile</h1>
+              <p className="mt-1 text-sm text-gray-600">
+                Manage your profile information and preferences
               </p>
             </div>
             <Button
               type="button"
               variant="outline"
-              className="rounded-full border-purple-200 bg-white text-xs font-medium text-purple-700 hover:bg-purple-50"
+              className="h-9 rounded-lg border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              <span className="mr-1 h-1 w-1 rounded-full bg-purple-500" />
               Customise questions
             </Button>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-[280px,minmax(0,1fr),300px]">
+          <div className="grid gap-5 lg:grid-cols-[260px,minmax(0,1fr),280px]">
             {/* Left sidebar */}
             <aside className="space-y-4">
-              <Card className="rounded-2xl shadow-sm">
-                <CardContent className="p-4">
+              <Card className="glass-card glass-card-hover rounded-xl">
+                <CardContent className="p-5">
                   <div className="flex flex-col items-center text-center">
-                    <div className="mb-3 h-24 w-24 overflow-hidden rounded-full border-4 border-white bg-gray-100 shadow-sm">
-                      <Avatar className="h-full w-full">
-                        <AvatarImage src={employee.profiles?.profile_picture_url} />
-                        <AvatarFallback className="text-2xl font-semibold text-purple-600">
-                          {initials}
-                        </AvatarFallback>
-                      </Avatar>
+                    <div className="relative mb-3">
+                      <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-gray-200 bg-gray-100">
+                        <Avatar className="h-full w-full">
+                          {employee?.id && employee.profiles?.profile_picture_url ? (
+                            <ProfilePicture 
+                              userId={employee.id} 
+                              src={employee.profiles.profile_picture_url} 
+                            />
+                          ) : (
+                            <AvatarImage src={undefined} />
+                          )}
+                          <AvatarFallback className="text-xl font-semibold text-gray-700">
+                            {initials}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadingProfilePic}
+                        className="absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-gray-800 text-white shadow-md transition hover:bg-gray-700 disabled:opacity-50"
+                      >
+                        {uploadingProfilePic ? (
+                          <Upload className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Camera className="h-4 w-4" />
+                        )}
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            handleProfilePictureUpload(file);
+                          }
+                        }}
+                      />
                     </div>
-                    <h2 className="text-lg font-semibold text-gray-900">{fullName}</h2>
-                    <p className="text-sm text-gray-500">{employee.position || 'Employee'}</p>
-                    <p className="mt-0.5 text-xs text-gray-400">{employee.department || ''}</p>
+                    <h2 className="text-lg font-bold text-gray-900">{fullName}</h2>
+                    <p className="mt-1 text-sm font-medium text-gray-700">{employee.position || 'Employee'}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">{employee.department || ''}</p>
                   </div>
 
-                  <div className="mt-4 space-y-2 border-t border-gray-100 pt-3 text-xs">
+                  <div className="mt-4 space-y-2.5 border-t border-gray-100 pt-4 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="text-gray-400">Employee ID</span>
-                      <span className="font-medium text-gray-800">
+                      <span className="text-gray-600">Employee ID</span>
+                      <span className="font-semibold text-gray-900">
                         {employee.employee_id || 'N/A'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-gray-400">Location</span>
-                      <span className="font-medium text-gray-800">
+                      <span className="text-gray-600">Location</span>
+                      <span className="font-semibold text-gray-900">
                         {employee.work_location || 'N/A'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-gray-400">Status</span>
-                      <Badge variant="outline" className="text-[10px]">
+                      <span className="text-gray-600">Status</span>
+                      <Badge variant="outline" className="h-5 border-gray-300 bg-white px-2 text-[10px] font-medium text-gray-700">
                         {employee.status || 'active'}
                       </Badge>
                     </div>
@@ -294,25 +377,21 @@ export default function MyProfile() {
                 </CardContent>
               </Card>
 
-              <Card className="rounded-2xl shadow-sm">
-                <CardContent className="p-4 space-y-3 text-xs">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <Card className="glass-card glass-card-hover rounded-xl">
+                <CardContent className="p-5 space-y-3 text-xs">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-700">
                     Contact
                   </h3>
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     <div className="flex items-center gap-2">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-50 text-[10px] text-purple-600">
-                        📞
-                      </span>
-                      <span className="text-gray-700">
+                      <span className="text-gray-400">📞</span>
+                      <span className="font-medium text-gray-800">
                         {employee.profiles?.phone || 'Not provided'}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 break-all">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-50 text-[10px] text-purple-600">
-                        ✉️
-                      </span>
-                      <span className="text-gray-700">
+                      <span className="text-gray-400">✉️</span>
+                      <span className="font-medium text-gray-800">
                         {employee.profiles?.email || 'Not provided'}
                       </span>
                     </div>
@@ -321,311 +400,359 @@ export default function MyProfile() {
               </Card>
             </aside>
 
-            {/* Center panel */}
-            <main className="space-y-4">
-              <Card className="rounded-2xl shadow-sm">
-                <CardContent className="p-4">
-                  {/* Main tabs (visual only for now, About selected) */}
-                  <div className="flex flex-wrap gap-2 border-b border-gray-100 pb-2 text-xs font-medium text-gray-500">
-                    <button
-                      type="button"
-                      className="rounded-full bg-purple-50 px-3 py-1 text-xs font-medium text-purple-700"
-                    >
-                      About
-                    </button>
-                  </div>
-
-                  {/* Functional subtabs */}
-                  <div className="mt-3 flex gap-3 border-b border-gray-100 pb-2 text-xs text-gray-500">
+            {/* Center panel - Tabbed */}
+            <main>
+              <Card className="glass-card rounded-xl">
+                <CardContent className="p-6">
+                  {/* Tab Bar */}
+                  <div className="mb-6 flex gap-1 border-b border-gray-200/50">
                     {[
-                      { key: 'summary', label: 'Summary' },
-                      { key: 'personal', label: 'Personal details' },
+                      { key: 'personal', label: 'Personal Details' },
                       { key: 'skills', label: 'Skills' },
                       { key: 'projects', label: 'Projects' },
-                      { key: 'history', label: 'Employee history' },
-                      { key: 'shifts', label: 'Shifts assigned' },
+                      { key: 'certifications', label: 'Certifications' },
+                      { key: 'shifts', label: 'My Shifts' },
+                      { key: 'history', label: 'History' },
                     ].map((tab) => (
                       <button
                         key={tab.key}
                         type="button"
-                        className={`pb-1 transition ${
-                          activeSubTab === tab.key
-                            ? 'border-b-2 border-purple-500 text-purple-700'
-                            : 'hover:text-gray-700'
+                        onClick={() => handleTabChange(tab.key as any)}
+                        className={`relative px-4 py-2.5 text-sm font-medium transition-all duration-500 liquid-glass-tab ${
+                          activeTab === tab.key
+                            ? 'liquid-glass-tab-active text-gray-900'
+                            : 'text-gray-500 hover:text-gray-700'
                         }`}
-                        onClick={() => setActiveSubTab(tab.key as any)}
                       >
-                        {tab.label}
+                        <span className="relative z-10">{tab.label}</span>
+                        {activeTab === tab.key && (
+                          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-900 z-20" />
+                        )}
                       </button>
                     ))}
                   </div>
 
-                  {/* Subtab content */}
-                  {activeSubTab === 'summary' && (
-                    <div className="mt-4 space-y-6 text-sm text-gray-700">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-gray-900">About</h3>
-                        {canEdit && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-7 rounded-full px-3 text-xs"
-                            onClick={() => setAboutEditing((prev) => !prev)}
-                            disabled={aboutLoading || aboutSaving}
-                          >
-                            {aboutEditing ? 'Cancel' : 'Edit'}
-                          </Button>
-                        )}
-                      </div>
+                  {/* Tab Content - No animation, just show/hide */}
+                  <div className="relative" style={{ minHeight: '500px' }}>
+                      {/* Personal Details Tab */}
+                      {activeTab === 'personal' && (
+                        <div className="space-y-6">
+                          {/* About Section */}
+                          <div>
+                            <div className="mb-4 flex items-center justify-between">
+                              <h3 className="text-lg font-bold text-gray-900">About</h3>
+                              {canEdit && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 rounded-lg px-3 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                                  onClick={() => setAboutEditing((prev) => !prev)}
+                                  disabled={aboutLoading || aboutSaving}
+                                >
+                                  {aboutEditing ? 'Cancel' : 'Edit'}
+                                </Button>
+                              )}
+                            </div>
 
-                      {aboutLoading ? (
-                        <p className="text-xs text-gray-400">Loading about section…</p>
-                      ) : aboutEditing ? (
-                        <form
-                          className="space-y-4"
-                          onSubmit={async (e) => {
-                            e.preventDefault();
-                            if (!canEdit) return;
-                            try {
-                              setAboutSaving(true);
-                              if ((api as any).updateMyAbout) {
-                                await (api as any).updateMyAbout({
-                                  about_me: about || null,
-                                  job_love: jobLove || null,
-                                  hobbies: hobbies || null,
-                                });
-                              }
-                              toast({
-                                title: 'Saved',
-                                description: 'Your about section has been updated.',
-                              });
-                              setAboutEditing(false);
-                            } catch (error: any) {
-                              console.error('Error saving about info', error);
-                              toast({
-                                title: 'Unable to save',
-                                description: error?.message || 'Please try again.',
-                                variant: 'destructive',
-                              });
-                            } finally {
-                              setAboutSaving(false);
-                            }
-                          }}
-                        >
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium text-gray-500">About</p>
-                            <Textarea
-                              value={about}
-                              onChange={(e) => setAbout(e.target.value)}
-                              rows={3}
-                              placeholder="Tell your team a bit about yourself – what you do, what you care about, and how you like to work."
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium text-gray-500">
-                              What I love about my job?
-                            </p>
-                            <Textarea
-                              value={jobLove}
-                              onChange={(e) => setJobLove(e.target.value)}
-                              rows={3}
-                              placeholder="Share what energises you at work – solving problems, collaborating with your team, helping customers, or learning new things."
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium text-gray-500">
-                              My interests and hobbies
-                            </p>
-                            <Textarea
-                              value={hobbies}
-                              onChange={(e) => setHobbies(e.target.value)}
-                              rows={3}
-                              placeholder="Talk about your interests outside work – hobbies, sports, creative pursuits, or anything that’s important to you."
-                            />
-                          </div>
-                          <div className="flex justify-end gap-2 pt-2">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              className="h-8 px-3 text-xs"
-                              onClick={() => setAboutEditing(false)}
-                              disabled={aboutSaving}
-                            >
-                              Cancel
-                            </Button>
-                            <Button
-                              type="submit"
-                              className="h-8 px-3 text-xs"
-                              disabled={aboutSaving}
-                            >
-                              {aboutSaving ? 'Saving…' : 'Save'}
-                            </Button>
-                          </div>
-                        </form>
-                      ) : (
-                        <>
-                          <section className="space-y-1">
-                            <p className="leading-relaxed text-gray-600">
-                              {about ||
-                                'Tell your team a bit about yourself – what you do, what you care about, and how you like to work.'}
-                            </p>
-                          </section>
-
-                          <div className="space-y-4 border-t border-gray-100 pt-4">
-                            <section className="space-y-1">
-                              <h3 className="text-sm font-semibold text-gray-900">
-                                What I love about my job?
-                              </h3>
-                              <p className="leading-relaxed text-gray-600">
-                                {jobLove ||
-                                  'Share what energises you at work – solving problems, collaborating with your team, helping customers, or learning new things.'}
-                              </p>
-                            </section>
-
-                            <section className="space-y-1">
-                              <h3 className="text-sm font-semibold text-gray-900">
-                                My interests and hobbies
-                              </h3>
-                              <p className="leading-relaxed text-gray-600">
-                                {hobbies ||
-                                  'Use this space to talk about your interests outside work – hobbies, sports, creative pursuits, or anything that’s important to you.'}
-                              </p>
-                            </section>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {activeSubTab === 'personal' && (
-                    <div className="mt-4 grid gap-4 text-sm text-gray-700 md:grid-cols-2">
-                      <div className="space-y-3">
-                        <div>
-                          <p className="text-xs font-medium text-gray-400">Employee ID</p>
-                          <p className="font-medium text-gray-900">{employee.employee_id || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-gray-400">Department</p>
-                          <p className="font-medium text-gray-900">{employee.department || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-gray-400">Designation</p>
-                          <p className="font-medium text-gray-900">{employee.position || 'N/A'}</p>
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        <div>
-                          <p className="text-xs font-medium text-gray-400">Location</p>
-                          <p className="font-medium text-gray-900">
-                            {employee.work_location || 'Not set'}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-gray-400">Joined</p>
-                          <p className="font-medium text-gray-900">
-                            {employee.join_date
-                              ? new Date(employee.join_date).toLocaleDateString()
-                              : 'Not available'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeSubTab === 'skills' && employee.id && (
-                    <div className="mt-4">
-                      <EmployeeSkillsEditor employeeId={employee.id} canEdit={canEdit} />
-                    </div>
-                  )}
-
-                  {activeSubTab === 'projects' && employee.id && (
-                    <div className="mt-4">
-                      <EmployeePastProjectsEditor employeeId={employee.id} canEdit={canEdit} />
-                    </div>
-                  )}
-
-                  {activeSubTab === 'history' && employee.id && (
-                    <div className="mt-4">
-                      <EmployeeHistoryTab employeeId={employee.id} isOwnProfile />
-                    </div>
-                  )}
-
-                  {activeSubTab === 'shifts' && (
-                    <div className="mt-4 space-y-3 text-sm text-gray-700">
-                      {loadingShifts ? (
-                        <p className="text-xs text-gray-400">Loading assigned shifts…</p>
-                      ) : upcomingShifts.length === 0 ? (
-                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-6 text-center text-xs text-gray-400">
-                          No shifts assigned for the next 30 days.
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {upcomingShifts.map((shift) => {
-                            const label = getShiftDateLabel(shift.shift_date);
-                            const type = shift.shift_type || 'day';
-                            return (
-                              <div
-                                key={shift.id}
-                                className="flex items-start justify-between rounded-xl border border-gray-100 bg-white px-3 py-2 shadow-sm"
+                            {aboutLoading ? (
+                              <p className="text-sm text-gray-400">Loading about section…</p>
+                            ) : aboutEditing ? (
+                              <form
+                                className="space-y-4"
+                                onSubmit={async (e) => {
+                                  e.preventDefault();
+                                  if (!canEdit) return;
+                                  try {
+                                    setAboutSaving(true);
+                                    if ((api as any).updateMyAbout) {
+                                      await (api as any).updateMyAbout({
+                                        about_me: about || null,
+                                        job_love: jobLove || null,
+                                        hobbies: hobbies || null,
+                                      });
+                                    }
+                                    toast({
+                                      title: 'Saved',
+                                      description: 'Your about section has been updated.',
+                                    });
+                                    setAboutEditing(false);
+                                  } catch (error: any) {
+                                    console.error('Error saving about info', error);
+                                    toast({
+                                      title: 'Unable to save',
+                                      description: error?.message || 'Please try again.',
+                                      variant: 'destructive',
+                                    });
+                                  } finally {
+                                    setAboutSaving(false);
+                                  }
+                                }}
                               >
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-sm font-semibold text-gray-900">
-                                      {shift.template_name || 'Shift'}
-                                    </p>
-                                    <Badge variant="outline" className="text-[10px] capitalize">
-                                      {type}
-                                    </Badge>
-                                  </div>
-                                  <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-500">
-                                    <CalendarDays className="h-3 w-3" />
-                                    {label}
-                                  </p>
+                                <div className="space-y-2">
+                                  <p className="text-sm font-semibold text-gray-700">About</p>
+                                  <Textarea
+                                    value={about}
+                                    onChange={(e) => setAbout(e.target.value)}
+                                    rows={3}
+                                    className="border-gray-300 bg-white text-sm text-gray-900 placeholder:text-gray-400"
+                                    placeholder="Tell your team a bit about yourself..."
+                                  />
                                 </div>
-                                <div className="mt-1 flex flex-col items-end gap-1 text-xs text-gray-600">
-                                  <span className="inline-flex items-center gap-1">
-                                    <Clock className="h-3 w-3" />
-                                    {formatShiftTime(shift.start_time)} –{' '}
-                                    {formatShiftTime(shift.end_time)}
-                                  </span>
-                                  {shift.assigned_by && (
-                                    <span className="text-[10px] text-gray-400">
-                                      Assigned by:{' '}
-                                      {shift.assigned_by === 'algorithm' ? 'System' : 'Manager'}
-                                    </span>
-                                  )}
+                                <div className="space-y-2">
+                                  <p className="text-sm font-semibold text-gray-700">
+                                    What I love about my job?
+                                  </p>
+                                  <Textarea
+                                    value={jobLove}
+                                    onChange={(e) => setJobLove(e.target.value)}
+                                    rows={3}
+                                    className="border-gray-300 bg-white text-sm text-gray-900 placeholder:text-gray-400"
+                                    placeholder="Share what energises you at work..."
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <p className="text-sm font-semibold text-gray-700">
+                                    My interests and hobbies
+                                  </p>
+                                  <Textarea
+                                    value={hobbies}
+                                    onChange={(e) => setHobbies(e.target.value)}
+                                    rows={3}
+                                    className="border-gray-300 bg-white text-sm text-gray-900 placeholder:text-gray-400"
+                                    placeholder="Talk about your interests outside work..."
+                                  />
+                                </div>
+                                <div className="flex justify-end gap-2 pt-2">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    className="h-9 rounded-lg px-4 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                                    onClick={() => setAboutEditing(false)}
+                                    disabled={aboutSaving}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    type="submit"
+                                    className="h-9 rounded-lg bg-gray-900 px-4 text-sm font-medium text-white hover:bg-gray-800"
+                                    disabled={aboutSaving}
+                                  >
+                                    {aboutSaving ? 'Saving…' : 'Save'}
+                                  </Button>
+                                </div>
+                              </form>
+                            ) : (
+                              <div className="space-y-4">
+                                <p className="text-sm leading-relaxed text-gray-700">
+                                  {about ||
+                                    'Tell your team a bit about yourself – what you do, what you care about, and how you like to work.'}
+                                </p>
+                                <div className="space-y-4 border-t border-gray-100 pt-4">
+                                  <div>
+                                    <h4 className="text-sm font-bold text-gray-900">
+                                      What I love about my job?
+                                    </h4>
+                                    <p className="mt-1.5 text-sm leading-relaxed text-gray-700">
+                                      {jobLove ||
+                                        'Share what energises you at work – solving problems, collaborating with your team, helping customers, or learning new things.'}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <h4 className="text-sm font-bold text-gray-900">
+                                      My interests and hobbies
+                                    </h4>
+                                    <p className="mt-1.5 text-sm leading-relaxed text-gray-700">
+                                      {hobbies ||
+                                        "Use this space to talk about your interests outside work – hobbies, sports, creative pursuits, or anything that's important to you."}
+                                    </p>
+                                  </div>
                                 </div>
                               </div>
-                            );
-                          })}
+                            )}
+                          </div>
+
+                          {/* Personal Info Grid */}
+                          <div className="grid gap-5 border-t border-gray-100 pt-6 md:grid-cols-2">
+                            <div className="space-y-4">
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Employee ID</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">{employee.employee_id || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Department</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">{employee.department || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Designation</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">{employee.position || 'N/A'}</p>
+                              </div>
+                            </div>
+                            <div className="space-y-4">
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Location</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {employee.work_location || 'Not set'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Joined</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {employee.join_date
+                                    ? new Date(employee.join_date).toLocaleDateString()
+                                    : 'Not available'}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
-                    </div>
-                  )}
+
+                      {/* Skills Tab */}
+                      {activeTab === 'skills' && (
+                        <div>
+                          {employee?.id ? (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Skills</h3>
+                              <EmployeeSkillsEditor employeeId={employee.id} canEdit={canEdit} />
+                            </div>
+                          ) : (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Skills</h3>
+                              <p className="text-sm text-gray-400">Loading employee data...</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Projects Tab */}
+                      {activeTab === 'projects' && (
+                        <div>
+                          {employee?.id ? (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Projects</h3>
+                              <EmployeePastProjectsEditor employeeId={employee.id} canEdit={canEdit} />
+                            </div>
+                          ) : (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Projects</h3>
+                              <p className="text-sm text-gray-400">Loading employee data...</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Certifications Tab */}
+                      {activeTab === 'certifications' && (
+                        <div>
+                          <h3 className="mb-4 text-lg font-bold text-gray-900">Certifications</h3>
+                          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center">
+                            <p className="text-sm text-gray-500">No certifications added yet</p>
+                            {canEdit && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="mt-3 h-9 rounded-lg border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                              >
+                                Add Certification
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* My Shifts Tab */}
+                      {activeTab === 'shifts' && (
+                        <div>
+                          <h3 className="mb-4 text-lg font-bold text-gray-900">My Shifts</h3>
+                          {loadingShifts ? (
+                            <p className="text-sm text-gray-400">Loading assigned shifts…</p>
+                          ) : upcomingShifts.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+                              No shifts assigned for the next 30 days.
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {upcomingShifts.map((shift) => {
+                                const label = getShiftDateLabel(shift.shift_date);
+                                const type = shift.shift_type || 'day';
+                                return (
+                                  <div
+                                    key={shift.id}
+                                    className="liquid-glass-card flex items-start justify-between rounded-lg px-4 py-3"
+                                  >
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-sm font-bold text-gray-900">
+                                          {shift.template_name || 'Shift'}
+                                        </p>
+                                        <Badge variant="outline" className="h-5 border-gray-300 bg-white px-2 text-[10px] font-medium text-gray-700">
+                                          {type}
+                                        </Badge>
+                                      </div>
+                                      <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-600">
+                                        <CalendarDays className="h-3.5 w-3.5" />
+                                        {label}
+                                      </p>
+                                    </div>
+                                    <div className="mt-1 flex flex-col items-end gap-1 text-xs text-gray-700">
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <Clock className="h-3.5 w-3.5" />
+                                        {formatShiftTime(shift.start_time)} –{' '}
+                                        {formatShiftTime(shift.end_time)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* History Tab */}
+                      {activeTab === 'history' && (
+                        <div>
+                          {employee?.id ? (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Employee History</h3>
+                              <p className="mb-4 text-sm text-gray-600">
+                                View your career progression, promotions, salary changes, and awards
+                              </p>
+                              <EmployeeHistoryTab employeeId={employee.id} isOwnProfile />
+                            </div>
+                          ) : (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Employee History</h3>
+                              <p className="text-sm text-gray-400">Loading employee data...</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                  </div>
                 </CardContent>
               </Card>
             </main>
 
-            {/* Right sidebar – reporting team */}
+            {/* Right sidebar */}
             <aside>
-              <Card className="flex h-full flex-col rounded-2xl shadow-sm">
-                <CardContent className="flex h-full flex-col p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-gray-900">Reporting team</h3>
-                    <span className="text-xs text-gray-400">
+              <Card className="glass-card glass-card-hover flex h-full flex-col rounded-xl">
+                <CardContent className="flex h-full flex-col p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-900">Reporting team</h3>
+                    <span className="text-xs text-gray-600">
                       {reportingTeam.length} members
                     </span>
                   </div>
-                  <div className="mb-3">
+                  <div className="mb-4">
                     <Input
                       type="text"
                       placeholder="Search team..."
-                      className="h-8 rounded-full border-gray-200 bg-gray-50 px-3 text-xs placeholder:text-gray-400 focus:border-purple-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="h-9 rounded-lg border-gray-300 bg-white px-3 text-xs placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
                     />
                   </div>
 
-                  <div className="mt-1 flex-1 space-y-2 overflow-y-auto">
+                  <div className="mt-1 flex-1 space-y-2.5 overflow-y-auto">
                     {reportingTeam.length === 0 && (
                       <p className="text-xs text-gray-400">No direct reports configured yet.</p>
                     )}
@@ -646,22 +773,26 @@ export default function MyProfile() {
                         <button
                           key={member.id}
                           type="button"
-                          className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-white px-3 py-2 text-left text-xs shadow-sm transition hover:border-purple-200 hover:bg-purple-50/40"
+                          className="glass-card glass-card-hover flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-xs"
                         >
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-100 bg-gray-100 text-[11px] font-semibold text-purple-600">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-[11px] font-semibold text-gray-700">
                               {initialsMember}
                             </div>
                             <div>
-                              <p className="font-medium text-gray-900">{name}</p>
-                              <p className="text-[11px] text-gray-500">
+                              <p className="font-bold text-gray-900">{name}</p>
+                              <p className="text-[11px] text-gray-600">
                                 {member.position || member.department || 'Employee'}
                               </p>
                             </div>
                           </div>
                           <span
                             className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                              statusChipClasses[status] || statusChipClasses.In
+                              status === 'In'
+                                ? 'bg-gray-100 text-gray-700 border border-gray-200'
+                                : status === 'Leave'
+                                ? 'bg-gray-100 text-gray-700 border border-gray-200'
+                                : 'bg-gray-100 text-gray-700 border border-gray-200'
                             }`}
                           >
                             {status}
@@ -679,6 +810,3 @@ export default function MyProfile() {
     </AppLayout>
   );
 }
-
-
-
