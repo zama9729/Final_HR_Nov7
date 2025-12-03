@@ -1294,7 +1294,7 @@ export default function Timesheets() {
                                          }
                                        }, 0);
                                      }}
-                                     className="text-center border-2 transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
+                                    className="text-center border-2 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
                                      disabled={!isEditable || (isHoliday && entry?.is_holiday)}
                                      placeholder="0"
                                    />
@@ -1322,7 +1322,7 @@ export default function Timesheets() {
                                    max="24"
                                    value={entry.hours || ""}
                                    onChange={(e) => updateEntry(dateStr, entryIndex, "hours", e.target.value)}
-                                   className="text-center border-2 transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
+                                  className="text-center border-2 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
                                    disabled={!isEditable || (isHoliday && entry.is_holiday)}
                                    placeholder="0"
                                  />
@@ -1412,7 +1412,7 @@ export default function Timesheets() {
                                       }}
                                                                              disabled={!isEditable}
                                      >
-                                       <SelectTrigger className="w-full border-2 transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
+                                       <SelectTrigger className="w-full border-2 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
                                          <SelectValue placeholder="Select project" />
                                        </SelectTrigger>
                                       <SelectContent>
@@ -1539,7 +1539,7 @@ export default function Timesheets() {
               Holiday Calendar ({new Date().getFullYear()})
             </span>
                         <Select value={selectedState || 'all'} onValueChange={(v) => setSelectedState(v)}>
-               <SelectTrigger className="w-[200px] border-2 transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
+              <SelectTrigger className="w-[200px] border-2 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
                  <SelectValue placeholder="Select State" />
                </SelectTrigger>
               <SelectContent>
@@ -1567,7 +1567,7 @@ export default function Timesheets() {
                          return (
                            <div
                              key={holiday.id}
-                             className={`p-3 rounded-lg border-2 text-sm transition-all duration-200 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] ${
+                             className={`p-3 rounded-lg border-2 text-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
                                isInCurrentWeek ? 'bg-primary/15 border-primary ring-2 ring-primary/30' : 'border-border/50'
                              }`}
                            >

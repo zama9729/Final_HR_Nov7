@@ -866,7 +866,7 @@ export default function Dashboard() {
                   {stats.projects.map((project) => (
                     <div 
                       key={project.id}
-                      className="p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                      className="p-3 rounded-lg hover:bg-muted/50 hover-lift cursor-pointer"
                       onClick={() => navigate(`/projects/${project.id}`)}
                     >
                       <p className="font-medium">{project.name}</p>

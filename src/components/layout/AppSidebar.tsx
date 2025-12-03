@@ -498,7 +498,7 @@ export function AppSidebar() {
     const badgeCount = item.showBadge ? getBadgeCount(item.url) : 0;
 
     const baseHover =
-      "border border-transparent transition-all duration-200 hover:border-blue-400/50 hover:bg-blue-100/70 dark:hover:bg-sky-500/20 hover:text-blue-700 dark:hover:text-sky-200 focus-visible:ring-2 focus-visible:ring-blue-400/40";
+      "border border-transparent transition-all duration-200 hover-lift hover:bg-muted/40 dark:hover:bg-sky-500/20 hover:text-foreground dark:hover:text-sky-200 focus-visible:ring-2 focus-visible:ring-blue-400/40";
     const activeStyles = "bg-blue-600 text-white border border-blue-500 shadow-[0_10px_25px_rgba(37,99,235,0.35)]";
 
     if (item.sso) {

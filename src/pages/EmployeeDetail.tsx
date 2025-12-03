@@ -86,7 +86,7 @@ function TeamMembersList({ teamId, employeeId }: { teamId: string; employeeId: s
       {members.map((member: any) => (
         <div
           key={member.id}
-          className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+          className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 hover-lift cursor-pointer"
           onClick={() => navigate(`/employees/${member.employee_id}`)}
         >
           <Avatar className="h-10 w-10">
@@ -831,7 +831,7 @@ export default function EmployeeDetail() {
                   <CardContent>
                     <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                       {employee.reporting_team.map((member) => (
-                        <div key={member.id} className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                        <div key={member.id} className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 hover-lift transition-colors">
                           <Avatar className="h-10 w-10">
                             <AvatarFallback>
                               {member.profiles?.first_name?.charAt(0) || ''}{member.profiles?.last_name?.charAt(0) || ''}

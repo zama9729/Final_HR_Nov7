@@ -202,7 +202,7 @@ export default function LeaveRequests() {
                     teamRequests.map((request) => (
                       <div
                         key={request.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 hover-lift transition-colors"
                       >
                         <div className="flex items-center gap-4">
                           <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -260,7 +260,7 @@ export default function LeaveRequests() {
                     approvedRequests.map((request) => (
                       <div
                         key={request.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 hover-lift transition-colors"
                       >
                         <div className="flex items-center gap-4">
                           <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">

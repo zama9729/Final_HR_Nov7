@@ -294,7 +294,7 @@ export default function Employees() {
                     </TableRow>
                   ) : (
                     employees.map((employee) => (
-                      <TableRow key={employee.id} className="cursor-pointer hover:bg-muted/50">
+                      <TableRow key={employee.id} className="cursor-pointer hover:bg-muted/50 hover-lift">
                         <TableCell className="font-medium">
                           <Link to={`/employees/${employee.id}`} className="hover:underline">
                             {employee.profiles?.first_name || ''} {employee.profiles?.last_name || ''}
