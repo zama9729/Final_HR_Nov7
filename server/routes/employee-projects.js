@@ -69,6 +69,7 @@ router.get('/employees/:id/projects', authenticateToken, async (req, res) => {
            WHERE pa.employee_id = $1 
              AND pa.org_id = $2
              AND (pa.end_date IS NULL OR pa.end_date >= CURRENT_DATE)
+             AND (pa.start_date IS NULL OR pa.start_date <= CURRENT_DATE)
            ORDER BY pa.start_date DESC`,
           [id, empTenant]
         );

@@ -862,6 +862,12 @@ class ApiClient {
     return this.request('/api/timesheets/pending');
   }
 
+  async submitTimesheet(timesheetId: string) {
+    return this.request(`/api/timesheets/${timesheetId}/submit`, {
+      method: 'POST',
+    });
+  }
+
   async approveTimesheet(timesheetId: string, action: 'approve' | 'reject' | 'return', rejectionReason?: string) {
     return this.request(`/api/timesheets/${timesheetId}/approve`, {
       method: 'POST',

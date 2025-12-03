@@ -485,7 +485,7 @@ router.get('/pending', authenticateToken, async (req, res) => {
         JOIN employees e ON e.id = t.employee_id
         JOIN profiles p ON p.id = e.user_id
         WHERE t.tenant_id = $1
-          AND t.status = 'pending'
+          AND t.status = 'pending_approval'
           AND e.reporting_manager_id = $2
         ORDER BY t.submitted_at DESC
       `;
@@ -507,7 +507,7 @@ router.get('/pending', authenticateToken, async (req, res) => {
         JOIN profiles p ON p.id = e.user_id
         LEFT JOIN employees m ON e.reporting_manager_id = m.id
         WHERE t.tenant_id = $1
-          AND t.status = 'pending'
+          AND t.status = 'pending_approval'
           AND (e.reporting_manager_id IS NULL OR m.reporting_manager_id IS NULL)
         ORDER BY t.submitted_at DESC
       `;
@@ -799,6 +799,7 @@ router.post('/', authenticateToken, async (req, res) => {
       );
 
       // Insert new entries (skip holiday entries - they're auto-managed)
+      // Allow entries with 0 hours so users can add new entries and fill them in later
       if (entries && Array.isArray(entries) && entries.length > 0) {
         for (const entry of entries) {
           // Skip holiday entries - they're managed separately
@@ -830,6 +831,13 @@ router.post('/', authenticateToken, async (req, res) => {
           );
           if (holidayCheck.rows.length > 0) {
             continue; // Skip regular entry if holiday exists for this date
+          }
+          
+          // Allow entries with 0 hours - users can add entries and fill them in later
+          // Only skip if hours is negative (invalid)
+          if (entry.hours < 0) {
+            console.warn('Skipping entry with negative hours:', entry);
+            continue;
           }
           
           // Determine project_id and project_type from entry
@@ -1021,8 +1029,8 @@ router.post('/:id/submit', authenticateToken, async (req, res) => {
       `UPDATE timesheets
        SET status = 'pending_approval',
            total_hours = $1,
-           submitted_at = now(),
-           submitted_by = $2,
+           submitted_at = COALESCE(submitted_at, now()),
+           submitted_by = COALESCE(submitted_by, $2),
            approvals = $3::jsonb,
            audit_snapshot = $4::jsonb,
            updated_at = now()

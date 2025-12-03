@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, Megaphone, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2 } from "lucide-react";
 import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay, isSameDay } from "date-fns";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
 import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
@@ -18,6 +18,14 @@ import confetti from "canvas-confetti";
 interface DashboardStats {
   timesheetHours: number;
   leaveBalance: number;
+  leaveBreakdown: Array<{
+    id: string;
+    name: string;
+    leave_type: string;
+    entitlement: number;
+    used: number;
+    remaining: number;
+  }>;
   nextHoliday: { date: string; name: string } | null;
   projects: Array<{ id: string; name: string; category?: string }>;
   announcements: Array<{ id: string; title: string; body: string; priority: string; created_at: string }>;
@@ -57,6 +65,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>({
     timesheetHours: 0,
     leaveBalance: 0,
+    leaveBreakdown: [],
     nextHoliday: null,
     projects: [],
     announcements: [],
@@ -156,9 +165,25 @@ export default function Dashboard() {
 
       // Get leave balance (for all roles that have employee records)
       let leaveBalance = 0;
+      let leaveBreakdown: DashboardStats["leaveBreakdown"] = [];
       try {
         const balance = await api.getLeaveBalance();
         leaveBalance = balance.leaveBalance || 0;
+        if (Array.isArray(balance.breakdown) && balance.breakdown.length > 0) {
+          leaveBreakdown = balance.breakdown;
+        } else {
+          // Fallback to a single total bucket if detailed breakdown is not available
+          leaveBreakdown = [
+            {
+              id: "total",
+              name: "Total",
+              leave_type: "TOTAL",
+              entitlement: balance.totalLeaves || leaveBalance + (balance.approvedLeaves || 0) || 0,
+              used: balance.approvedLeaves || 0,
+              remaining: Math.max(0, leaveBalance),
+            },
+          ];
+        }
       } catch (error: any) {
         // Only log error if it's not a 404 or permission issue
         const errorMsg = error?.message || String(error);
@@ -223,6 +248,7 @@ export default function Dashboard() {
       setStats({
         timesheetHours: Math.round(timesheetHours),
         leaveBalance,
+        leaveBreakdown,
         nextHoliday,
         projects,
         announcements,
@@ -529,6 +555,21 @@ export default function Dashboard() {
 
   const isClockFeatureEnabled = clockStatus?.is_clock_mode ?? true;
 
+  const leaveDonutData = useMemo(() => {
+    if (!stats.leaveBreakdown || stats.leaveBreakdown.length === 0) return [];
+
+    // Use entitlement to show category mix even if no leaves have been used yet
+    return stats.leaveBreakdown.map((item) => ({
+      name: item.name,
+      value: item.entitlement || 0,
+    }));
+  }, [stats.leaveBreakdown]);
+
+  const totalEntitlement = useMemo(
+    () => stats.leaveBreakdown.reduce((sum, item) => sum + (item.entitlement || 0), 0),
+    [stats.leaveBreakdown]
+  );
+
   const handleClockButtonClick = () => {
     if (!isClockFeatureEnabled) {
       toast({
@@ -676,54 +717,88 @@ export default function Dashboard() {
 
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Next shift</p>
-                  <p className="text-sm font-semibold">
-                    {nextShift
-                      ? `${getShiftDateLabel(nextShift.shift_date)}, ${formatShiftTime(nextShift.start_time)}`
-                      : 'No shifts scheduled'}
-                  </p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Upcoming holiday</p>
+                  {stats.nextHoliday ? (
+                    <p className="text-sm font-semibold">
+                      {stats.nextHoliday.name} · {formatHolidayDate(stats.nextHoliday.date)}
+                    </p>
+                  ) : (
+                    <p className="text-sm font-semibold">No upcoming holidays</p>
+                  )}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/calendar')}>
-                  View schedule
-                </Button>
+                <CalendarDays className="h-6 w-6 text-sky-500 dark:text-sky-300" />
               </div>
             </CardContent>
           </Card>
           <Card className="shadow-lg border border-white/60 dark:border-slate-800/70 bg-white/80 dark:bg-slate-900/70 backdrop-blur-lg">
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-semibold">Leave & Holiday Snapshot</CardTitle>
-              <p className="text-sm text-muted-foreground">Plan time off with confidence</p>
+              <CardTitle className="text-lg font-semibold">Leave Overview</CardTitle>
+              <p className="text-sm text-muted-foreground">Understand how your leaves are used</p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-2xl border border-emerald-200/60 dark:border-emerald-500/30 bg-emerald-50/80 dark:bg-emerald-500/10 p-4 flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-200">Leave balance</p>
-                  <p className="text-3xl font-bold text-slate-900 dark:text-white">{stats.leaveBalance} days</p>
-                  <p className="text-xs text-muted-foreground">available right now</p>
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <div className="rounded-2xl border border-emerald-200/60 dark:border-emerald-500/30 bg-emerald-50/80 dark:bg-emerald-500/10 p-3 h-full flex flex-col items-center justify-center">
+                    <div className="h-32 w-32">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={leaveDonutData}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius={26}
+                            outerRadius={40}
+                            paddingAngle={2}
+                          >
+                            {leaveDonutData.map((entry, index) => {
+                              const colors = [
+                                "#10B981", // emerald
+                                "#3B82F6", // blue
+                                "#F97316", // orange
+                                "#A855F7", // purple
+                                "#F59E0B", // amber
+                              ];
+                              return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
+                            })}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground text-center">
+                      {totalEntitlement} days across all leave types
+                    </p>
+                  </div>
                 </div>
-                <Button
-                  onClick={handleApplyLeave}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white min-w-[120px]"
-                >
-                  Apply leave
-                </Button>
-              </div>
-              <div className="rounded-2xl border border-sky-200/60 dark:border-sky-500/30 bg-sky-50/80 dark:bg-sky-500/10 p-4 flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-sky-600 dark:text-sky-200">Upcoming holiday</p>
-                  {stats.nextHoliday ? (
-                    <>
-                      <p className="text-lg font-semibold text-slate-900 dark:text-white">{stats.nextHoliday.name}</p>
-                      <p className="text-sm text-muted-foreground">{formatHolidayDate(stats.nextHoliday.date)}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-lg font-semibold text-slate-900 dark:text-white">No holiday announced</p>
-                      <p className="text-sm text-muted-foreground">We&apos;ll update you soon</p>
-                    </>
-                  )}
+                <div className="flex-1 space-y-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-200">
+                      Leave balance
+                    </p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-white">
+                      {stats.leaveBalance} days
+                    </p>
+                    <p className="text-xs text-muted-foreground">available right now</p>
+                  </div>
+                  <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                    {stats.leaveBreakdown.map((item) => (
+                      <div key={item.id} className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-slate-700 dark:text-slate-200">
+                          {item.name}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {item.used} used · {item.entitlement} total
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    onClick={handleApplyLeave}
+                    className="bg-emerald-500 hover:bg-emerald-600 text-white w-full mt-1"
+                  >
+                    Apply leave
+                  </Button>
                 </div>
-                <CalendarDays className="h-10 w-10 text-sky-500 dark:text-sky-300 drop-shadow-[0_8px_24px_rgba(14,165,233,0.35)]" />
               </div>
             </CardContent>
           </Card>

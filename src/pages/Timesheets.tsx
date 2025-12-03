@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Clock, Save, Check, X, Calendar as CalendarIcon, RotateCcw, Plus, Trash2, CheckCircle2, XCircle, Hourglass, Info } from "lucide-react";
+import { Clock, Save, Check, X, Calendar as CalendarIcon, RotateCcw, Plus, Trash2, Send, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +28,12 @@ interface TimesheetEntry {
   is_holiday?: boolean;
   source?: string;
   readonly?: boolean;
+  clock_in?: string | null;
+  clock_out?: string | null;
+  manual_in?: string | null;
+  manual_out?: string | null;
+  hours_worked?: number | null;
+  notes?: string | null;
 }
 
 interface Timesheet {
@@ -53,6 +59,7 @@ export default function Timesheets() {
   const [currentWeek, setCurrentWeek] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [timesheet, setTimesheet] = useState<Timesheet | null>(null);
   const [entries, setEntries] = useState<Record<string, TimesheetEntry[]>>({});
+  const [timesheetData, setTimesheetData] = useState<any>(null);
   const [shifts, setShifts] = useState<Record<string, Shift>>({});
   const [holidays, setHolidays] = useState<any[]>([]);
   const [holidayCalendar, setHolidayCalendar] = useState<any>({});
@@ -62,9 +69,8 @@ export default function Timesheets() {
   const [employeeId, setEmployeeId] = useState<string>('');
   const [employeeState, setEmployeeState] = useState<string>('');
   const [assignedProjects, setAssignedProjects] = useState<Array<{id: string; project_id: string; project_name: string}>>([]);
-  const [reopenDialogOpen, setReopenDialogOpen] = useState(false);
-  const [reopenComment, setReopenComment] = useState("");
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfWeek(new Date(), { weekStartsOn: 1 }),
     to: addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 6),
@@ -415,20 +421,21 @@ export default function Timesheets() {
       const weekEnd = format(addDays(currentWeek, 6), "yyyy-MM-dd");
 
       // Fetch existing timesheet (this now returns holidays even if timesheet doesn't exist)
-      const timesheetData = await api.getTimesheet(weekStart, weekEnd);
+      const fetchedTimesheetData = await api.getTimesheet(weekStart, weekEnd);
+      setTimesheetData(fetchedTimesheetData);
 
       // Map entries by date - group multiple entries per day
       const entriesMap: Record<string, TimesheetEntry[]> = {};
       const containsShiftEntries = Boolean(
-        timesheetData?.entries?.some(
+        fetchedTimesheetData?.entries?.some(
           (entry: any) => typeof entry?.source === "string" && entry.source.toLowerCase() === "shift"
         )
       );
       setHasShiftEntries(containsShiftEntries);
       
       // First, process existing timesheet entries if any
-      if (timesheetData?.entries && Array.isArray(timesheetData.entries)) {
-        timesheetData.entries.forEach((entry: any) => {
+      if (fetchedTimesheetData?.entries && Array.isArray(fetchedTimesheetData.entries)) {
+        fetchedTimesheetData.entries.forEach((entry: any) => {
           // Convert work_date to YYYY-MM-DD format if it's an ISO string
           let workDate = entry.work_date;
           if (typeof workDate === 'string' && workDate.includes('T')) {
@@ -446,17 +453,24 @@ export default function Timesheets() {
           entriesMap[workDate].push({
             ...entry,
             work_date: workDate,
+            hours: typeof entry.hours === 'number' && entry.hours > 0 ? entry.hours : (entry.hours_worked ?? 0) || 0,
+            hours_worked: entry.hours_worked ?? entry.hours ?? 0,
             is_holiday: entry.is_holiday || false, // Ensure this is set
             source: entry.source,
             readonly: entry.readonly,
+            clock_in: entry.clock_in || null,
+            clock_out: entry.clock_out || null,
+            manual_in: entry.manual_in || null,
+            manual_out: entry.manual_out || null,
+            notes: entry.notes || entry.description || '',
           });
         });
       }
       
       // Set holiday calendar and inject holidays into entries
-      // Normalize holidays from timesheetData
-      if (timesheetData?.holidayCalendar && Array.isArray(timesheetData.holidayCalendar)) {
-        const normalizedHolidays = timesheetData.holidayCalendar.map((h: any) => ({
+      // Normalize holidays from fetchedTimesheetData
+      if (fetchedTimesheetData?.holidayCalendar && Array.isArray(fetchedTimesheetData.holidayCalendar)) {
+        const normalizedHolidays = fetchedTimesheetData.holidayCalendar.map((h: any) => ({
           ...h,
           date: normalizeDate(h.date)
         })).filter((h: any) => h.date);
@@ -468,8 +482,8 @@ export default function Timesheets() {
         const holidayMap: Record<string, any> = {};
         
         // From timesheet holidayCalendar
-        if (timesheetData?.holidayCalendar && Array.isArray(timesheetData.holidayCalendar)) {
-          timesheetData.holidayCalendar.forEach((h: any) => {
+        if (fetchedTimesheetData?.holidayCalendar && Array.isArray(fetchedTimesheetData.holidayCalendar)) {
+          fetchedTimesheetData.holidayCalendar.forEach((h: any) => {
             const dateStr = normalizeDate(h.date);
             if (dateStr) {
               holidayMap[dateStr] = { ...h, date: dateStr, name: h.name || 'Holiday' };
@@ -491,23 +505,38 @@ export default function Timesheets() {
       const allHolidays = getAllHolidaysForWeek();
       
       // Initialize all week days with entries (including holidays)
+      // Also merge clock in/out data from timesheetData entries
       weekDays.forEach((day) => {
         const dateStr = format(day, "yyyy-MM-dd");
+        
+        // Find matching entry from fetchedTimesheetData that has clock_in/clock_out
+        const matchingEntry = fetchedTimesheetData?.entries?.find((e: any) => {
+          const entryDate = typeof e.work_date === 'string' && e.work_date.includes('T') 
+            ? e.work_date.split('T')[0] 
+            : String(e.work_date);
+          return entryDate === dateStr;
+        });
         
         // If holiday exists for this date, ensure at least one holiday entry
         if (allHolidays[dateStr]) {
           if (!entriesMap[dateStr] || entriesMap[dateStr].length === 0) {
             entriesMap[dateStr] = [{
               work_date: dateStr,
-              hours: 0,
+              hours: matchingEntry?.hours_worked ?? matchingEntry?.hours ?? 0,
+              hours_worked: matchingEntry?.hours_worked ?? matchingEntry?.hours ?? 0,
               description: "Holiday",
               is_holiday: true,
               project_id: null,
               project_type: null,
               source: undefined,
+              clock_in: matchingEntry?.clock_in || null,
+              clock_out: matchingEntry?.clock_out || null,
+              manual_in: matchingEntry?.manual_in || null,
+              manual_out: matchingEntry?.manual_out || null,
+              notes: matchingEntry?.notes || matchingEntry?.description || '',
             }];
           } else {
-            // Update first entry to holiday if not already
+            // Update first entry to holiday if not already, but preserve clock times
             if (!entriesMap[dateStr][0]?.is_holiday) {
               entriesMap[dateStr][0] = {
                 ...entriesMap[dateStr][0],
@@ -516,28 +545,49 @@ export default function Timesheets() {
                 project_id: null,
                 project_type: null,
                 source: entriesMap[dateStr][0]?.source,
+                hours: entriesMap[dateStr][0]?.hours || matchingEntry?.hours_worked || matchingEntry?.hours || 0,
+                hours_worked: entriesMap[dateStr][0]?.hours_worked || entriesMap[dateStr][0]?.hours || matchingEntry?.hours_worked || matchingEntry?.hours || 0,
+                clock_in: entriesMap[dateStr][0]?.clock_in || matchingEntry?.clock_in || null,
+                clock_out: entriesMap[dateStr][0]?.clock_out || matchingEntry?.clock_out || null,
+                manual_in: entriesMap[dateStr][0]?.manual_in || matchingEntry?.manual_in || null,
+                manual_out: entriesMap[dateStr][0]?.manual_out || matchingEntry?.manual_out || null,
+                notes: entriesMap[dateStr][0]?.notes || matchingEntry?.notes || entriesMap[dateStr][0]?.description || '',
               };
             }
           }
         } else if (!entriesMap[dateStr] || entriesMap[dateStr].length === 0) {
-          // Create empty entry if it doesn't exist
+          // Create empty entry if it doesn't exist, but include clock times from matching entry
           entriesMap[dateStr] = [{
             work_date: dateStr,
-            hours: 0,
+            hours: matchingEntry?.hours_worked ?? matchingEntry?.hours ?? 0,
+            hours_worked: matchingEntry?.hours_worked ?? matchingEntry?.hours ?? 0,
             description: "",
             project_id: null,
             project_type: null,
             is_holiday: false,
             source: undefined,
+            clock_in: matchingEntry?.clock_in || null,
+            clock_out: matchingEntry?.clock_out || null,
+            manual_in: matchingEntry?.manual_in || null,
+            manual_out: matchingEntry?.manual_out || null,
+            notes: matchingEntry?.notes || matchingEntry?.description || '',
           }];
         } else {
-          // Ensure existing entries have project_id and project_type
-          entriesMap[dateStr] = entriesMap[dateStr].map(entry => ({
+          // Ensure existing entries have project_id, project_type, and clock times
+          entriesMap[dateStr] = entriesMap[dateStr].map((entry, idx) => ({
             ...entry,
+            hours: entry.hours || entry.hours_worked || (idx === 0 ? matchingEntry?.hours_worked || matchingEntry?.hours : 0) || 0,
+            hours_worked: entry.hours_worked ?? entry.hours ?? (idx === 0 ? matchingEntry?.hours_worked || matchingEntry?.hours : 0) ?? 0,
             is_holiday: entry.is_holiday || false,
             project_id: entry.project_id || null,
             project_type: entry.project_type || null,
             source: entry.source,
+            // Merge clock times from matching entry if not already set
+            clock_in: entry.clock_in || (idx === 0 ? matchingEntry?.clock_in : null) || null,
+            clock_out: entry.clock_out || (idx === 0 ? matchingEntry?.clock_out : null) || null,
+            manual_in: entry.manual_in || (idx === 0 ? matchingEntry?.manual_in : null) || null,
+            manual_out: entry.manual_out || (idx === 0 ? matchingEntry?.manual_out : null) || null,
+            notes: entry.notes || (idx === 0 ? matchingEntry?.notes : null) || entry.description || '',
           }));
         }
       });
@@ -545,8 +595,8 @@ export default function Timesheets() {
       setEntries(entriesMap);
       
       // Set timesheet data if it exists
-      if (timesheetData && timesheetData.id) {
-        setTimesheet(timesheetData as any);
+      if (fetchedTimesheetData && fetchedTimesheetData.id) {
+        setTimesheet(fetchedTimesheetData as any);
       } else {
         setTimesheet(null);
       }
@@ -774,8 +824,8 @@ export default function Timesheets() {
         const entryArray = entries[dateKey] || [];
         
         entryArray.forEach((entry) => {
-          // Skip holiday entries and entries with no hours
-          if (entry.is_holiday || !entry || (Number(entry.hours) || 0) <= 0) {
+          // Skip holiday entries only - allow entries with 0 hours so users can add new entries
+          if (entry.is_holiday || !entry) {
             return;
           }
           
@@ -828,17 +878,26 @@ export default function Timesheets() {
             description: String(entry?.description || ''),
             project_id: entry?.project_id || null,
             project_type: entry?.project_type || null,
+            clock_in: entry?.clock_in || null,
+            clock_out: entry?.clock_out || null,
+            manual_in: entry?.manual_in || null,
+            manual_out: entry?.manual_out || null,
+            source: entry?.source || null,
+            notes: entry?.notes || entry?.description || '',
+            hours_worked: typeof entry?.hours_worked === 'number' ? entry.hours_worked : Number(entry?.hours) || 0,
           });
         });
       });
 
       // Final validation - ensure all entries have valid work_date and skip holiday entries
+      // Allow entries with 0 hours so users can add new entries and fill them in later
       const entriesToSave = entriesArray.filter((entry) => {
         // Skip holiday entries - they're auto-managed by backend
         if (entry.is_holiday) {
           return false;
         }
-        const isValid = entry && entry.work_date && entry.work_date.trim() !== '' && entry.hours > 0;
+        // Validate entry has work_date - allow 0 hours for new entries
+        const isValid = entry && entry.work_date && entry.work_date.trim() !== '' && (entry.hours >= 0);
         if (!isValid) {
           console.warn('Filtering out invalid entry:', entry);
         }
@@ -864,14 +923,15 @@ export default function Timesheets() {
       }
 
       // Save timesheet via API
-      const timesheetData = await api.saveTimesheet(weekStart, weekEnd, hoursToSave, entriesToSave);
+      const savedTimesheetData = await api.saveTimesheet(weekStart, weekEnd, hoursToSave, entriesToSave);
 
-      if (timesheetData) {
-        setTimesheet(timesheetData as any);
+      if (savedTimesheetData) {
+        setTimesheet(savedTimesheetData as any);
+        setTimesheetData(savedTimesheetData as any);
         
         // Map entries by date - group multiple entries per day
         const entriesMap: Record<string, TimesheetEntry[]> = {};
-        (timesheetData as any).entries?.forEach((entry: any) => {
+        (savedTimesheetData as any).entries?.forEach((entry: any) => {
           // Convert work_date to YYYY-MM-DD format if it's an ISO string
           let workDate = entry.work_date;
           if (typeof workDate === 'string' && workDate.includes('T')) {
@@ -889,6 +949,13 @@ export default function Timesheets() {
           entriesMap[workDate].push({
             ...entry,
             work_date: workDate,
+            hours: typeof entry.hours === 'number' && entry.hours > 0 ? entry.hours : (entry.hours_worked ?? 0) || 0,
+            hours_worked: entry.hours_worked ?? entry.hours ?? 0,
+            clock_in: entry.clock_in || null,
+            clock_out: entry.clock_out || null,
+            manual_in: entry.manual_in || null,
+            manual_out: entry.manual_out || null,
+            notes: entry.notes || entry.description || '',
           });
         });
         setEntries(entriesMap);
@@ -910,47 +977,61 @@ export default function Timesheets() {
     }
   };
 
-  const handleReopen = () => {
-    if (!timesheet) return;
-    setReopenComment("");
-    setReopenDialogOpen(true);
-  };
-
-  const confirmReopen = async () => {
-    if (!timesheet || !reopenComment.trim()) {
+  const handleSubmit = async () => {
+    if (!timesheet || !timesheet.id) {
       toast({
         title: "Error",
-        description: "Please provide a comment for reopening",
+        description: "Please save the timesheet first before submitting",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (timesheet.status === 'pending_approval' || timesheet.status === 'approved') {
+      toast({
+        title: "Already Submitted",
+        description: "This timesheet has already been submitted for approval",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      setLoading(true);
-      // Call API to reopen the timesheet
-      await api.approveTimesheet(timesheet.id!, 'return', reopenComment.trim());
-      setReopenDialogOpen(false);
-      setReopenComment("");
+      setSubmitting(true);
+      await api.submitTimesheet(timesheet.id);
       await fetchTimesheet();
       toast({
         title: "Success",
-        description: "Timesheet reopened successfully. You can now edit and resubmit.",
+        description: "Timesheet submitted for approval successfully",
       });
     } catch (error: any) {
-      console.error("Error reopening timesheet:", error);
+      console.error("Error submitting timesheet:", error);
       toast({
         title: "Error",
-        description: error.message || "Failed to reopen timesheet",
+        description: error.message || "Failed to submit timesheet",
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
   const isToday = (date: Date) => isSameDay(date, new Date());
-  const isEditable = !timesheet || timesheet.status === "pending";
+  // Only allow editing if timesheet is draft, pending (legacy), or doesn't exist yet
+  // Once submitted (pending_approval) or approved, it should not be editable
+  // Note: 'pending' status is legacy from old code - treat it as editable draft
+  const isEditable = !timesheet || timesheet.status === "draft" || timesheet.status === "pending";
+  
+  // Format time for display
+  const formatTime = (timeStr: string | null | undefined): string => {
+    if (!timeStr) return '';
+    try {
+      const date = new Date(timeStr);
+      return format(date, 'HH:mm');
+    } catch {
+      return '';
+    }
+  };
 
   return (
     <AppLayout>
@@ -964,29 +1045,6 @@ export default function Timesheets() {
           <p className="text-muted-foreground text-lg">Track and manage your work hours for the week</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-          {timesheet?.status && (
-            <div className={`px-5 py-3 rounded-xl text-sm font-bold flex items-center gap-2.5 shadow-lg border-2 backdrop-blur-sm ${
-              timesheet.status === "approved" 
-                ? "bg-gradient-to-r from-green-50 to-emerald-50 text-green-700 border-green-300 dark:from-green-950/40 dark:to-emerald-950/40 dark:text-green-400 dark:border-green-700"
-                : timesheet.status === "rejected"
-                ? "bg-gradient-to-r from-red-50 to-rose-50 text-red-700 border-red-300 dark:from-red-950/40 dark:to-rose-950/40 dark:text-red-400 dark:border-red-700"
-                : "bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-700 border-amber-300 dark:from-amber-950/40 dark:to-yellow-950/40 dark:text-amber-400 dark:border-amber-700"
-            }`}>
-              {timesheet.status === "approved" && (
-                <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
-              )}
-              {timesheet.status === "rejected" && (
-                <XCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
-              )}
-              {timesheet.status === "pending" && (
-                <Hourglass className="h-6 w-6 text-amber-600 dark:text-amber-400 animate-pulse" />
-              )}
-              <span className="text-base">
-                {timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}
-              </span>
-            </div>
-          )}
-          
           <div className="flex flex-wrap gap-2 items-center">
             <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
               <PopoverTrigger asChild>
@@ -1087,7 +1145,7 @@ export default function Timesheets() {
                     const hasShift = shifts[dateStr];
                     const isHoliday = isDateHoliday(dateStr);
                     return (
-                      <th key={dateStr} className={`text-center p-4 font-bold min-w-[180px] border-r last:border-r-0 ${isToday(day) ? "bg-primary/15 ring-2 ring-primary/30" : ""}`}>
+                      <th key={dateStr} className={`text-center p-4 font-bold min-w-[200px] border-r last:border-r-0 ${isToday(day) ? "bg-primary/15 ring-2 ring-primary/30" : ""}`}>
                         <div className="flex flex-col items-center gap-2">
                           <div className="flex items-center gap-1.5">
                             <span className="text-base">{format(day, "EEE")}</span>
@@ -1132,6 +1190,72 @@ export default function Timesheets() {
 
                     return (
                       <React.Fragment key={`entry-row-${entryIndex}`}>
+                        {/* Clock In/Out row - only show for first entry */}
+                        {entryIndex === 0 && (
+                          <tr className="border-b bg-muted/10 hover:bg-muted/20 transition-colors">
+                            <td className="p-2 font-medium text-sm sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
+                              Clock In/Out
+                            </td>
+                            {weekDays.map((day) => {
+                              const dateStr = format(day, "yyyy-MM-dd");
+                              const dayEntries = entries[dateStr] || [];
+                              const entry = dayEntries[0];
+                              const isHoliday = isDateHoliday(dateStr);
+                              
+                              // Also check timesheetData state for clock times if entry doesn't have them
+                              const matchingDataEntry = timesheetData?.entries?.find((e: any) => {
+                                const entryDate = typeof e.work_date === 'string' && e.work_date.includes('T') 
+                                  ? e.work_date.split('T')[0] 
+                                  : String(e.work_date);
+                                return entryDate === dateStr;
+                              });
+                              
+                              if (isHoliday) {
+                                return (
+                                  <td key={dateStr} className={`p-2 align-top border-r text-center text-sm text-muted-foreground ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                    Holiday
+                                  </td>
+                                );
+                              }
+                              
+                              // Prefer entry clock times, fallback to matchingDataEntry from backend
+                              const clockIn = entry?.clock_in || entry?.manual_in || matchingDataEntry?.clock_in || null;
+                              const clockOut = entry?.clock_out || entry?.manual_out || matchingDataEntry?.clock_out || null;
+                              
+                              if (!clockIn && !clockOut) {
+                                return (
+                                  <td key={dateStr} className={`p-2 align-top border-r text-center text-sm text-muted-foreground ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                    No clock in
+                                  </td>
+                                );
+                              }
+                              
+                              return (
+                                <td key={dateStr} className={`p-2 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                  <div className="flex flex-col gap-1 text-xs">
+                                    {clockIn ? (
+                                      <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                                        <Clock className="h-3 w-3" />
+                                        <span className="font-medium">In: {formatTime(clockIn)}</span>
+                                      </div>
+                                    ) : (
+                                      <div className="text-muted-foreground">No clock in</div>
+                                    )}
+                                    {clockOut ? (
+                                      <div className="flex items-center gap-1 text-red-600 dark:text-red-400">
+                                        <Clock className="h-3 w-3" />
+                                        <span className="font-medium">Out: {formatTime(clockOut)}</span>
+                                      </div>
+                                    ) : clockIn ? (
+                                      <div className="text-amber-600 dark:text-amber-400 text-xs">Still clocked in</div>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              );
+                            })}
+                            <td className="p-2 border-l bg-muted/20"></td>
+                          </tr>
+                        )}
                                                  {/* Hours row */}
                          <tr className="border-b hover:bg-muted/20 transition-colors">
                            <td className="p-3 font-bold sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
@@ -1213,7 +1337,14 @@ export default function Timesheets() {
                                                  {/* Project/Task row */}
                          <tr className="border-b hover:bg-muted/20 transition-colors">
                            <td className="p-3 font-bold sticky left-0 bg-background/95 backdrop-blur-sm z-10 border-r">
-                             {entryIndex === 0 ? "Project / Task" : ""}
+                             {entryIndex === 0 ? (
+                               <div className="flex flex-col gap-1">
+                                 <span>Project / Task</span>
+                                 {isEditable && (
+                                   <span className="text-xs text-muted-foreground font-normal">Click + to add entries</span>
+                                 )}
+                               </div>
+                             ) : ""}
                            </td>
                           {weekDays.map((day) => {
                             const dateStr = format(day, "yyyy-MM-dd");
@@ -1302,27 +1433,29 @@ export default function Timesheets() {
 
                                     {/* Add/Remove buttons */}
                                     {isEditable && (
-                                      <div className="flex items-center gap-1">
+                                      <div className="flex items-center gap-2 mt-2">
                                         {isLastEntry && (
                                           <Button
-                                            variant="ghost"
+                                            variant="outline"
                                             size="sm"
-                                            className="h-7 w-7 p-0"
+                                            className="h-8 px-3 border-2 border-primary/30 hover:border-primary hover:bg-primary/10"
                                             onClick={() => addEntry(dateStr)}
                                             title="Add another entry for this day"
                                           >
-                                            <Plus className="h-3.5 w-3.5" />
+                                            <Plus className="h-4 w-4 mr-1" />
+                                            <span className="text-xs font-medium">Add Entry</span>
                                           </Button>
                                         )}
                                         {dayEntries.length > 1 && (
                                           <Button
-                                            variant="ghost"
+                                            variant="outline"
                                             size="sm"
-                                            className="h-7 w-7 p-0 text-red-600 hover:text-red-700"
+                                            className="h-8 px-3 border-2 border-red-300 hover:border-red-500 hover:bg-red-50 text-red-600 hover:text-red-700"
                                             onClick={() => removeEntry(dateStr, entryIndex)}
                                             title="Remove this entry"
                                           >
-                                            <Trash2 className="h-3.5 w-3.5" />
+                                            <Trash2 className="h-4 w-4 mr-1" />
+                                            <span className="text-xs font-medium">Remove</span>
                                           </Button>
                                         )}
                                       </div>
@@ -1365,38 +1498,33 @@ export default function Timesheets() {
                <Button 
                  onClick={saveTimesheet} 
                  disabled={loading}
+                 variant="outline"
                  className="px-6 py-2.5 text-base font-semibold border-2"
                  size="lg"
                >
                  <Save className="h-5 w-5 mr-2" />
-                 {loading ? "Saving..." : "Save Timesheet"}
+                 {loading ? "Saving..." : "Save Draft"}
                </Button>
+               {timesheet?.id && timesheet.status !== 'pending_approval' && timesheet.status !== 'approved' && (
+                 <Button 
+                   onClick={handleSubmit} 
+                   disabled={submitting || loading || !timesheet.id}
+                   className="px-6 py-2.5 text-base font-semibold border-2 bg-primary hover:bg-primary/90"
+                   size="lg"
+                 >
+                   <Send className="h-5 w-5 mr-2" />
+                   {submitting ? "Submitting..." : "Submit for Approval"}
+                 </Button>
+               )}
              </div>
            )}
-
-                     {timesheet?.status === "rejected" && (
-             <div className="mt-6 p-5 bg-destructive/10 border-2 border-destructive/30 rounded-xl space-y-4 backdrop-blur-sm">
-               <div>
-                 <p className="font-bold text-lg text-destructive mb-2">Rejection Reason:</p>
-                 <p className="text-base mt-1 text-destructive/90">{timesheet.rejection_reason}</p>
-               </div>
-               <Button onClick={handleReopen} variant="outline" size="sm" className="border-2">
-                 <RotateCcw className="h-4 w-4 mr-2" />
-                 Reopen for Editing
-               </Button>
-             </div>
-           )}
-
-           {timesheet?.status === "approved" && (
+           
+           {timesheet?.status === "pending_approval" && (
              <div className="mt-6 p-5 bg-blue-50 dark:bg-blue-950/30 border-2 border-blue-300 dark:border-blue-700 rounded-xl space-y-4 backdrop-blur-sm">
                <div>
-                 <p className="font-bold text-lg text-blue-900 dark:text-blue-200">Timesheet Approved</p>
-                 <p className="text-base mt-1 text-blue-800 dark:text-blue-300">This timesheet has been approved by your manager.</p>
+                 <p className="font-bold text-lg text-blue-900 dark:text-blue-200">Timesheet Submitted</p>
+                 <p className="text-base mt-1 text-blue-800 dark:text-blue-300">Your timesheet has been submitted and is awaiting approval from your manager.</p>
                </div>
-               <Button onClick={handleReopen} variant="outline" size="sm" className="border-2">
-                 <RotateCcw className="h-4 w-4 mr-2" />
-                 Request to Edit
-               </Button>
              </div>
            )}
         </CardContent>
@@ -1468,38 +1596,6 @@ export default function Timesheets() {
         </CardContent>
       </Card>
 
-      {/* Reopen Dialog */}
-      <Dialog open={reopenDialogOpen} onOpenChange={setReopenDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reopen Timesheet</DialogTitle>
-            <DialogDescription>
-              Provide a comment explaining why you're reopening this timesheet for editing.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label htmlFor="reopen-comment">Comment</Label>
-              <Textarea
-                id="reopen-comment"
-                placeholder="Enter your comment..."
-                value={reopenComment}
-                onChange={(e) => setReopenComment(e.target.value)}
-                className="mt-2"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReopenDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={confirmReopen} disabled={!reopenComment.trim() || loading}>
-              <RotateCcw className="h-4 w-4 mr-2" />
-              {loading ? "Reopening..." : "Reopen"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       </div>
     </AppLayout>
   );

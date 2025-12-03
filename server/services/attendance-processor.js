@@ -479,26 +479,24 @@ async function createTimesheetEntryFromAttendance(normalized, uploadId, rowNumbe
 
   let timesheetId;
   if (timesheetResult.rows.length === 0) {
-    // Create new timesheet with status 'pending' (not submitted)
+    // Create new timesheet with status 'draft' (not submitted)
     // Attendance uploads should not auto-submit timesheets - user must submit manually
-    // Try to set submitted_at to NULL first (if migration has been run)
-    // If constraint doesn't allow NULL, omit the column to use DEFAULT now()
-    // In that case, status='pending' still indicates it needs manual submission
+    // Timesheets should only go to 'pending_approval' when user explicitly submits them
     try {
       const newTimesheetResult = await query(
         `INSERT INTO timesheets (employee_id, week_start_date, week_end_date, total_hours, tenant_id, status, submitted_at)
-         VALUES ($1, $2, $3, $4, $5, 'pending', NULL)
+         VALUES ($1, $2, $3, $4, $5, 'draft', NULL)
          RETURNING id`,
         [normalized.employee_id, weekStart, weekEnd, 0, tenantId]
       );
       timesheetId = newTimesheetResult.rows[0].id;
     } catch (error) {
       // If NULL is not allowed (migration not run yet), omit submitted_at to use DEFAULT
-      // This will still set status='pending' which indicates it needs manual submission
+      // This will still set status='draft' which indicates it needs manual submission
       if (error.message && error.message.includes('submitted_at') && error.message.includes('null value')) {
         const newTimesheetResult = await query(
           `INSERT INTO timesheets (employee_id, week_start_date, week_end_date, total_hours, tenant_id, status)
-           VALUES ($1, $2, $3, $4, $5, 'pending')
+           VALUES ($1, $2, $3, $4, $5, 'draft')
            RETURNING id`,
           [normalized.employee_id, weekStart, weekEnd, 0, tenantId]
         );
