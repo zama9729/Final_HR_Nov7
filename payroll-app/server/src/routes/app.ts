@@ -1082,7 +1082,17 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
             totalGross += adjustedGross;
           }
 
+          // Calculate total net salary from stored payroll_items
+          const totalNetSalaryResult = await query(
+            `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary
+             FROM payroll_items
+             WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+            [cycleId, tenantId]
+          );
+          const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+
           // Update cycle totals with correct counts
+          // Store NET salary in total_amount to match Review Dialog and Bank Export
           await query(
             `UPDATE payroll_cycles SET 
                status = 'completed',
@@ -1090,7 +1100,7 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
                total_amount = $2,
                updated_at = NOW()
              WHERE id = $3 AND tenant_id = $4`,
-            [processedCount, totalGross, cycleId, tenantId]
+            [processedCount, totalNetSalary, cycleId, tenantId]
           );
         } catch (err) {
           console.error("[PAYSLIPS] Failed to process employees for cycle", cycleId, err);
@@ -3089,7 +3099,8 @@ appRouter.get("/payroll-cycles/:cycleId/payslips", requireAuth, async (req, res)
 
 // Helper function to get payroll items for bank transfer (from payroll_items or calculated from preview)
 async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string, cycle: any) {
-  // First, try to get from payroll_items table (if already processed)
+  // ALWAYS try to get from payroll_items table first (if cycle has been saved/processed)
+  // This ensures we use stored values that match the Review Dialog
   const existingItemsResult = await query(
     `
     SELECT 
@@ -3111,10 +3122,15 @@ async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string,
     [cycleId, tenantId]
   );
 
-  // If items exist, return them
+  // If items exist in payroll_items, ALWAYS use them (never calculate)
+  // This guarantees consistency with Review Dialog
   if (existingItemsResult.rows.length > 0) {
+    console.log(`[BANK EXPORT] Using stored payroll_items for cycle ${cycleId}: ${existingItemsResult.rows.length} employees`);
     return existingItemsResult.rows;
   }
+  
+  // Only calculate if no items exist (draft cycle that hasn't been saved yet)
+  console.log(`[BANK EXPORT] No stored payroll_items found for cycle ${cycleId}, calculating from scratch`);
 
   // Otherwise, calculate from preview logic (before processing) - reuse the preview endpoint logic
   const payrollMonth = cycle.month;
@@ -4312,14 +4328,24 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
       totalDeductions += calculatedDeductions;
     }
 
+    // Calculate total net salary from stored payroll_items
+    const totalNetSalaryResult = await query(
+      `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary
+       FROM payroll_items
+       WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+      [cycleId, tenantId]
+    );
+    const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+
     // Update payroll cycle totals but keep status unchanged
+    // Store NET salary in total_amount to match Review Dialog and Bank Export
     await query(
       `UPDATE payroll_cycles
        SET total_employees = $1,
            total_amount = $2,
            updated_at = NOW()
        WHERE id = $3 AND tenant_id = $4`,
-      [savedCount, totalGrossSalary, cycleId, tenantId]
+      [savedCount, totalNetSalary, cycleId, tenantId]
     );
 
     return res.status(200).json({
@@ -4358,10 +4384,10 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
 
     const cycle = cycleResult.rows[0];
 
-    // Only allow processing of approved cycles
-    if (cycle.status !== 'approved') {
+    // Only allow processing of approved or pending_approval cycles
+    if (!['approved', 'pending_approval'].includes(cycle.status)) {
       return res.status(400).json({ 
-        error: `Cannot process payroll. Current status is '${cycle.status}'. Only 'approved' payroll can be processed. Please approve the payroll first.` 
+        error: `Cannot process payroll. Current status is '${cycle.status}'. Only 'pending_approval' or 'approved' payroll can be processed.` 
       });
     }
     const payrollMonth = cycle.month;
@@ -4382,11 +4408,12 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
     };
 
     // Get all active employees who were employed by the payroll month
+    // Include employees with NULL status (similar to preview endpoint)
     const employeesResult = await query(
-      `SELECT e.id, e.full_name, e.email
+      `SELECT e.id, e.full_name, e.email, e.employee_id
        FROM employees e
        WHERE e.tenant_id = $1 
-         AND e.status = 'active'
+         AND (e.status = 'active' OR e.status IS NULL)
          AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
        ORDER BY e.date_of_joining ASC`,
       [tenantId, payrollMonthEnd.toISOString()]
@@ -4419,23 +4446,19 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           
           // If items exist and are approved, don't allow edits - just process as-is
           if (existingItemsResult.rows.length > 0) {
-            // Calculate totals from existing items
-            let processedCount = 0;
-            let totalGrossSalary = 0;
-            let totalDeductions = 0;
-            
-            for (const existingItem of existingItemsResult.rows) {
-              processedCount++;
-              totalGrossSalary += Number(existingItem.gross_salary || 0);
-              // Get deductions from existing item
-              const itemDeductions = await query(
-                "SELECT deductions FROM payroll_items WHERE payroll_cycle_id = $1 AND employee_id = $2 AND tenant_id = $3",
-                [cycleId, existingItem.employee_id, tenantId]
-              );
-              totalDeductions += Number(itemDeductions.rows[0]?.deductions || 0);
-            }
+            // Calculate totals from existing items - use NET salary for total_amount
+            const totalNetSalaryResult = await query(
+              `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary,
+                      COUNT(*) as employee_count
+               FROM payroll_items
+               WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+              [cycleId, tenantId]
+            );
+            const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+            const processedCount = Number(totalNetSalaryResult.rows[0]?.employee_count || 0);
 
             // Update cycle status to processing
+            // Store NET salary in total_amount to match Review Dialog and Bank Export
             await query(
               `UPDATE payroll_cycles
                SET status = 'processing',
@@ -4443,7 +4466,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
                    total_amount = $2,
                    updated_at = NOW()
                WHERE id = $3 AND tenant_id = $4`,
-              [processedCount, totalGrossSalary, cycleId, tenantId]
+              [processedCount, totalNetSalary, cycleId, tenantId]
             );
 
             return res.status(200).json({
@@ -4673,7 +4696,17 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         totalDeductions += calculatedDeductions;
       }
 
+      // Calculate total net salary from stored payroll_items
+      const totalNetSalaryResult = await query(
+        `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary
+         FROM payroll_items
+         WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+        [cycleId, tenantId]
+      );
+      const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+
       // Update payroll cycle with processed data
+      // Store NET salary in total_amount to match Review Dialog and Bank Export
       await query(
         `UPDATE payroll_cycles
          SET status = 'processing',
@@ -4681,7 +4714,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
              total_amount = $2,
              updated_at = NOW()
          WHERE id = $3 AND tenant_id = $4`,
-        [processedCount, totalGrossSalary, cycleId, tenantId]
+        [processedCount, totalNetSalary, cycleId, tenantId]
       );
 
       // Update advance salary paid_amount for all employees with EMI deductions
@@ -4741,8 +4774,8 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
     }
 
     // Original logic: calculate fresh (for backward compatibility)
-    // For approved cycles, items should already exist - skip processing
-    if (cycle.status === 'approved') {
+    // For approved or pending_approval cycles, if items already exist, use them
+    if (['approved', 'pending_approval'].includes(cycle.status)) {
       const existingItemsResult = await query(
         "SELECT COUNT(*)::text as count, SUM(gross_salary)::text as total_gross, SUM(deductions)::text as total_deductions FROM payroll_items WHERE payroll_cycle_id = $1 AND tenant_id = $2",
         [cycleId, tenantId]
@@ -4764,7 +4797,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         );
 
         return res.status(200).json({
-          message: `Payroll processed successfully for ${processedCount} employees (approved payroll - using existing items)`,
+          message: `Payroll processed successfully for ${processedCount} employees (using existing items)`,
           processedCount,
           totalGrossSalary,
           totalDeductions,

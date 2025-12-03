@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 // Removed useToast, using sonnerToast for consistency
 import { PlusCircle, Search } from "lucide-react";
 import { toast as sonnerToast } from "sonner";
@@ -33,6 +34,7 @@ export const CreatePayrollDialog = ({ onSuccess }: CreatePayrollDialogProps) => 
   const [month, setMonth] = useState("");
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [payday, setPayday] = useState("");
+  const [runType, setRunType] = useState<"regular" | "off_cycle">("regular");
   
   // Employee data state
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -107,6 +109,7 @@ export const CreatePayrollDialog = ({ onSuccess }: CreatePayrollDialogProps) => 
         employeeCount: employeeCount,
         totalCompensation: totalCompensation,
         included_employee_ids: Array.from(selectedEmployeeIds),
+        run_type: runType,
       };
 
       // Use the API client to create the payroll cycle
@@ -120,6 +123,7 @@ export const CreatePayrollDialog = ({ onSuccess }: CreatePayrollDialogProps) => 
       setOpen(false);
       setMonth("");
       setPayday("");
+      setRunType("regular");
       setEmployees([]);
       setSelectedEmployeeIds(new Set());
       setSearchQuery("");
@@ -217,6 +221,28 @@ export const CreatePayrollDialog = ({ onSuccess }: CreatePayrollDialogProps) => 
               />
               <p className="text-xs text-muted-foreground">
                 Expected payment date (defaults to last working day of the month)
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label>Run Type</Label>
+              <RadioGroup value={runType} onValueChange={(value) => setRunType(value as "regular" | "off_cycle")}>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="regular" id="run-type-regular" />
+                  <Label htmlFor="run-type-regular" className="font-normal cursor-pointer">
+                    Final Settlement (Regular)
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="off_cycle" id="run-type-off-cycle" />
+                  <Label htmlFor="run-type-off-cycle" className="font-normal cursor-pointer">
+                    Off-Cycle / Advance
+                  </Label>
+                </div>
+              </RadioGroup>
+              <p className="text-xs text-muted-foreground">
+                {runType === "regular" 
+                  ? "Regular payroll run. Previous off-cycle payments in this period will be automatically deducted."
+                  : "Off-cycle run for advances or partial payments. Will be deducted from the regular run."}
               </p>
             </div>
 

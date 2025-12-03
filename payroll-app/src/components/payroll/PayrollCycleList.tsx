@@ -29,6 +29,7 @@ interface PayrollCycle {
   created_at: string;
   approved_at?: string;
   payday?: string;
+  run_type?: "regular" | "off_cycle";
 }
 
 interface PayrollCycleListProps {
@@ -187,7 +188,17 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
           cycles.map((cycle) => (
             <TableRow key={cycle.id}>
               <TableCell className="font-medium">
-                {getMonthName(cycle.month)} {cycle.year}
+                <div className="flex flex-col gap-1">
+                  <span>{getMonthName(cycle.month)} {cycle.year}</span>
+                  {cycle.run_type && (
+                    <Badge 
+                      variant={cycle.run_type === "off_cycle" ? "outline" : "secondary"}
+                      className="text-xs w-fit"
+                    >
+                      {cycle.run_type === "off_cycle" ? "Off-Cycle" : "Regular"}
+                    </Badge>
+                  )}
+                </div>
               </TableCell>
               <TableCell>
                 <Badge variant={getStatusColor(cycle.status)}>
