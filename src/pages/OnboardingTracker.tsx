@@ -2,7 +2,8 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useEffect, useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { Users, CheckCircle, Clock, XCircle } from "lucide-react";
 
@@ -29,6 +30,9 @@ export default function OnboardingTracker() {
     inProgress: 0,
     completed: 0,
   });
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<"join_date" | "name" | "employee_id" | "status">("join_date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     fetchOnboardingEmployees();
@@ -93,6 +97,40 @@ export default function OnboardingTracker() {
     }
   };
 
+  const normalizedStatus = (e: OnboardingEmployee) => {
+    if (e.must_change_password) return "awaiting_password";
+    if (e.onboarding_status === "not_started" || e.onboarding_status === "pending") return "not_started";
+    if (e.onboarding_status === "in_progress") return "in_progress";
+    if (e.onboarding_status === "completed") return "completed";
+    return e.onboarding_status || "unknown";
+  };
+
+  const filteredAndSortedEmployees = useMemo(() => {
+    let list = [...employees];
+
+    if (statusFilter !== "all") {
+      list = list.filter((e) => normalizedStatus(e) === statusFilter);
+    }
+
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === "join_date") {
+        cmp = new Date(a.join_date).getTime() - new Date(b.join_date).getTime();
+      } else if (sortBy === "name") {
+        const an = `${a.profiles?.first_name || ""} ${a.profiles?.last_name || ""}`.trim().toLowerCase();
+        const bn = `${b.profiles?.first_name || ""} ${b.profiles?.last_name || ""}`.trim().toLowerCase();
+        cmp = an.localeCompare(bn);
+      } else if (sortBy === "employee_id") {
+        cmp = (a.employee_id || "").localeCompare(b.employee_id || "");
+      } else if (sortBy === "status") {
+        cmp = normalizedStatus(a).localeCompare(normalizedStatus(b));
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+    return list;
+  }, [employees, statusFilter, sortBy, sortDir]);
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -138,12 +176,54 @@ export default function OnboardingTracker() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Employees</CardTitle>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <CardTitle>Employees</CardTitle>
+              <div className="flex flex-wrap gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Filter</span>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="h-8 w-[170px]">
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="awaiting_password">Awaiting password</SelectItem>
+                      <SelectItem value="not_started">Not started</SelectItem>
+                      <SelectItem value="in_progress">In progress</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Sort by</span>
+                  <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
+                    <SelectTrigger className="h-8 w-[160px]">
+                      <SelectValue placeholder="Join date" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="join_date">Join date</SelectItem>
+                      <SelectItem value="name">Name</SelectItem>
+                      <SelectItem value="employee_id">Employee ID</SelectItem>
+                      <SelectItem value="status">Status</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={sortDir} onValueChange={(v) => setSortDir(v as "asc" | "desc")}>
+                    <SelectTrigger className="h-8 w-[120px]">
+                      <SelectValue placeholder="Ascending" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="asc">Ascending</SelectItem>
+                      <SelectItem value="desc">Descending</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
               <div className="text-center py-8 text-muted-foreground">Loading...</div>
-            ) : employees.length === 0 ? (
+            ) : filteredAndSortedEmployees.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
                 <p>No employees in onboarding</p>
@@ -161,7 +241,7 @@ export default function OnboardingTracker() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {employees.map((employee) => (
+                  {filteredAndSortedEmployees.map((employee) => (
                     <TableRow key={employee.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">

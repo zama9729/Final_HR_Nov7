@@ -5,6 +5,7 @@ import { authenticateToken, requireRole } from '../middleware/auth.js';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { processAttendanceUpload } from '../services/attendance-processor.js';
+import { handlePunchEvent } from '../services/timesheet-realtime.js';
 import { geocodeAddress, reverseGeocode } from '../services/geocoding.js';
 
 const router = express.Router();
@@ -969,6 +970,32 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
       `UPDATE attendance_events SET work_type = $1 WHERE id = $2`,
       [workType, event.id]
     );
+
+    // Persist punch for realtime timesheet calculations (Asia/Kolkata)
+    try {
+      await query(
+        `INSERT INTO punches (
+          tenant_id, employee_id, type, "timestamp", timestamp_local, source, created_by
+        ) VALUES ($1,$2,$3,$4, ($4 AT TIME ZONE 'Asia/Kolkata'), $5, $6)`,
+        [
+          userTenantId,
+          employeeId,
+          action,
+          punchTime,
+          finalCaptureMethod || 'unknown',
+          req.user.id,
+        ],
+      );
+
+      await handlePunchEvent({
+        tenantId: userTenantId,
+        employeeId,
+        punch: { type: action, timestamp: punchTime.toISOString() },
+      });
+    } catch (punchError) {
+      console.error('[Clock] Failed to record realtime punch:', punchError);
+      // Continue – do not fail clock action only because realtime layer failed
+    }
 
     // Handle clock in
     if (action === 'IN') {

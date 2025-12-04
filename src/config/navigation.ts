@@ -122,6 +122,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Attendance & Leave",
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
+        { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -180,6 +181,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Attendance & Leave",
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
+        { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -240,6 +242,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Attendance & Leave",
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
+        { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -293,6 +296,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Attendance & Leave",
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
+        { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
