@@ -1099,9 +1099,9 @@ export default function Dashboard() {
                       dataKey="hours" 
                       stroke="#E41E26"
                       strokeWidth={3}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 6, fill: "#E41E26" }}
-                      name="Average Hours"
+                      dot={false}
+                      activeDot={false}
+                      name="Hours Worked"
                     />
                   </LineChart>
                 </ResponsiveContainer>

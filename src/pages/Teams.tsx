@@ -137,11 +137,6 @@ export default function Teams() {
         ...formData,
         owner_manager_id: formData.owner_manager_id === '__none__' ? '' : formData.owner_manager_id,
       };
-<<<<<<< HEAD
-      
-=======
-
->>>>>>> Latest_20-11
       if (editingTeam) {
         await api.updateTeam(editingTeam.id, dataToSave);
         toast({
@@ -151,11 +146,6 @@ export default function Teams() {
       } else {
         const newTeam = await api.createTeam(dataToSave);
         const teamId = newTeam?.id || (newTeam as any)?.id;
-<<<<<<< HEAD
-        
-=======
-
->>>>>>> Latest_20-11
         // Add selected employees to the team
         if (selectedEmployeeIds.size > 0 && teamId) {
           const addEmployeePromises = Array.from(selectedEmployeeIds).map((employeeId) =>
@@ -168,17 +158,8 @@ export default function Teams() {
               return null;
             })
           );
-<<<<<<< HEAD
-          
           const results = await Promise.all(addEmployeePromises);
           const successCount = results.filter(r => r !== null).length;
-          
-=======
-
-          const results = await Promise.all(addEmployeePromises);
-          const successCount = results.filter(r => r !== null).length;
-
->>>>>>> Latest_20-11
           toast({
             title: 'Success',
             description: successCount === selectedEmployeeIds.size
@@ -400,11 +381,7 @@ export default function Teams() {
                   : 'Create a new functional or project team'}
               </DialogDescription>
             </DialogHeader>
-<<<<<<< HEAD
-            <div className="space-y-4">
-=======
             <div className="space-y-4 flex-1 overflow-y-auto px-6 py-4">
->>>>>>> Latest_20-11
               <div>
                 <Label htmlFor="name">Team Name *</Label>
                 <Input

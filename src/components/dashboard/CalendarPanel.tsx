@@ -13,6 +13,17 @@ import {
 } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -21,7 +32,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Loader2, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, CalendarDays, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -38,6 +49,7 @@ const EVENT_META: Record<
   birthday: { label: 'Birthday', color: 'text-amber-700', bg: 'bg-amber-50', dot: 'bg-amber-500' },
   leave: { label: 'Leave', color: 'text-rose-700', bg: 'bg-rose-50', dot: 'bg-rose-500' },
   announcement: { label: 'Announcement', color: 'text-slate-700', bg: 'bg-slate-50', dot: 'bg-slate-500' },
+  personal: { label: 'Personal', color: 'text-gray-800', bg: 'bg-gray-100', dot: 'bg-gray-700' },
 };
 
 type CalendarEvent = {
@@ -49,6 +61,7 @@ type CalendarEvent = {
   description?: string;
   location?: string;
   shiftSubtype?: 'day' | 'night';
+  isPersonal?: boolean;
 };
 
 function toKey(date: Date) {
@@ -62,6 +75,11 @@ export function CalendarPanel() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [personalEvents, setPersonalEvents] = useState<CalendarEvent[]>([]);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addDate, setAddDate] = useState<string | null>(null);
+  const [addTitle, setAddTitle] = useState('');
+  const [addNotes, setAddNotes] = useState('');
 
   const normalizeName = (name: string | undefined | null) =>
     (name || '')
@@ -72,6 +90,42 @@ export function CalendarPanel() {
   const selfName = normalizeName(
     [user?.firstName, user?.lastName].filter(Boolean).join(' '),
   );
+
+  // Load any saved personal notes/tasks for this user
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const raw = localStorage.getItem(`teamCalendarPersonal:${user.id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as CalendarEvent[];
+        setPersonalEvents(
+          Array.isArray(parsed)
+            ? parsed.map((evt) => ({ ...evt, type: 'personal', isPersonal: true }))
+            : [],
+        );
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }, [user?.id]);
+
+  // Persist personal events
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const payload = personalEvents.map(({ id, date, title, description }) => ({
+        id,
+        date,
+        title,
+        description,
+        type: 'personal',
+        isPersonal: true,
+      }));
+      localStorage.setItem(`teamCalendarPersonal:${user.id}`, JSON.stringify(payload));
+    } catch {
+      // ignore storage errors
+    }
+  }, [personalEvents, user?.id]);
 
   useEffect(() => {
     if (!privilegedRoles.has(userRole || '') && viewLevel !== 'employee') {
@@ -239,13 +293,43 @@ export function CalendarPanel() {
   }, [currentMonth]);
 
   const eventsByDate = useMemo(() => {
-    return events.reduce<Record<string, CalendarEvent[]>>((acc, event) => {
+    const allEvents = [...events, ...personalEvents];
+    return allEvents.reduce<Record<string, CalendarEvent[]>>((acc, event) => {
       const key = event.date;
       if (!acc[key]) acc[key] = [];
       acc[key].push(event);
       return acc;
     }, {});
-  }, [events]);
+  }, [events, personalEvents]);
+
+  const openAddForDate = (date: Date) => {
+    if (viewLevel !== 'employee') return;
+    const key = toKey(date);
+    setAddDate(key);
+    setAddTitle('');
+    setAddNotes('');
+    setAddDialogOpen(true);
+  };
+
+  const handleSavePersonal = () => {
+    if (!addDate || !addTitle.trim()) {
+      setError('Please add a title for your note or task.');
+      return;
+    }
+    const newEvent: CalendarEvent = {
+      id: `personal-${addDate}-${Date.now()}`,
+      type: 'personal',
+      title: addTitle.trim(),
+      date: addDate,
+      description: addNotes || undefined,
+      isPersonal: true,
+    };
+    setPersonalEvents((prev) => [...prev, newEvent]);
+    setAddDialogOpen(false);
+    setAddTitle('');
+    setAddNotes('');
+    setError(null);
+  };
 
   return (
     <TooltipProvider>
@@ -406,6 +490,16 @@ export function CalendarPanel() {
                         </TooltipContent>
                       </Tooltip>
                     )}
+                    {viewLevel === 'employee' && (
+                      <button
+                        type="button"
+                        onClick={() => openAddForDate(day)}
+                        className="mt-1 inline-flex items-center justify-center rounded-full border border-dashed border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:border-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                      >
+                        <Plus className="mr-1 h-3 w-3" />
+                        Add
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -424,6 +518,48 @@ export function CalendarPanel() {
           )}
         </CardContent>
       </Card>
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add to My calendar</DialogTitle>
+            <DialogDescription>
+              Create a private note, task, or event for your own Team Calendar. Only you will see this entry.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 px-1 py-2">
+            {addDate && (
+              <p className="text-xs text-gray-500">
+                Date: <span className="font-medium">{addDate}</span>
+              </p>
+            )}
+            <div className="space-y-1">
+              <Label htmlFor="personal-title">Title</Label>
+              <Input
+                id="personal-title"
+                value={addTitle}
+                onChange={(e) => setAddTitle(e.target.value)}
+                placeholder="e.g. 1:1 with manager, prepare deck, follow-ups"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="personal-notes">Notes (optional)</Label>
+              <Textarea
+                id="personal-notes"
+                value={addNotes}
+                onChange={(e) => setAddNotes(e.target.value)}
+                rows={3}
+                placeholder="Add details, checklist items, or meeting links…"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSavePersonal}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }

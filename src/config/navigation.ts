@@ -60,6 +60,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "My Profile", url: "/my/profile", icon: Users },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "My Shifts", url: "/my/profile?tab=shifts", icon: CalendarClock },
+        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Leave Requests", url: "/leaves", icon: Calendar },
         { title: "Request Resignation", url: "/offboarding/new", icon: LogOut },
@@ -123,6 +124,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
+        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -182,6 +184,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
+        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -243,6 +246,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
+        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
@@ -297,6 +301,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
+        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },

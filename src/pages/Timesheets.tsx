@@ -44,6 +44,8 @@ interface Timesheet {
   status: string;
   rejection_reason?: string;
   entries: TimesheetEntry[];
+  // Optional holiday calendar metadata returned by backend
+  holidayCalendar?: any[];
 }
 
 interface Shift {
@@ -192,9 +194,9 @@ export default function Timesheets() {
 
   // Check if a date is a holiday (checking all sources)
   const isDateHoliday = (dateStr: string): boolean => {
-    // 1. Check entry.is_holiday flag
-    const entry = entries[dateStr];
-    if (entry?.is_holiday) return true;
+    // 1. Check entries for this date
+    const dayEntries = entries[dateStr];
+    if (Array.isArray(dayEntries) && dayEntries.some((e) => e.is_holiday)) return true;
     
     // 2. Check holidays array (normalized dates)
     if (holidays.some(h => normalizeDate(h.date) === dateStr)) return true;
@@ -420,9 +422,36 @@ export default function Timesheets() {
       const weekStart = format(currentWeek, "yyyy-MM-dd");
       const weekEnd = format(addDays(currentWeek, 6), "yyyy-MM-dd");
 
-      // Fetch existing timesheet (this now returns holidays even if timesheet doesn't exist)
+      // Fetch existing legacy timesheet (projects, manual hours, holidays)
       const fetchedTimesheetData = await api.getTimesheet(weekStart, weekEnd);
-      setTimesheetData(fetchedTimesheetData);
+
+      // Fetch attendance-derived punches for this employee and week, then normalize fields
+      let attendanceEntries: any[] = [];
+      try {
+        const empInfo = await api.getEmployeeId();
+        if (empInfo?.id) {
+          const attendanceData = await api.getEmployeeAttendanceTimesheet(empInfo.id, weekStart, weekEnd);
+          const rawEntries = attendanceData?.entries || [];
+          attendanceEntries = rawEntries.map((e: any) => ({
+            ...e,
+            // Normalize work_date and attach clock_in/clock_out fields the UI expects
+            work_date:
+              typeof e.work_date === "string" && e.work_date.includes("T")
+                ? e.work_date.split("T")[0]
+                : e.work_date,
+            clock_in: e.start_time_utc || null,
+            clock_out: e.end_time_utc || null,
+          }));
+
+          // Store only the normalized attendance entries for the clock row UI
+          setTimesheetData({ entries: attendanceEntries });
+        } else {
+          setTimesheetData(null);
+        }
+      } catch (attendanceError) {
+        console.error("Error fetching attendance-based timesheet:", attendanceError);
+        setTimesheetData(null);
+      }
 
       // Map entries by date - group multiple entries per day
       const entriesMap: Record<string, TimesheetEntry[]> = {};
@@ -505,15 +534,16 @@ export default function Timesheets() {
       const allHolidays = getAllHolidaysForWeek();
       
       // Initialize all week days with entries (including holidays)
-      // Also merge clock in/out data from timesheetData entries
+      // Also merge clock in/out data from attendance entries
       weekDays.forEach((day) => {
         const dateStr = format(day, "yyyy-MM-dd");
         
-        // Find matching entry from fetchedTimesheetData that has clock_in/clock_out
-        const matchingEntry = fetchedTimesheetData?.entries?.find((e: any) => {
-          const entryDate = typeof e.work_date === 'string' && e.work_date.includes('T') 
-            ? e.work_date.split('T')[0] 
-            : String(e.work_date);
+        // Find matching attendance entry that has clock_in/clock_out
+        const matchingEntry = attendanceEntries.find((e: any) => {
+          const entryDate =
+            typeof e.work_date === "string" && e.work_date.includes("T")
+              ? e.work_date.split("T")[0]
+              : String(e.work_date);
           return entryDate === dateStr;
         });
         

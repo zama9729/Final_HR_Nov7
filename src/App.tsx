@@ -72,6 +72,7 @@ import UnifiedPolicyManagement from "./pages/UnifiedPolicyManagement";
 import PolicyLibrary from "./pages/PolicyLibrary";
 import Teams from "./pages/Teams";
 import TeamDetail from "./pages/TeamDetail";
+import TeamSchedule from "./pages/TeamSchedule";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import PromotionCycles from "./pages/PromotionCycles";
@@ -226,6 +227,7 @@ const App = () => (
             {/* Teams & Projects routes */}
             <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
             <Route path="/teams/:id" element={<ProtectedRoute><TeamDetail /></ProtectedRoute>} />
+            <Route path="/team-schedule" element={<ProtectedRoute><TeamSchedule /></ProtectedRoute>} />
             <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
             <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
             

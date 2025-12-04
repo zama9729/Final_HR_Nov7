@@ -288,6 +288,14 @@ router.get('/', authenticateToken, async (req, res) => {
       leaveQuery += ` AND lr.employee_id = $4`;
       leaveParams.push(employee_id);
     }
+
+    // Additional privacy / RLS rule for organization calendar:
+    // - HR / CEO / Director / Admin in organization view should NOT see every employee's annual leave.
+    //   They will still see other special leave types (e.g., sick, maternity, etc.), but routine
+    //   annual/vacation leave is hidden from the org-wide calendar.
+    if (!isEmployeeView && !isManager && ['hr', 'ceo', 'director', 'admin'].includes(userRole)) {
+      leaveQuery += ` AND COALESCE(lp.leave_type::text, '') <> 'annual'`;
+    }
     
     const leaveResult = await query(leaveQuery, leaveParams);
     const leaveEvents = leaveResult.rows;

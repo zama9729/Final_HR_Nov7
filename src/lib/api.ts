@@ -1178,15 +1178,6 @@ class ApiClient {
   async uploadAttendance(file: File, etlConfig?: any) {
     const formData = new FormData();
     formData.append('file', file);
-<<<<<<< HEAD
-
-=======
-<<<<<<< Updated upstream
-    if (mapping) {
-      formData.append('mapping', JSON.stringify(mapping));
-=======
-
->>>>>>> Latest_20-11
     // Support both old format (just mapping) and new format (full ETL config)
     if (etlConfig) {
       if (etlConfig.mapping) {
@@ -1195,19 +1186,9 @@ class ApiClient {
         // Old format - just mapping object
         formData.append('mapping', JSON.stringify(etlConfig));
       }
-<<<<<<< HEAD
-
       if (etlConfig.transformations && Array.isArray(etlConfig.transformations)) {
         formData.append('transformations', JSON.stringify(etlConfig.transformations));
       }
-
-=======
-
-      if (etlConfig.transformations && Array.isArray(etlConfig.transformations)) {
-        formData.append('transformations', JSON.stringify(etlConfig.transformations));
-      }
-
->>>>>>> Latest_20-11
       if (etlConfig.validations && Array.isArray(etlConfig.validations)) {
         formData.append('validations', JSON.stringify(etlConfig.validations));
       }
@@ -1215,10 +1196,6 @@ class ApiClient {
       if (typeof etlConfig.matrixDetected === 'boolean') {
         formData.append('matrixDetected', JSON.stringify(etlConfig.matrixDetected));
       }
-<<<<<<< HEAD
-=======
->>>>>>> Stashed changes
->>>>>>> Latest_20-11
     }
 
     return this.request('/api/v1/attendance/upload', {
@@ -1517,11 +1494,6 @@ class ApiClient {
     return res?.policies ?? [];
   }
 
-<<<<<<< HEAD
-=======
-<<<<<<< Updated upstream
-=======
->>>>>>> Latest_20-11
   async publishManagedPolicy(id: string, change_note?: string) {
     return this.request(`/api/policy-management/policies/${id}/publish`, {
       method: 'POST',
@@ -1621,20 +1593,10 @@ class ApiClient {
 
   async downloadOrgPolicyPDF(policyId: string): Promise<Blob> {
     const url = `/api/policies/org/${policyId}/download`;
-<<<<<<< HEAD
-
-=======
-
->>>>>>> Latest_20-11
     const headers: HeadersInit = {};
     if (this._token) {
       headers['Authorization'] = `Bearer ${this._token}`;
     }
-<<<<<<< HEAD
-
-=======
-
->>>>>>> Latest_20-11
     const response = await fetch(`${this.baseURL}${url}`, {
       method: 'GET',
       headers,
@@ -1649,26 +1611,14 @@ class ApiClient {
   }
 
   async downloadPolicyPDF(policyId: string, version?: string): Promise<Blob> {
-<<<<<<< HEAD
     const url = version
       ? `/api/policy-management/policies/${policyId}/download?version=${version}`
       : `/api/policy-management/policies/${policyId}/download`;
 
-=======
-    const url = version
-      ? `/api/policy-management/policies/${policyId}/download?version=${version}`
-      : `/api/policy-management/policies/${policyId}/download`;
-
->>>>>>> Latest_20-11
     const headers: HeadersInit = {};
     if (this._token) {
       headers['Authorization'] = `Bearer ${this._token}`;
     }
-<<<<<<< HEAD
-
-=======
-
->>>>>>> Latest_20-11
     const response = await fetch(`${this.baseURL}${url}`, {
       method: 'GET',
       headers,
@@ -1682,10 +1632,6 @@ class ApiClient {
     return await response.blob();
   }
 
-<<<<<<< HEAD
-=======
->>>>>>> Stashed changes
->>>>>>> Latest_20-11
   // Promotion methods
   async getPromotionHealth() {
     return this.request('/api/promotion/health');
@@ -2205,11 +2151,6 @@ class ApiClient {
     if (params.view_type) query.append('view_type', params.view_type);
     return this.request(`/api/calendar?${query.toString()}`);
   }
-
-<<<<<<< HEAD
-=======
-
->>>>>>> Latest_20-11
   // Profile picture upload
   async getProfilePicturePresignedUrl(contentType: string) {
     return this.request('/api/employees/profile-picture/presign', {
@@ -2288,11 +2229,6 @@ class ApiClient {
         'Authorization': `Bearer ${this._token}`,
       },
     });
-<<<<<<< HEAD
-
-=======
-
->>>>>>> Latest_20-11
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
       throw new Error(error.error || 'Failed to download PDF');
@@ -2300,11 +2236,6 @@ class ApiClient {
 
     // Check if response is JSON (presigned URL) or PDF blob
     const contentType = response.headers.get('content-type');
-<<<<<<< HEAD
-
-=======
-
->>>>>>> Latest_20-11
     if (contentType?.includes('application/json')) {
       // It's a presigned URL
       const data = await response.json();
@@ -2314,11 +2245,6 @@ class ApiClient {
         return;
       }
     }
-<<<<<<< HEAD
-
-=======
-
->>>>>>> Latest_20-11
     // It's a PDF blob
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
