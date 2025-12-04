@@ -49,7 +49,7 @@ export function BackgroundCheckPanel({ employeeId }: BackgroundCheckPanelProps) 
   const [loading, setLoading] = useState(true);
   const [backgroundCheck, setBackgroundCheck] = useState<BackgroundCheck | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [statusCounts, setStatusCounts] = useState({ pending: 0, approved: 0, hold: 0, rejected: 0 });
+  const [statusCounts, setStatusCounts] = useState({ pending: 0, approved: 0, hold: 0, completed: 0 });
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [actionDialogOpen, setActionDialogOpen] = useState(false);
   const [actionType, setActionType] = useState<'approve' | 'hold' | null>(null);
@@ -69,7 +69,7 @@ export function BackgroundCheckPanel({ employeeId }: BackgroundCheckPanelProps) 
       const response = await api.customRequest(`/api/onboarding/${employeeId}/background-check`);
       setBackgroundCheck(response.background_check);
       setDocuments(response.documents || []);
-      setStatusCounts(response.status_counts || { pending: 0, approved: 0, hold: 0, rejected: 0 });
+      setStatusCounts(response.status_counts || { pending: 0, approved: 0, hold: 0, completed: 0 });
     } catch (error: any) {
       console.error('Error fetching background check:', error);
       toast({
@@ -243,7 +243,7 @@ export function BackgroundCheckPanel({ employeeId }: BackgroundCheckPanelProps) 
             <div className="grid grid-cols-4 gap-4 text-sm">
               <div>
                 <p className="text-muted-foreground">Pending</p>
-                <p className="text-2xl font-bold">{statusCounts.pending}</p>
+                <p className="text-2xl font-bold text-blue-600">{statusCounts.pending}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Approved</p>
@@ -254,8 +254,8 @@ export function BackgroundCheckPanel({ employeeId }: BackgroundCheckPanelProps) 
                 <p className="text-2xl font-bold text-yellow-600">{statusCounts.hold}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">Rejected</p>
-                <p className="text-2xl font-bold text-red-600">{statusCounts.rejected}</p>
+                <p className="text-muted-foreground">Completed</p>
+                <p className="text-2xl font-bold text-green-600">{statusCounts.completed}</p>
               </div>
             </div>
           )}

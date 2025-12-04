@@ -230,25 +230,30 @@ export function CalendarPanel() {
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <ToggleGroup
-              type="single"
-              value={viewLevel}
-              onValueChange={(val) => val && setViewLevel(val as 'employee' | 'organization')}
-            >
-              <ToggleGroupItem
-                value="employee"
-                className="rounded-md px-4 text-sm font-medium data-[state=on]:liquid-glass-nav-item-active data-[state=on]:text-gray-900"
+            {privilegedRoles.has(userRole || '') ? (
+              <ToggleGroup
+                type="single"
+                value={viewLevel}
+                onValueChange={(val) => val && setViewLevel(val as 'employee' | 'organization')}
               >
+                <ToggleGroupItem
+                  value="employee"
+                  className="rounded-md px-4 text-sm font-medium data-[state=on]:liquid-glass-nav-item-active data-[state=on]:text-gray-900"
+                >
+                  My calendar
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="organization"
+                  className="rounded-md px-4 text-sm font-medium data-[state=on]:liquid-glass-nav-item-active data-[state=on]:text-gray-900"
+                >
+                  Organization
+                </ToggleGroupItem>
+              </ToggleGroup>
+            ) : (
+              <div className="text-sm font-medium text-gray-700 px-4 py-2">
                 My calendar
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="organization"
-                disabled={!privilegedRoles.has(userRole || '')}
-                className="rounded-md px-4 text-sm font-medium data-[state=on]:liquid-glass-nav-item-active data-[state=on]:text-gray-900 disabled:opacity-40"
-              >
-                Organization
-              </ToggleGroupItem>
-            </ToggleGroup>
+              </div>
+            )}
             <div className="flex items-center gap-2 rounded-lg bg-white border border-gray-200 px-3 py-2 shadow-sm">
               <Button
                 variant="ghost"
@@ -268,10 +273,10 @@ export function CalendarPanel() {
                 <ChevronRight className="h-4 w-4" />
               </Button>
               <Button
-                variant="secondary"
+                variant="default"
                 size="sm"
                 onClick={() => setCurrentMonth(startOfMonth(new Date()))}
-                className="ml-2 rounded-md bg-gray-900 text-xs font-semibold text-white hover:bg-gray-800"
+                className="ml-2"
               >
                 Today
               </Button>

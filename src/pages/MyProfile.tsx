@@ -439,7 +439,6 @@ export default function MyProfile() {
                                   type="button"
                                   size="sm"
                                   variant="ghost"
-                                  className="h-8 rounded-lg px-3 text-xs font-medium text-gray-700 hover:bg-gray-100"
                                   onClick={() => setAboutEditing((prev) => !prev)}
                                   disabled={aboutLoading || aboutSaving}
                                 >
@@ -516,11 +515,11 @@ export default function MyProfile() {
                                     placeholder="Talk about your interests outside work..."
                                   />
                                 </div>
-                                <div className="flex justify-end gap-2 pt-2">
+                                <div className="flex items-center justify-end gap-2 pt-2">
                                   <Button
                                     type="button"
                                     variant="ghost"
-                                    className="h-9 rounded-lg px-4 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                                    size="default"
                                     onClick={() => setAboutEditing(false)}
                                     disabled={aboutSaving}
                                   >
@@ -528,7 +527,7 @@ export default function MyProfile() {
                                   </Button>
                                   <Button
                                     type="submit"
-                                    className="h-9 rounded-lg bg-gray-900 px-4 text-sm font-medium text-white hover:bg-gray-800"
+                                    size="default"
                                     disabled={aboutSaving}
                                   >
                                     {aboutSaving ? 'Saving…' : 'Save'}
@@ -645,7 +644,8 @@ export default function MyProfile() {
                               <Button
                                 type="button"
                                 variant="outline"
-                                className="mt-3 h-9 rounded-lg border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                size="default"
+                                className="mt-3"
                               >
                                 Add Certification
                               </Button>

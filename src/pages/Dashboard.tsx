@@ -28,7 +28,7 @@ interface DashboardStats {
   }>;
   nextHoliday: { date: string; name: string } | null;
   projects: Array<{ id: string; name: string; category?: string }>;
-  announcements: Array<{ id: string; title: string; body: string; priority: string; created_at: string }>;
+  announcements: Array<{ id: string; title: string; body: string; priority: string; created_at: string; type?: 'announcement' | 'birthday' }>;
 }
 
 interface UpcomingShift {
@@ -94,6 +94,20 @@ export default function Dashboard() {
     () => presenceStatus.replace('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
     [presenceStatus]
   );
+
+  // Get time-based greeting
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) {
+      return 'Good morning';
+    } else if (hour >= 12 && hour < 17) {
+      return 'Good afternoon';
+    } else if (hour >= 17 && hour < 21) {
+      return 'Good evening';
+    } else {
+      return 'Good night';
+    }
+  };
 
   useEffect(() => {
     checkOnboardingStatus();
@@ -231,7 +245,7 @@ export default function Dashboard() {
       }
 
       // Get announcements (latest for this org)
-      let announcements: Array<{ id: string; title: string; body: string; priority: string; created_at: string }> = [];
+      let announcements: Array<{ id: string; title: string; body: string; priority: string; created_at: string; type?: 'announcement' | 'birthday' }> = [];
       try {
         const data = await api.getAnnouncements(5);
         announcements = (data || []).map((a: any) => ({
@@ -240,9 +254,69 @@ export default function Dashboard() {
           body: a.body,
           priority: a.priority || 'normal',
           created_at: a.created_at,
+          type: 'announcement' as const,
         }));
       } catch (error) {
         console.error('Error fetching announcements:', error);
+      }
+
+      // Get upcoming birthdays (next 14 days) for all employees
+      try {
+        const today = new Date();
+        const next14Days = new Date(today);
+        next14Days.setDate(today.getDate() + 14);
+        
+        const calendarData = await api.getCalendar({
+          start_date: format(today, 'yyyy-MM-dd'),
+          end_date: format(next14Days, 'yyyy-MM-dd'),
+          view_type: 'organization', // Get all birthdays regardless of profile
+        });
+
+        // Extract birthday events from calendar data
+        // Birthday events have resource.type === 'birthday'
+        const birthdayEvents = (calendarData.events || []).filter((event: any) => 
+          event.resource?.type === 'birthday' || event.event_type === 'birthday'
+        );
+        
+        // Convert birthday events to announcement-like format
+        const birthdayAnnouncements = birthdayEvents.map((event: any) => {
+          // Calendar API uses 'start' field for the date
+          const eventDateStr = event.start || event.date || event.end;
+          const eventDate = parseISO(eventDateStr);
+          const isToday = isSameDay(eventDate, today);
+          const daysUntil = Math.ceil((eventDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          
+          // Extract employee name from title or resource
+          const employeeName = event.resource?.employee_name || 
+                               event.title?.replace(/🎂\s*/g, '').replace(/'s Birthday/g, '') || 
+                               'someone';
+          
+          return {
+            id: `birthday-${event.id || event.resource?.employee_id || Math.random()}`,
+            title: isToday 
+              ? `🎉 Today is ${employeeName}'s birthday!` 
+              : daysUntil === 1 
+                ? `🎂 Tomorrow: ${employeeName}'s Birthday` 
+                : `🎂 ${format(eventDate, 'MMM dd')}: ${employeeName}'s Birthday`,
+            body: isToday 
+              ? `Wish ${employeeName} a wonderful day! 🎈` 
+              : `Birthday coming up in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`,
+            priority: isToday ? 'urgent' : 'normal',
+            created_at: eventDateStr,
+            type: 'birthday' as const,
+          };
+        });
+
+        // Combine announcements and birthdays, sort by date (today's birthdays first, then by date)
+        announcements = [...announcements, ...birthdayAnnouncements].sort((a, b) => {
+          // Today's birthdays/urgent items first
+          if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
+          if (a.priority !== 'urgent' && b.priority === 'urgent') return 1;
+          // Then sort by date
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        }).slice(0, 5); // Limit to 5 total items
+      } catch (error) {
+        console.error('Error fetching birthdays:', error);
       }
 
       setStats({
@@ -655,14 +729,16 @@ export default function Dashboard() {
               {/* Confetti container - confetti is triggered via canvas-confetti */}
             </div>
           )}
-          <h1 className={`text-3xl font-bold mb-2 ${isBirthday ? 'text-primary animate-pulse' : ''}`}>
-            {isBirthday ? `🎉 Happy Birthday, ${getFirstName()}! 🎉` : `Welcome back, ${getFirstName()}!`}
-          </h1>
-          <p className="text-muted-foreground">
-            {isBirthday 
-              ? "Wishing you a wonderful day filled with joy and celebration!" 
-              : `You are ${presenceStatus === 'online' ? 'online' : presenceStatus.replace('_', ' ')}`}
-          </p>
+          <div>
+            <h1 className={`text-3xl font-bold mb-2 ${isBirthday ? 'text-primary animate-pulse' : ''}`}>
+              {isBirthday ? `🎉 Happy Birthday, ${getFirstName()}! 🎉` : `Welcome back, ${getFirstName()}!`}
+            </h1>
+            <p className="text-muted-foreground">
+              {isBirthday 
+                ? "Wishing you a wonderful day filled with joy and celebration!" 
+                : getGreeting()}
+            </p>
+          </div>
         </div>
 
         {/* Today Summary & Quick Actions */}
@@ -738,7 +814,7 @@ export default function Dashboard() {
             <CardContent className="space-y-4">
               <div className="flex items-center gap-4">
                 <div className="flex-1">
-                  <div className="rounded-2xl border border-emerald-200/60 dark:border-emerald-500/30 bg-emerald-50/80 dark:bg-emerald-500/10 p-3 h-full flex flex-col items-center justify-center">
+                  <div className="rounded-2xl border border-gray-200/60 dark:border-gray-500/30 bg-white dark:bg-slate-800/50 p-3 h-full flex flex-col items-center justify-center">
                     <div className="h-32 w-32">
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
@@ -906,16 +982,27 @@ export default function Dashboard() {
                     <div
                       key={a.id}
                       className={`p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
-                        a.priority === 'urgent' ? 'border-red-300 bg-red-50/70' : 'border-border'
+                        a.type === 'birthday' 
+                          ? 'border-amber-300 bg-amber-50/70' 
+                          : a.priority === 'urgent' 
+                            ? 'border-red-300 bg-red-50/70' 
+                            : 'border-border'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <p className="font-medium text-sm line-clamp-1">{a.title}</p>
-                        {a.priority === 'urgent' && (
-                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                            Urgent
-                          </Badge>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {a.type === 'birthday' && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-400 text-amber-700">
+                              Birthday
+                            </Badge>
+                          )}
+                          {a.priority === 'urgent' && a.type !== 'birthday' && (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                              Urgent
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                         {a.body}

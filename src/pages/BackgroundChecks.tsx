@@ -277,16 +277,18 @@ export default function BackgroundChecks() {
             break;
           case 'in_progress':
           case 'vendor_delay':
-          case 'completed_amber':
-          case 'completed_green':
             acc.inProgress += 1;
             break;
           case 'on_hold':
             acc.onHold += 1;
             break;
+          case 'completed_green':
+          case 'completed_amber':
+          case 'completed_red':
+            acc.completed += 1;
+            break;
           case 'failed':
           case 'rejected':
-          case 'completed_red':
           case 'cancelled':
             acc.rejected += 1;
             break;
@@ -295,7 +297,7 @@ export default function BackgroundChecks() {
         }
         return acc;
       },
-      { pending: 0, inProgress: 0, onHold: 0, rejected: 0 }
+      { pending: 0, inProgress: 0, onHold: 0, completed: 0, rejected: 0 }
     );
   }, [checks]);
 
@@ -463,28 +465,28 @@ export default function BackgroundChecks() {
               <p className="text-xs text-muted-foreground">Vendor or HR in progress</p>
             </CardContent>
           </Card>
-          <Card className="shadow-sm border-amber-100 bg-amber-50/60">
+          <Card className="shadow-sm border-yellow-100 bg-yellow-50/60">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-amber-700 flex items-center gap-2">
+              <CardTitle className="text-sm font-medium text-yellow-700 flex items-center gap-2">
                 <PauseCircle className="h-4 w-4" />
                 On Hold
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-bold text-amber-900">{statusSummary.onHold}</p>
+              <p className="text-3xl font-bold text-yellow-900">{statusSummary.onHold}</p>
               <p className="text-xs text-muted-foreground">Waiting for clarifications</p>
             </CardContent>
           </Card>
-          <Card className="shadow-sm border-rose-100 bg-rose-50/60">
+          <Card className="shadow-sm border-emerald-100 bg-emerald-50/60">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-rose-700 flex items-center gap-2">
-                <XCircle className="h-4 w-4" />
-                Rejected
+              <CardTitle className="text-sm font-medium text-emerald-700 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4" />
+                Completed
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-bold text-rose-900">{statusSummary.rejected}</p>
-              <p className="text-xs text-muted-foreground">Failed / adverse outcomes</p>
+              <p className="text-3xl font-bold text-emerald-900">{statusSummary.completed}</p>
+              <p className="text-xs text-muted-foreground">Successfully verified</p>
             </CardContent>
           </Card>
           <Card className="shadow-sm border-emerald-100 bg-emerald-50/60">

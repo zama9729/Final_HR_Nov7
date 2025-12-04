@@ -341,7 +341,7 @@ export default function Analytics() {
             {quickActions.map(({ id, icon: Icon, label, action, loading: loadingAction }) => (
               <Button
                 key={id}
-                className="min-w-[110px] bg-blue-600 hover:bg-blue-700 text-white"
+                className="min-w-[110px]"
                 onClick={action}
                 disabled={loadingAction}
               >

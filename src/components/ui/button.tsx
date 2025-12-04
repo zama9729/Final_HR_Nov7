@@ -11,9 +11,9 @@ const buttonVariants = cva(
       variant: {
         default: "red-glass-button",
         destructive: "red-glass-button",
-        outline: "red-glass-button border-2 bg-transparent text-red-700 hover:bg-transparent",
-        secondary: "red-glass-button bg-transparent text-red-700 hover:bg-transparent",
-        ghost: "red-glass-button bg-transparent border-transparent text-red-700 hover:bg-transparent",
+        outline: "red-glass-button",
+        secondary: "red-glass-button",
+        ghost: "red-glass-button",
         link: "text-red-700 underline-offset-4 hover:underline font-bold",
       },
       size: {

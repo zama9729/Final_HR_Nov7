@@ -1435,9 +1435,8 @@ export default function Timesheets() {
                                       <div className="flex items-center gap-2 mt-2">
                                         {isLastEntry && (
                                           <Button
-                                            variant="outline"
+                                            variant="default"
                                             size="sm"
-                                            className="h-8 px-3 border-2 border-primary/30 hover:border-primary hover:bg-primary/10"
                                             onClick={() => addEntry(dateStr)}
                                             title="Add another entry for this day"
                                           >
@@ -1449,7 +1448,7 @@ export default function Timesheets() {
                                           <Button
                                             variant="outline"
                                             size="sm"
-                                            className="h-8 px-3 border-2 border-red-300 hover:border-red-500 hover:bg-red-50 text-red-600 hover:text-red-700"
+                                            className="h-8 px-3"
                                             onClick={() => removeEntry(dateStr, entryIndex)}
                                             title="Remove this entry"
                                           >
@@ -1497,9 +1496,9 @@ export default function Timesheets() {
                <Button 
                  onClick={saveTimesheet} 
                  disabled={loading}
-                 variant="outline"
-                 className="px-6 py-2.5 text-base font-semibold border-2"
+                 variant="default"
                  size="lg"
+                 className="px-6 py-2.5 text-base font-semibold"
                >
                  <Save className="h-5 w-5 mr-2" />
                  {loading ? "Saving..." : "Save Draft"}

@@ -411,7 +411,7 @@ export function TopNavBar() {
                       onClick={() => handlePresenceChange(status)}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm liquid-glass-dropdown-item ${presenceStatus === status
                           ? 'bg-red-50/60 text-red-700'
-                          : 'text-gray-700'
+                          : 'text-slate-700'
                         }`}
                     >
                       <span className={`h-2.5 w-2.5 rounded-full border border-white/40 ${getPresenceDotGlow(status)}`} />

@@ -26,7 +26,7 @@ All colors MUST be HSL.
     --muted: 210 40% 96%;
     --muted-foreground: 215 16% 47%;
 
-    --accent: 142 76% 36%;
+    --accent: 0 84% 50%;
     --accent-foreground: 0 0% 100%;
 
     --success: 142 76% 36%;
@@ -79,7 +79,7 @@ All colors MUST be HSL.
     --muted: 217 32% 17%;
     --muted-foreground: 215 20% 65%;
 
-    --accent: 142 76% 36%;
+    --accent: 0 84% 50%;
     --accent-foreground: 0 0% 100%;
 
     --success: 142 76% 36%;
@@ -452,6 +452,86 @@ All colors MUST be HSL.
                 inset 0 -1px 0 rgba(255, 255, 255, 0.3);
   }
 
+  /* AI Chat Button - Complete Liquid Glass Effect */
+  .ai-chat-button {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(40px) saturate(200%);
+    -webkit-backdrop-filter: blur(40px) saturate(200%);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1),
+                0 2px 8px 0 rgba(0, 0, 0, 0.06),
+                inset 0 1px 0 rgba(255, 255, 255, 0.4),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.1);
+    z-index: 50;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    overflow: visible;
+    cursor: pointer;
+  }
+
+  .ai-chat-button::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.4) 0%,
+      rgba(255, 255, 255, 0.1) 25%,
+      rgba(255, 255, 255, 0.05) 50%,
+      rgba(255, 255, 255, 0.1) 75%,
+      rgba(255, 255, 255, 0.4) 100%
+    );
+    border-radius: 50%;
+    opacity: 0.6;
+    animation: shimmer 3s ease-in-out infinite;
+  }
+
+  .ai-chat-button::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at 30% 30%,
+      rgba(255, 255, 255, 0.3) 0%,
+      rgba(255, 255, 255, 0.1) 40%,
+      transparent 90%
+    );
+    pointer-events: none;
+  }
+
+  @keyframes shimmer {
+    0%, 100% {
+      transform: rotate(0deg) translate(0, 0);
+      opacity: 0.6;
+    }
+    50% {
+      transform: rotate(180deg) translate(10px, -10px);
+      opacity: 0.8;
+    }
+  }
+
+  .ai-chat-button:hover {
+    transform: scale(1.08);
+    background: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.18),
+                0 4px 12px 0 rgba(0, 0, 0, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.6),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.15);
+  }
+
+  .ai-chat-button:active {
+    transform: scale(1.05);
+  }
+
   /* Liquid glass dropdown */
   .liquid-glass-dropdown {
     background: rgba(255, 255, 255, 0.15);
@@ -469,6 +549,8 @@ All colors MUST be HSL.
     position: relative;
     overflow: hidden;
     border-radius: 0.375rem;
+    background: transparent !important;
+    color: inherit !important;
   }
 
   .liquid-glass-dropdown-item::before {
@@ -478,22 +560,110 @@ All colors MUST be HSL.
     top: 0;
     width: 3px;
     height: 100%;
-    background: linear-gradient(to bottom, rgba(99, 102, 241, 0.7), rgba(139, 92, 246, 0.7));
+    background: #E41E26;
     transform: scaleY(0);
     transform-origin: top;
     transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     border-radius: 0 0.125rem 0.125rem 0;
+    z-index: 1;
   }
 
-  .liquid-glass-dropdown-item:hover::before {
+  /* Show red line when item has ItemIndicator (selected state) */
+  .liquid-glass-dropdown-item:has([data-radix-select-item-indicator])::before,
+  .liquid-glass-dropdown-item:has([data-radix-dropdown-menu-item-indicator])::before {
     transform: scaleY(1);
   }
 
-  .liquid-glass-dropdown-item:hover {
-    background: rgba(255, 255, 255, 0.3);
+  .liquid-glass-dropdown-item:has([data-radix-select-item-indicator]),
+  .liquid-glass-dropdown-item:has([data-radix-dropdown-menu-item-indicator]) {
+    background: rgba(255, 255, 255, 0.3) !important;
     backdrop-filter: blur(14px) saturate(200%);
     -webkit-backdrop-filter: blur(14px) saturate(200%);
     transform: translateX(2px);
+  }
+
+  .liquid-glass-dropdown-item:hover::before,
+  .liquid-glass-dropdown-item:focus::before,
+  .liquid-glass-dropdown-item:focus-visible::before,
+  .liquid-glass-dropdown-item[data-highlighted]::before,
+  .liquid-glass-dropdown-item[data-state="checked"]::before,
+  .liquid-glass-dropdown-item[data-state="open"]::before,
+  .liquid-glass-dropdown-item[aria-selected="true"]::before,
+  .liquid-glass-dropdown-item[aria-current="page"]::before {
+    transform: scaleY(1);
+  }
+
+  .liquid-glass-dropdown-item:hover,
+  .liquid-glass-dropdown-item:focus,
+  .liquid-glass-dropdown-item:focus-visible,
+  .liquid-glass-dropdown-item[data-highlighted],
+  .liquid-glass-dropdown-item[data-state="checked"],
+  .liquid-glass-dropdown-item[data-state="open"],
+  .liquid-glass-dropdown-item[aria-selected="true"],
+  .liquid-glass-dropdown-item[aria-current="page"] {
+    background: rgba(255, 255, 255, 0.3) !important;
+    backdrop-filter: blur(14px) saturate(200%);
+    -webkit-backdrop-filter: blur(14px) saturate(200%);
+    transform: translateX(2px);
+    color: inherit !important;
+  }
+
+  /* Apply liquid glass dropdown item style to all Radix dropdown/select items */
+  [data-radix-select-item],
+  [data-radix-dropdown-menu-item] {
+    position: relative;
+    overflow: hidden;
+    border-radius: 0.375rem;
+  }
+
+  [data-radix-select-item]::before,
+  [data-radix-dropdown-menu-item]::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 3px;
+    height: 100%;
+    background: #E41E26;
+    transform: scaleY(0);
+    transform-origin: top;
+    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    border-radius: 0 0.125rem 0.125rem 0;
+    z-index: 1;
+  }
+
+  [data-radix-select-item][data-highlighted]::before,
+  [data-radix-dropdown-menu-item][data-highlighted]::before,
+  [data-radix-select-item]:focus::before,
+  [data-radix-dropdown-menu-item]:focus::before,
+  [data-radix-select-item]:focus-visible::before,
+  [data-radix-dropdown-menu-item]:focus-visible::before,
+  [data-radix-select-item][data-state="checked"]::before,
+  [data-radix-dropdown-menu-item][data-state="checked"]::before,
+  [data-radix-select-item][data-state="open"]::before,
+  [data-radix-dropdown-menu-item][data-state="open"]::before,
+  [data-radix-select-item][aria-selected="true"]::before,
+  [data-radix-dropdown-menu-item][aria-selected="true"]::before {
+    transform: scaleY(1);
+  }
+
+  [data-radix-select-item][data-highlighted],
+  [data-radix-dropdown-menu-item][data-highlighted],
+  [data-radix-select-item]:focus,
+  [data-radix-dropdown-menu-item]:focus,
+  [data-radix-select-item]:focus-visible,
+  [data-radix-dropdown-menu-item]:focus-visible,
+  [data-radix-select-item][data-state="checked"],
+  [data-radix-dropdown-menu-item][data-state="checked"],
+  [data-radix-select-item][data-state="open"],
+  [data-radix-dropdown-menu-item][data-state="open"],
+  [data-radix-select-item][aria-selected="true"],
+  [data-radix-dropdown-menu-item][aria-selected="true"] {
+    background: rgba(255, 255, 255, 0.3) !important;
+    backdrop-filter: blur(14px) saturate(200%);
+    -webkit-backdrop-filter: blur(14px) saturate(200%);
+    transform: translateX(2px);
+    color: inherit !important;
   }
 
   /* Red button - uniform app-level style with #E41E26 */
@@ -526,9 +696,8 @@ All colors MUST be HSL.
 
   .red-glass-button:hover {
     background: #E41E26;
-    box-shadow: 0 4px 16px 0 rgba(228, 30, 38, 0.5),
-                0 0 30px 0 rgba(228, 30, 38, 0.6),
-                0 0 50px 0 rgba(228, 30, 38, 0.4),
+    box-shadow: 0 2px 12px 0 rgba(228, 30, 38, 0.4),
+                0 0 20px 0 rgba(228, 30, 38, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.2);
     transform: translateY(-1px);
     color: #ffffff;
@@ -536,14 +705,14 @@ All colors MUST be HSL.
 
   .red-glass-button:active {
     transform: translateY(0);
-    box-shadow: 0 2px 8px 0 rgba(228, 30, 38, 0.4),
-                0 0 20px 0 rgba(228, 30, 38, 0.5);
+    box-shadow: 0 2px 8px 0 rgba(228, 30, 38, 0.3),
+                0 0 15px 0 rgba(228, 30, 38, 0.3);
   }
 
   .red-glass-button:focus {
     outline: none;
-    box-shadow: 0 4px 16px 0 rgba(228, 30, 38, 0.5),
-                0 0 30px 0 rgba(228, 30, 38, 0.6);
+    box-shadow: 0 2px 12px 0 rgba(228, 30, 38, 0.4),
+                0 0 20px 0 rgba(228, 30, 38, 0.3);
   }
 
   /* Red glass card/box */
@@ -583,21 +752,6 @@ All colors MUST be HSL.
     box-shadow: 0 8px 32px 0 rgba(220, 38, 38, 0.15),
                 inset 0 1px 0 rgba(255, 255, 255, 0.5);
     transform: translateY(-2px);
-  }
-
-  /* Ghost/Outline button variant - transparent red */
-  .red-glass-button.bg-transparent {
-    background: rgba(228, 30, 38, 0.1) !important;
-    border-color: rgba(228, 30, 38, 0.4) !important;
-    color: #E41E26 !important;
-    font-weight: 700 !important;
-  }
-
-  .red-glass-button.bg-transparent:hover {
-    background: rgba(228, 30, 38, 0.15) !important;
-    border-color: rgba(228, 30, 38, 0.6) !important;
-    box-shadow: 0 0 25px 0 rgba(228, 30, 38, 0.4) !important;
-    color: #E41E26 !important;
   }
 
   /* Apple-style liquid glass toggle button */

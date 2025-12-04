@@ -358,18 +358,6 @@ export default function AttendanceAnalytics() {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Pending Timesheets</CardTitle>
-                  <Clock className="h-4 w-4 text-amber-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{overview?.pending_approvals || 0}</div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Awaiting approval (HR/CEO view)
-                  </p>
-                </CardContent>
-              </Card>
             </div>
 
             {/* Statistics Cards */}
@@ -449,7 +437,7 @@ export default function AttendanceAnalytics() {
                   <CardContent>
                     {histogram.length > 0 ? (
                       <ResponsiveContainer width="100%" height={400}>
-                        <ComposedChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
+                        <BarChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                           <XAxis
                             dataKey="date"
@@ -462,10 +450,10 @@ export default function AttendanceAnalytics() {
                           <YAxis tick={{ fontSize: 12 }} />
                           <Tooltip content={<CustomTooltip />} />
                           <Legend />
-                          <Bar dataKey="present" fill="#10b981" name="Present" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="absent" fill="#ef4444" name="Absent" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="late" fill="#f59e0b" name="Late" radius={[4, 4, 0, 0]} />
-                        </ComposedChart>
+                          <Bar dataKey="late" stackId="a" fill="#f59e0b" name="Late" radius={[0, 0, 4, 4]} />
+                          <Bar dataKey="absent" stackId="a" fill="#ef4444" name="Absent" />
+                          <Bar dataKey="present" stackId="a" fill="#10b981" name="Present" radius={[4, 4, 0, 0]} />
+                        </BarChart>
                       </ResponsiveContainer>
                     ) : (
                       <div className="text-center py-16 text-muted-foreground">
@@ -564,7 +552,7 @@ export default function AttendanceAnalytics() {
                   <CardContent>
                     {histogram.length > 0 ? (
                       <ResponsiveContainer width="100%" height={400}>
-                        <ComposedChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
+                        <BarChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                           <XAxis
                             dataKey="date"
@@ -577,9 +565,9 @@ export default function AttendanceAnalytics() {
                           <YAxis tick={{ fontSize: 12 }} />
                           <Tooltip content={<CustomTooltip />} />
                           <Legend />
-                          <Bar dataKey="wfo" fill="#3b82f6" name="WFO" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="wfh" fill="#8b5cf6" name="WFH" radius={[4, 4, 0, 0]} />
-                        </ComposedChart>
+                          <Bar dataKey="wfh" stackId="b" fill="#8b5cf6" name="WFH" radius={[0, 0, 4, 4]} />
+                          <Bar dataKey="wfo" stackId="b" fill="#3b82f6" name="WFO" radius={[4, 4, 0, 0]} />
+                        </BarChart>
                       </ResponsiveContainer>
                     ) : (
                       <div className="text-center py-16 text-muted-foreground">

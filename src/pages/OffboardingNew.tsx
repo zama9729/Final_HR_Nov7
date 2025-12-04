@@ -234,7 +234,7 @@ export default function OffboardingNew() {
                   {verification.email !== 'verified' && (
                     <div className="flex gap-2">
                       <Button 
-                        variant="outline" 
+                        variant="default" 
                         size="sm" 
                         onClick={() => sendOTP('email')}
                         disabled={loading || verification.email === 'sent'}
@@ -272,7 +272,7 @@ export default function OffboardingNew() {
                   {verification.phone !== 'verified' && (
                     <div className="flex gap-2">
                       <Button 
-                        variant="outline" 
+                        variant="default" 
                         size="sm" 
                         onClick={() => sendOTP('phone')}
                         disabled={loading || verification.phone === 'sent'}

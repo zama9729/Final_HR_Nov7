@@ -545,12 +545,12 @@ export default function ShiftManagement() {
 
   const getSlotStyle = (slot: RosterSlot) => {
     if (slot.assignment_status === "unassigned") {
-      return "border-red-200 bg-red-50";
+      return "border-red-200 bg-red-50/30";
     }
     if ((slot.conflict_flags?.length || 0) > 0 || (slot.warning_flags?.length || 0) > 0) {
-      return "border-amber-200 bg-amber-50";
+      return "border-amber-200 bg-amber-50/30";
     }
-    return "border-emerald-200 bg-emerald-50";
+    return "border-emerald-200 bg-emerald-50/30";
   };
 
   const getEmployeeLabel = (employeeId?: string | null) => {
@@ -578,7 +578,7 @@ export default function ShiftManagement() {
         {schedules.map((schedule) => (
           <Card
             key={schedule.id}
-            className={`border ${
+            className={`border transition-transform duration-300 hover:scale-105 cursor-pointer ${
               selectedSchedule?.id === schedule.id ? "border-primary" : "border-muted"
             }`}
           >
