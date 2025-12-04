@@ -70,6 +70,8 @@ interface RosterSlot {
   start_time: string;
   end_time: string;
   assigned_employee_id?: string | null;
+  assigned_team_id?: string | null;
+  assignment_type?: 'EMPLOYEE' | 'TEAM';
   assignment_status: "assigned" | "unassigned" | "conflict" | "warning";
   assignment_source: "auto" | "manual";
   conflict_flags?: string[];
@@ -133,6 +135,7 @@ export default function ShiftManagement() {
   const [publishedSchedules, setPublishedSchedules] = useState<RosterSchedule[]>([]);
   const [runs, setRuns] = useState<any[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [teams, setTeams] = useState<any[]>([]);
 
   const [selectedSchedule, setSelectedSchedule] = useState<RosterSchedule | null>(null);
   const [scheduleSlots, setScheduleSlots] = useState<RosterSlot[]>([]);
@@ -183,7 +186,7 @@ export default function ShiftManagement() {
   }, []);
 
   const loadInitialData = async () => {
-    await Promise.all([loadTemplates(), loadSchedules(), loadRuns(), loadEmployees()]);
+    await Promise.all([loadTemplates(), loadSchedules(), loadRuns(), loadEmployees(), loadTeams()]);
   };
 
   const loadTemplates = async () => {
@@ -208,6 +211,15 @@ export default function ShiftManagement() {
       );
     } catch (error) {
       console.error("Employee load failed", error);
+    }
+  };
+
+  const loadTeams = async () => {
+    try {
+      const data = await api.getTeams();
+      setTeams(data || []);
+    } catch (error) {
+      console.error("Team load failed", error);
     }
   };
 
@@ -266,14 +278,14 @@ export default function ShiftManagement() {
       rows.map((row) =>
         row.id === rowId
           ? {
-              ...row,
-              [field]:
-                field === "dayOfWeek"
+            ...row,
+            [field]:
+              field === "dayOfWeek"
+                ? Number(value)
+                : field === "coverageRequired"
                   ? Number(value)
-                  : field === "coverageRequired"
-                    ? Number(value)
-                    : value,
-            }
+                  : value,
+          }
           : row
       )
     );
@@ -578,9 +590,8 @@ export default function ShiftManagement() {
         {schedules.map((schedule) => (
           <Card
             key={schedule.id}
-            className={`border ${
-              selectedSchedule?.id === schedule.id ? "border-primary" : "border-muted"
-            }`}
+            className={`border transition-transform duration-300 hover:scale-105 cursor-pointer ${selectedSchedule?.id === schedule.id ? "border-primary" : "border-muted"
+              }`}
           >
             <CardHeader className="space-y-1">
               <div className="flex items-center justify-between">
@@ -988,12 +999,17 @@ export default function ShiftManagement() {
                                             <SelectItem value="">Unassigned</SelectItem>
                                             {employees.map((emp) => (
                                               <SelectItem key={emp.id} value={emp.id}>
-                                                {getEmployeeLabel(emp.id)} (
-                                                {emp.employee_id || "ID"})
+                                                {getEmployeeLabel(emp.id)} ({emp.employee_id || "ID"})
                                               </SelectItem>
                                             ))}
                                           </SelectContent>
                                         </Select>
+                                        {slot.assigned_team_id && (
+                                          <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
+                                            <Users className="h-3 w-3" />
+                                            Team: {teams.find(t => t.id === slot.assigned_team_id)?.name || "Unknown"}
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                     {(slot.conflict_flags?.length || 0) > 0 && (

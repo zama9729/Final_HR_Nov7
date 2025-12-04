@@ -49,7 +49,8 @@ export async function generateRosterRun({
   decayRate,
   shiftWeights,
   overwriteLocked = false,
-  ruleSetId
+  ruleSetId,
+  teamId // [NEW]
 }) {
   if (!tenantId) {
     throw new Error('tenantId is required for roster generation');
@@ -91,13 +92,24 @@ export async function generateRosterRun({
         }
 
         // 2. Fetch Active Employees
-        const employeesResult = await client.query(
-          `SELECT e.*, p.first_name, p.last_name, p.email
+        let employeeQuery = `
+           SELECT e.*, p.first_name, p.last_name, p.email
            FROM employees e
            INNER JOIN profiles p ON p.id = e.user_id
-           WHERE e.tenant_id = $1 AND e.status = 'active'`,
-          [tenantId]
-        );
+           WHERE e.tenant_id = $1 AND e.status = 'active'
+        `;
+        const employeeParams = [tenantId];
+
+        if (teamId) {
+          employeeQuery += ` AND e.id IN (
+            SELECT employee_id FROM team_memberships 
+            WHERE team_id = $2 
+              AND (end_date IS NULL OR end_date >= $3)
+          )`;
+          employeeParams.push(teamId, effectiveStartDate);
+        }
+
+        const employeesResult = await client.query(employeeQuery, employeeParams);
         const employees = employeesResult.rows;
 
         if (employees.length === 0) {
@@ -125,7 +137,8 @@ export async function generateRosterRun({
                 shift_template_id: template.id,
                 day_of_week: dayOfWeek,
                 required_count: 1,
-                required_roles: null
+                required_roles: null,
+                assignment_type: template.schedule_mode || 'employee' // Default from template
               });
             }
           }
@@ -147,6 +160,8 @@ export async function generateRosterRun({
             const template = templates.find(t => t.id === req.shift_template_id);
             if (!template) continue;
 
+            const assignmentType = req.assignment_type || template.schedule_mode || 'employee';
+
             for (let i = 0; i < req.required_count; i++) {
               slots.push({
                 shiftDate: dateStr,
@@ -158,7 +173,8 @@ export async function generateRosterRun({
                 templateRuleId: null,
                 positionIndex: i,
                 shift_template_id: template.id,
-                shift_type: template.shift_type
+                shift_type: template.shift_type,
+                assignmentType: assignmentType
               });
             }
           }
@@ -206,8 +222,25 @@ export async function generateRosterRun({
 
         const availability = [...availabilityResult.rows, ...leaveBlackouts];
 
-        // 5. Fetch Prior Night Counts
-        let priorNightCounts = {};
+        // 5. Fetch Teams (New)
+        let teamQuery = `
+           SELECT t.id, t.name, array_agg(tm.employee_id) as member_ids
+           FROM teams t
+           JOIN team_memberships tm ON tm.team_id = t.id
+           WHERE t.org_id = $1
+             AND (tm.end_date IS NULL OR tm.end_date >= $2)
+        `;
+        const teamParams = [tenantId, effectiveStartDate];
+
+        if (teamId) { // Add teamId to generateRosterRun params
+          teamQuery += ` AND t.id = $3`;
+          teamParams.push(teamId);
+        }
+
+        teamQuery += ` GROUP BY t.id`;
+
+        const teamsResult = await client.query(teamQuery, teamParams);
+        const teams = teamsResult.rows;
 
         // 6. Initialize ScoreRank Scheduler
         const { getScheduler } = await import('./scheduling/scheduler.js');
@@ -228,11 +261,12 @@ export async function generateRosterRun({
           weekStart: effectiveStartDate,
           weekEnd: effectiveEndDate,
           employees,
+          teams, // Pass teams
           templates,
           demand,
           availability,
           exceptions: [],
-          priorNightCounts,
+          priorNightCounts: {},
           demandSlots: slots // Pass pre-generated slots
         });
 
@@ -262,22 +296,26 @@ export async function generateRosterRun({
         if (result.assignments && result.assignments.length > 0) {
           for (const assignment of result.assignments) {
             const template = templates.find(t => t.id === assignment.shift_template_id);
+
+            // Handle both employee and team assignments
             await client.query(
               `INSERT INTO schedule_assignments (
-                      schedule_id, tenant_id, employee_id, shift_date,
-                      shift_template_id, start_time, end_time, assigned_by, shift_type
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                      schedule_id, tenant_id, employee_id, team_id, shift_date,
+                      shift_template_id, start_time, end_time, assigned_by, shift_type, assignment_type
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                     ON CONFLICT (schedule_id, employee_id, shift_date, start_time) DO NOTHING`,
               [
                 scheduleId,
                 tenantId,
-                assignment.employee_id,
+                assignment.employee_id || null, // Nullable if team assignment (though schema might require employee_id? Let's check)
+                assignment.team_id || null,
                 assignment.shift_date,
                 assignment.shift_template_id,
                 assignment.start_time,
                 assignment.end_time,
                 'algorithm',
-                template ? template.shift_type : 'day'
+                template ? template.shift_type : 'day',
+                assignment.assignment_type || 'employee'
               ]
             );
           }
@@ -293,11 +331,12 @@ export async function generateRosterRun({
         const fullSchedule = fullScheduleResult.rows[0];
 
         const assignmentsResult = await client.query(
-          `SELECT sa.*, p.first_name, p.last_name, t.name as template_name
+          `SELECT sa.*, p.first_name, p.last_name, t.name as template_name, tm.name as team_name
              FROM schedule_assignments sa
              LEFT JOIN employees e ON e.id = sa.employee_id
              LEFT JOIN profiles p ON p.id = e.user_id
              LEFT JOIN shift_templates t ON t.id = sa.shift_template_id
+             LEFT JOIN teams tm ON tm.id = sa.team_id
              WHERE sa.schedule_id = $1`,
           [scheduleId]
         );
@@ -310,7 +349,8 @@ export async function generateRosterRun({
             first_name: e.first_name,
             last_name: e.last_name,
             email: e.email
-          }))
+          })),
+          teams: teams // Return teams too
         };
 
       } catch (error) {
@@ -331,12 +371,12 @@ export async function listSchedules(tenantId, { status, dateFrom, dateTo }) {
   }
 
   if (dateFrom) {
-    filters.push(`start_date >= $${params.length + 1}::date`);
+    filters.push(`week_start_date >= $${params.length + 1}::date`);
     params.push(dateFrom);
   }
 
   if (dateTo) {
-    filters.push(`end_date <= $${params.length + 1}::date`);
+    filters.push(`week_end_date <= $${params.length + 1}::date`);
     params.push(dateTo);
   }
 
@@ -346,13 +386,11 @@ export async function listSchedules(tenantId, { status, dateFrom, dateTo }) {
     `
     SELECT
       s.*,
-      t.name AS template_name,
-      r.summary AS run_summary
-    FROM schedules s
-    LEFT JOIN schedule_templates t ON t.id = s.template_id
-    LEFT JOIN scheduler_runs r ON r.id = s.run_id
+      'Generated Schedule' AS template_name,
+      s.telemetry AS run_summary
+    FROM generated_schedules s
     ${whereClause}
-    ORDER BY s.start_date DESC, s.created_at DESC
+    ORDER BY s.week_start_date DESC, s.created_at DESC
     `,
     params,
     tenantId

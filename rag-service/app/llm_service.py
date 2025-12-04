@@ -124,29 +124,17 @@ class LLMService:
             for i, chunk in enumerate(context_chunks)
         ])
         
-        system_prompt = """You are a helpful HR assistant with access to multiple company policy documents. Your role is to answer questions using the provided context documents.
-
-IMPORTANT INSTRUCTIONS:
-1. ALWAYS use the provided context documents to answer questions - they contain the information you need
-2. Extract and present information directly from the context, even if you need to infer or summarize
-3. If the context contains relevant information (even if not an exact match), use it to provide a helpful answer
-4. Cite which document section you're referencing when possible (e.g., "According to Document Section 1...")
-5. Be thorough and extract all relevant details from the context
-6. Only say "information not available" if the context is completely irrelevant to the question
-7. If the question asks about specific criteria, requirements, policies, or procedures, carefully search through ALL provided context sections
-8. You have access to MULTIPLE documents - information may be spread across different document sections, so check all of them
-
-Be confident and helpful - the context documents are your source of truth."""
+        system_prompt = """You are a helpful HR assistant. Answer questions using ONLY the provided context documents.
+1. Use the context to answer. If the answer isn't there, say "information not available".
+2. Cite document sections (e.g., "Section 1") when possible.
+3. Be concise and direct."""
         
-        user_prompt = f"""You have access to the following document sections from multiple uploaded company documents:
-
+        user_prompt = f"""Context:
 {context_text}
 
 ---
-
 Question: {query}
-
-Please answer the question using the information from the document sections above. Extract all relevant details, criteria, requirements, or information that relates to the question. Be thorough and cite specific sections when possible. Remember that information may be spread across multiple document sections."""
+Answer:"""
         
         messages = [
             {"role": "system", "content": system_prompt},

@@ -478,9 +478,7 @@ class ApiClient {
     });
   }
 
-  async getBackgroundCheckReport(id: string) {
-    return this.request(`/api/background-checks/${id}/report`);
-  }
+
 
   // AI assistant conversation methods
   async listAIConversations() {
@@ -844,7 +842,7 @@ class ApiClient {
     });
   }
 
-  async getTeamMembers() {
+  async getMyTeamMembers() {
     return this.request('/api/employees?team=mine');
   }
 
@@ -857,9 +855,7 @@ class ApiClient {
   }
 
   // Project methods
-  async getProjects() {
-    return this.request('/api/v1/projects');
-  }
+
 
   async getProject(id: string) {
     return this.request(`/api/v1/projects/${id}`);
@@ -1066,8 +1062,32 @@ class ApiClient {
   async uploadAttendance(file: File, mapping?: any) {
     const formData = new FormData();
     formData.append('file', file);
+<<<<<<< Updated upstream
     if (mapping) {
       formData.append('mapping', JSON.stringify(mapping));
+=======
+
+    // Support both old format (just mapping) and new format (full ETL config)
+    if (etlConfig) {
+      if (etlConfig.mapping) {
+        formData.append('mapping', JSON.stringify(etlConfig.mapping));
+      } else if (typeof etlConfig === 'object' && !etlConfig.transformations) {
+        // Old format - just mapping object
+        formData.append('mapping', JSON.stringify(etlConfig));
+      }
+
+      if (etlConfig.transformations && Array.isArray(etlConfig.transformations)) {
+        formData.append('transformations', JSON.stringify(etlConfig.transformations));
+      }
+
+      if (etlConfig.validations && Array.isArray(etlConfig.validations)) {
+        formData.append('validations', JSON.stringify(etlConfig.validations));
+      }
+
+      if (typeof etlConfig.matrixDetected === 'boolean') {
+        formData.append('matrixDetected', JSON.stringify(etlConfig.matrixDetected));
+      }
+>>>>>>> Stashed changes
     }
 
     return this.request('/api/v1/attendance/upload', {
@@ -1349,6 +1369,150 @@ class ApiClient {
     return res?.policies ?? [];
   }
 
+<<<<<<< Updated upstream
+=======
+  async publishManagedPolicy(id: string, change_note?: string) {
+    return this.request(`/api/policy-management/policies/${id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ change_note }),
+    });
+  }
+
+  // Promotions API
+  async getPromotions(params?: { status?: string; employeeId?: string; year?: number }) {
+    const search = new URLSearchParams();
+    if (params?.status) search.append('status', params.status);
+    if (params?.employeeId) search.append('employeeId', params.employeeId);
+    if (params?.year) search.append('year', params.year.toString());
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return this.request(`/api/promotion${suffix}`);
+  }
+
+  async getPromotion(id: string) {
+    return this.request(`/api/promotions/${id}`);
+  }
+
+  async createPromotion(data: {
+    employee_id: string;
+    appraisal_id?: string;
+    old_designation?: string;
+    old_grade?: string;
+    old_department_id?: string;
+    old_ctc?: number;
+    new_designation: string;
+    new_grade?: string;
+    new_department_id?: string;
+    new_ctc?: number;
+    reason_text?: string;
+    effective_date: string;
+    status?: string;
+  }) {
+    return this.request('/api/promotion', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePromotion(id: string, data: Partial<{
+    new_designation: string;
+    new_grade: string;
+    new_department_id: string;
+    new_ctc: number;
+    reason_text: string;
+    effective_date: string;
+    appraisal_id: string;
+  }>) {
+    return this.request(`/api/promotion/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async submitPromotion(id: string) {
+    return this.request(`/api/promotion/${id}/submit`, {
+      method: 'POST',
+    });
+  }
+
+  async approvePromotion(id: string) {
+    return this.request(`/api/promotion/${id}/approve`, {
+      method: 'POST',
+    });
+  }
+
+  async rejectPromotion(id: string, rejection_reason?: string) {
+    return this.request(`/api/promotion/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ rejection_reason }),
+    });
+  }
+
+  // Employee History API
+  async getMyHistory(params?: { year?: number; types?: string[] }) {
+    const search = new URLSearchParams();
+    if (params?.year) search.append('year', params.year.toString());
+    if (params?.types) search.append('types', params.types.join(','));
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return this.request(`/api/me/history${suffix}`);
+  }
+
+  async getEmployeeHistory(employeeId: string, params?: { year?: number; types?: string[] }) {
+    const search = new URLSearchParams();
+    if (params?.year) search.append('year', params.year.toString());
+    if (params?.types) search.append('types', params.types.join(','));
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return this.request(`/api/employees/${employeeId}/history${suffix}`);
+  }
+
+  async getHistoryEvent(eventId: string) {
+    return this.request(`/api/history/events/${eventId}`);
+  }
+
+  async downloadOrgPolicyPDF(policyId: string): Promise<Blob> {
+    const url = `/api/policies/org/${policyId}/download`;
+
+    const headers: HeadersInit = {};
+    if (this._token) {
+      headers['Authorization'] = `Bearer ${this._token}`;
+    }
+
+    const response = await fetch(`${this.baseURL}${url}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+      throw new Error(error.error || 'Failed to download PDF');
+    }
+
+    return await response.blob();
+  }
+
+  async downloadPolicyPDF(policyId: string, version?: string): Promise<Blob> {
+    const url = version
+      ? `/api/policy-management/policies/${policyId}/download?version=${version}`
+      : `/api/policy-management/policies/${policyId}/download`;
+
+    const headers: HeadersInit = {};
+    if (this._token) {
+      headers['Authorization'] = `Bearer ${this._token}`;
+    }
+
+    const response = await fetch(`${this.baseURL}${url}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+      throw new Error(error.error || 'Failed to download PDF');
+    }
+
+    return await response.blob();
+  }
+
+>>>>>>> Stashed changes
   // Promotion methods
   async getPromotionHealth() {
     return this.request('/api/promotion/health');
@@ -1391,11 +1555,7 @@ class ApiClient {
     });
   }
 
-  async approvePromotion(id: string) {
-    return this.request(`/api/promotion/approve/${id}`, {
-      method: 'POST',
-    });
-  }
+
 
   // User invite methods
   async inviteUsers(data: {
@@ -1794,13 +1954,16 @@ class ApiClient {
     week_start_date: string;
     week_end_date: string;
     rule_set_id: string;
-    algorithm: 'greedy' | 'ilp' | 'simulated_annealing';
+    algorithm?: 'greedy' | 'ilp' | 'simulated_annealing';
     template_ids?: string[];
     employee_ids?: string[];
     branch_id?: string;
     team_id?: string;
     seed?: number;
     replace_schedule_id?: string;
+    decayRate?: number;
+    shiftWeights?: { morning: number; evening: number; night: number };
+    overwriteLocked?: boolean;
   }) {
     return this.request('/api/scheduling/schedules/run', {
       method: 'POST',
@@ -1832,56 +1995,26 @@ class ApiClient {
     });
   }
 
-  async manualEditSchedule(
-    id: string,
-    data: {
-      assignments: Array<{
-        id?: string;
-        employee_id: string;
-        shift_date: string;
-        shift_template_id: string;
-        start_time: string;
-        end_time: string;
-      }>;
-      reason?: string;
-    }
-  ) {
+  async manualEditSchedule(id: string, data: { assignments: any[]; reason?: string }) {
     return this.request(`/api/scheduling/schedules/${id}/manual-edit`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
-  async createException(data: {
-    schedule_id?: string;
-    employee_id: string;
-    rule_id: string;
-    exception_type: 'allow_violation' | 'force_assignment' | 'prevent_assignment';
-    reason: string;
-  }) {
-    return this.request('/api/scheduling/exceptions', {
-      method: 'POST',
-      body: JSON.stringify(data),
+  async exportScheduleCSV(id: string): Promise<Blob> {
+    const response = await fetch(`${this.baseURL}/api/scheduling/schedules/${id}/export/csv`, {
+      headers: {
+        'Authorization': `Bearer ${this._token}`,
+      },
     });
-  }
 
-  async approveException(id: string) {
-    return this.request(`/api/scheduling/exceptions/${id}/approve`, {
-      method: 'PATCH',
-    });
-  }
-
-  async exportScheduleCSV(id: string) {
-    const url = `${this.baseURL}/api/scheduling/schedules/${id}/export/csv`;
-    const headers: HeadersInit = {};
-    if (this._token) {
-      headers['Authorization'] = `Bearer ${this._token}`;
-    }
-    const response = await fetch(url, { headers });
     if (!response.ok) {
-      throw new Error('Failed to export schedule');
+      const error = await response.json().catch(() => ({ error: 'Failed to download CSV' }));
+      throw new Error(error.error || 'Failed to download CSV');
     }
-    return response.blob();
+
+    return await response.blob();
   }
 
   async getCalendar(params: {
@@ -1899,6 +2032,334 @@ class ApiClient {
     if (params.view_type) query.append('view_type', params.view_type);
     return this.request(`/api/calendar?${query.toString()}`);
   }
+
+
+  // Profile picture upload
+  async getProfilePicturePresignedUrl(contentType: string) {
+    return this.request('/api/employees/profile-picture/presign', {
+      method: 'POST',
+      body: JSON.stringify({ contentType }),
+    });
+  }
+
+  // Unified Policy Management APIs
+  async getUnifiedPolicies(params?: { category?: string; status?: string; search?: string }) {
+    const query = new URLSearchParams();
+    if (params?.category) query.append('category', params.category);
+    if (params?.status) query.append('status', params.status);
+    if (params?.search) query.append('search', params.search);
+    return this.request(`/api/unified-policies?${query.toString()}`);
+  }
+
+  async getUnifiedPolicy(id: string) {
+    return this.request(`/api/unified-policies/${id}`);
+  }
+
+  async createUnifiedPolicy(data: {
+    category: 'LEAVE' | 'OFFBOARDING' | 'GENERAL';
+    title: string;
+    short_description?: string;
+    content_html: string;
+    content_markdown?: string;
+    effective_from?: string;
+    effective_to?: string;
+  }) {
+    return this.request('/api/unified-policies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateUnifiedPolicy(id: string, data: {
+    title?: string;
+    short_description?: string;
+    content_html?: string;
+    content_markdown?: string;
+    effective_from?: string;
+    effective_to?: string;
+    status?: 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'ARCHIVED';
+  }) {
+    return this.request(`/api/unified-policies/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async publishUnifiedPolicy(id: string, changelog_text?: string) {
+    return this.request(`/api/unified-policies/${id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ changelog_text }),
+    });
+  }
+
+  async archiveUnifiedPolicy(id: string) {
+    return this.request(`/api/unified-policies/${id}/archive`, {
+      method: 'POST',
+    });
+  }
+
+  async getUnifiedPolicyVersions(id: string) {
+    return this.request(`/api/unified-policies/${id}/versions`);
+  }
+
+  async getUnifiedPolicyVersion(id: string, version: number) {
+    return this.request(`/api/unified-policies/${id}/versions/${version}`);
+  }
+
+  async downloadUnifiedPolicyPDF(id: string, version: number) {
+    const response = await fetch(`${this.baseURL}/api/unified-policies/${id}/versions/${version}/download`, {
+      headers: {
+        'Authorization': `Bearer ${this._token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+      throw new Error(error.error || 'Failed to download PDF');
+    }
+
+    // Check if response is JSON (presigned URL) or PDF blob
+    const contentType = response.headers.get('content-type');
+
+    if (contentType?.includes('application/json')) {
+      // It's a presigned URL
+      const data = await response.json();
+      if (data.downloadUrl) {
+        // Open presigned URL in new tab
+        window.open(data.downloadUrl, '_blank');
+        return;
+      }
+    }
+
+    // It's a PDF blob
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `policy-${id}-v${version}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  }
+
+  // Employee policy APIs
+  async getMyPolicies(params?: { category?: string; search?: string }) {
+    const query = new URLSearchParams();
+    if (params?.category) query.append('category', params.category);
+    if (params?.search) query.append('search', params.search);
+    return this.request(`/api/unified-policies/me/policies?${query.toString()}`);
+  }
+
+  async getMyPolicy(id: string) {
+    return this.request(`/api/unified-policies/me/policies/${id}`);
+  }
+
+  // RAG ingestion
+  async reindexPoliciesForRAG() {
+    return this.request('/api/unified-policies/rag/reindex', {
+      method: 'POST',
+    });
+  }
+
+  async ingestPolicyForRAG(id: string) {
+    return this.request(`/api/unified-policies/${id}/rag/ingest`, {
+      method: 'POST',
+    });
+  }
+
+  async uploadProfilePicture(url: string, key: string) {
+    return this.request('/api/employees/profile-picture/upload', {
+      method: 'POST',
+      body: JSON.stringify({ url, key }),
+    });
+  }
+
+  async getProfilePictureUrl(userId: string) {
+    return this.request(`/api/employees/profile-picture/${userId}`, {
+      method: 'GET',
+    });
+  }
+
+  // Check for missing onboarding data
+  async getMissingOnboardingData() {
+    return this.request('/api/onboarding/me/missing-data');
+  }
+
+  // Teams Management APIs
+  async getTeams(params?: { type?: 'FUNCTIONAL' | 'PROJECT'; search?: string; active?: boolean }) {
+    const query = new URLSearchParams();
+    if (params?.type) query.append('type', params.type);
+    if (params?.search) query.append('search', params.search);
+    if (params?.active !== undefined) query.append('active', String(params.active));
+    const response = await this.request(`/api/teams?${query.toString()}`);
+    return response.teams || [];
+  }
+
+  async getTeam(id: string) {
+    return this.request(`/api/teams/${id}`);
+  }
+
+  async createTeam(data: {
+    name: string;
+    code?: string;
+    description?: string;
+    team_type?: 'FUNCTIONAL' | 'PROJECT';
+    parent_team_id?: string;
+    owner_manager_id?: string;
+  }) {
+    return this.request('/api/teams', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTeam(id: string, data: {
+    name?: string;
+    code?: string;
+    description?: string;
+    parent_team_id?: string;
+    owner_manager_id?: string;
+    is_active?: boolean;
+  }) {
+    return this.request(`/api/teams/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async activateTeam(id: string) {
+    return this.request(`/api/teams/${id}/activate`, {
+      method: 'POST',
+    });
+  }
+
+  async deactivateTeam(id: string) {
+    return this.request(`/api/teams/${id}/deactivate`, {
+      method: 'POST',
+    });
+  }
+
+  async getTeamMembers(teamId: string) {
+    const response = await this.request(`/api/teams/${teamId}/members`);
+    return response.members || [];
+  }
+
+  async getAvailableEmployeesForTeam(teamId: string) {
+    const response = await this.request(`/api/teams/${teamId}/available-employees`);
+    return response.employees || [];
+  }
+
+  async addTeamMember(teamId: string, data: {
+    employee_id: string;
+    role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
+    is_primary?: boolean;
+    start_date?: string;
+    manual_override?: boolean;
+  }) {
+    return this.request(`/api/teams/${teamId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTeamMembership(teamId: string, memberId: string, data: {
+    role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
+    is_primary?: boolean;
+    end_date?: string;
+  }) {
+    return this.request(`/api/teams/${teamId}/members/${memberId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Reporting Lines APIs
+  async getEmployeeReportingLines(employeeId: string) {
+    const response = await this.request(`/api/reporting-lines/employee/${employeeId}`);
+    return response.reporting_lines || [];
+  }
+
+  async getManagerDirectReports(managerId: string, relationshipType?: string) {
+    const query = relationshipType ? `?relationship_type=${relationshipType}` : '';
+    const response = await this.request(`/api/reporting-lines/manager/${managerId}${query}`);
+    return response.direct_reports || [];
+  }
+
+  async setPrimaryManager(data: {
+    employee_id: string;
+    manager_id: string;
+    start_date?: string;
+  }) {
+    return this.request('/api/reporting-lines/set-primary-manager', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async addSecondaryManager(data: {
+    employee_id: string;
+    manager_id: string;
+    team_id?: string;
+    start_date?: string;
+  }) {
+    return this.request('/api/reporting-lines/add-secondary-manager', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeManager(data: {
+    reporting_line_id: string;
+    end_date?: string;
+  }) {
+    return this.request('/api/reporting-lines/remove-manager', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Enhanced Projects APIs
+  async getProjects(params?: { status?: string; search?: string }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.append('status', params.status);
+    if (params?.search) query.append('search', params.search);
+    const response = await this.request(`/api/v1/projects?${query.toString()}`);
+    return response.projects || [];
+  }
+
+
+  async getProjectMembers(projectId: string) {
+    const response = await this.request(`/api/v1/projects/${projectId}/members`);
+    return response.members || [];
+  }
+
+  async createProjectAllocation(projectId: string, data: {
+    employee_id: string;
+    allocation_type?: 'FULL_TIME' | 'PART_TIME' | 'AD_HOC';
+    percent_allocation?: number;
+    start_date?: string;
+    end_date?: string;
+    role_on_project?: string;
+  }) {
+    return this.request(`/api/v1/projects/${projectId}/allocations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProjectAllocation(projectId: string, allocId: string, data: {
+    allocation_type?: 'FULL_TIME' | 'PART_TIME' | 'AD_HOC';
+    percent_allocation?: number;
+    end_date?: string;
+    role_on_project?: string;
+  }) {
+    return this.request(`/api/v1/projects/${projectId}/allocations/${allocId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
 }
 
 export const api = new ApiClient(API_URL);
