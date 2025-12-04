@@ -30,7 +30,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Bell } from "lucide-react";
+import { Bell, ArrowLeft } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { PayrollLayout } from "@/components/layout/PayrollLayout";
 
 type PendingReimbursement = {
   id: string;
@@ -81,6 +83,7 @@ const statusVariants: Record<string, string> = {
 };
 
 const ApproveReimbursements = () => {
+  const navigate = useNavigate();
   const [selected, setSelected] = useState<PendingReimbursement | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("pending");
@@ -186,7 +189,7 @@ const ApproveReimbursements = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <PayrollLayout>
       <div className="container mx-auto px-4 py-8 space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -203,6 +206,10 @@ const ApproveReimbursements = () => {
               Review and approve employee expense claims for your organization.
             </p>
           </div>
+          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="liquid-glass-nav-item">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Dashboard
+          </Button>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
@@ -638,7 +645,7 @@ const ApproveReimbursements = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PayrollLayout>
   );
 };
 

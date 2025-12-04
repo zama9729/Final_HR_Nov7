@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Save, Loader2, Plus, Trash2 } from "lucide-react";
 // Fix: Use relative path for the API client
+import { PayrollLayout } from "@/components/layout/PayrollLayout";
 import { api } from "../lib/api";
 import { toast } from "sonner";
 
@@ -280,19 +281,19 @@ const PayrollSettings = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <Button variant="ghost" onClick={() => navigate("/payroll")} className="mb-2">
+    <PayrollLayout>
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-6">
+          <Button variant="ghost" onClick={() => navigate("/payroll")} className="mb-2 liquid-glass-nav-item">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Payroll
+            Payroll
           </Button>
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-foreground">Payroll Configuration</h1>
               <p className="text-muted-foreground">Configure payroll rules and statutory compliance</p>
             </div>
-            <Button onClick={handleSave} disabled={loading}>
+            <Button onClick={handleSave} disabled={loading} className="liquid-glass-nav-item">
               {loading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
@@ -302,9 +303,6 @@ const PayrollSettings = () => {
             </Button>
           </div>
         </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
         <div className="grid gap-6 md:grid-cols-2">
           {/* Statutory Deductions */}
           <Card className="shadow-md">
@@ -602,8 +600,8 @@ const PayrollSettings = () => {
             </CardContent>
           </Card>
         </div>
-      </main>
-    </div>
+      </div>
+    </PayrollLayout>
   );
 };
 

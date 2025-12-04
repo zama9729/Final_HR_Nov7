@@ -1052,15 +1052,28 @@ export default function Timesheets() {
   // Note: 'pending' status is legacy from old code - treat it as editable draft
   const isEditable = !timesheet || timesheet.status === "draft" || timesheet.status === "pending";
   
-  // Format time for display
+  // Format time for display (supports raw "HH:mm" or full ISO timestamps)
   const formatTime = (timeStr: string | null | undefined): string => {
     if (!timeStr) return '';
-    try {
-      const date = new Date(timeStr);
-      return format(date, 'HH:mm');
-    } catch {
-      return '';
+    const trimmed = String(timeStr).trim();
+
+    // If backend already sent a plain time like "09:00" or "09:00:00"
+    const plainTimeMatch = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(trimmed);
+    if (plainTimeMatch) {
+      const [, h, m] = plainTimeMatch;
+      return `${h}:${m}`;
     }
+
+    // Otherwise, try to parse as a date/timestamp and format to HH:mm local time
+    try {
+      const date = new Date(trimmed);
+      if (!isNaN(date.getTime())) {
+        return format(date, 'HH:mm');
+      }
+    } catch {
+      // ignore
+    }
+    return '';
   };
 
   return (
@@ -1248,8 +1261,15 @@ export default function Timesheets() {
                               }
                               
                               // Prefer entry clock times, fallback to matchingDataEntry from backend
-                              const clockIn = entry?.clock_in || entry?.manual_in || matchingDataEntry?.clock_in || null;
-                              const clockOut = entry?.clock_out || entry?.manual_out || matchingDataEntry?.clock_out || null;
+                              const rawClockIn = entry?.clock_in || entry?.manual_in || matchingDataEntry?.clock_in || null;
+                              const rawClockOut = entry?.clock_out || entry?.manual_out || matchingDataEntry?.clock_out || null;
+                              
+                              const formattedIn = rawClockIn ? formatTime(rawClockIn) : '';
+                              const formattedOut = rawClockOut ? formatTime(rawClockOut) : '';
+                              
+                              // Treat identical in/out times as "only clock in" to avoid showing 05:30–05:30 etc.
+                              const clockIn = formattedIn || null;
+                              const clockOut = formattedOut && formattedOut !== formattedIn ? formattedOut : null;
                               
                               if (!clockIn && !clockOut) {
                                 return (
@@ -1265,7 +1285,7 @@ export default function Timesheets() {
                                     {clockIn ? (
                                       <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
                                         <Clock className="h-3 w-3" />
-                                        <span className="font-medium">In: {formatTime(clockIn)}</span>
+                                        <span className="font-medium">In: {clockIn}</span>
                                       </div>
                                     ) : (
                                       <div className="text-muted-foreground">No clock in</div>
@@ -1273,7 +1293,7 @@ export default function Timesheets() {
                                     {clockOut ? (
                                       <div className="flex items-center gap-1 text-red-600 dark:text-red-400">
                                         <Clock className="h-3 w-3" />
-                                        <span className="font-medium">Out: {formatTime(clockOut)}</span>
+                                        <span className="font-medium">Out: {clockOut}</span>
                                       </div>
                                     ) : clockIn ? (
                                       <div className="text-amber-600 dark:text-amber-400 text-xs">Still clocked in</div>

@@ -3,6 +3,7 @@ import { query, queryWithOrg } from '../db/pool.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
 import { audit } from '../utils/auditLog.js';
+import { applyPromotion } from '../services/promotion-service.js';
 
 // Helper to send notification to employee
 async function notifyEmployee(tenantId, employeeId, title, message, type = 'promotion') {
@@ -191,9 +192,18 @@ router.post('/', authenticateToken, setTenantContext, requireRole('hr', 'ceo', '
     let oldDept = old_department_id;
     let oldCTC = old_ctc;
     
-    if (!oldDesig || !oldGrade) {
+    if (!oldDesig || !oldGrade || !oldDept) {
+      // Fetch employee with home assignment to get department_id
       const empResult = await queryWithOrg(
-        'SELECT position, department FROM employees WHERE id = $1 AND tenant_id = $2',
+        `SELECT 
+          e.position, 
+          e.designation,
+          e.grade,
+          e.ctc,
+          ea.department_id
+        FROM employees e
+        LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
+        WHERE e.id = $1 AND e.tenant_id = $2`,
         [employee_id, tenantId],
         tenantId
       );
@@ -202,8 +212,11 @@ router.post('/', authenticateToken, setTenantContext, requireRole('hr', 'ceo', '
         return res.status(404).json({ error: 'Employee not found' });
       }
       
-      oldDesig = oldDesig || empResult.rows[0].position;
-      oldDept = oldDept || empResult.rows[0].department;
+      const emp = empResult.rows[0];
+      oldDesig = oldDesig || emp.designation || emp.position;
+      oldGrade = oldGrade || emp.grade;
+      oldDept = oldDept || emp.department_id;
+      oldCTC = oldCTC || emp.ctc;
     }
     
     const result = await queryWithOrg(
@@ -404,8 +417,8 @@ router.post('/:id/approve', authenticateToken, setTenantContext, requireRole('hr
     effectiveDate.setHours(0, 0, 0, 0);
     
     if (effectiveDate <= today) {
-      // Apply immediately
-      await applyPromotion(promo, tenantId);
+      // Apply immediately using central promotion service
+      await applyPromotion(approvedPromotion, tenantId);
     }
     // Otherwise, the cron job will apply it on the effective date
     
@@ -478,89 +491,5 @@ router.post('/:id/reject', authenticateToken, setTenantContext, requireRole('hr'
     res.status(500).json({ error: error.message || 'Failed to reject promotion' });
   }
 });
-
-// Helper function to apply promotion to employee profile
-async function applyPromotion(promotion, tenantId) {
-  try {
-    // Get current employee data for old CTC if not set
-    const empResult = await queryWithOrg(
-      'SELECT ctc, designation, grade FROM employees WHERE id = $1 AND tenant_id = $2',
-      [promotion.employee_id, tenantId],
-      tenantId
-    );
-    const currentEmployee = empResult.rows[0];
-    
-    // Update employee profile
-    const updateFields = [];
-    const values = [];
-    let paramIndex = 1;
-    
-    if (promotion.new_designation) {
-      updateFields.push(`position = $${paramIndex++}`);
-      values.push(promotion.new_designation);
-      // Also update designation if column exists
-      updateFields.push(`designation = $${paramIndex++}`);
-      values.push(promotion.new_designation);
-    }
-    
-    if (promotion.new_grade) {
-      updateFields.push(`grade = $${paramIndex++}`);
-      values.push(promotion.new_grade);
-    }
-    
-    if (promotion.new_department_id) {
-      updateFields.push(`department = (SELECT name FROM org_branches WHERE id = $${paramIndex++})`);
-      values.push(promotion.new_department_id);
-    }
-    
-    // Update CTC if provided
-    if (promotion.new_ctc !== null && promotion.new_ctc !== undefined) {
-      updateFields.push(`ctc = $${paramIndex++}`);
-      values.push(promotion.new_ctc);
-    }
-    
-    if (updateFields.length > 0) {
-      values.push(promotion.employee_id, tenantId);
-      await queryWithOrg(
-        `UPDATE employees 
-         SET ${updateFields.join(', ')}, updated_at = now()
-         WHERE id = $${paramIndex++} AND tenant_id = $${paramIndex++}`,
-        values,
-        tenantId
-      );
-    }
-    
-    // Create HIKE event if CTC changed
-    if (promotion.new_ctc && promotion.old_ctc && promotion.new_ctc !== promotion.old_ctc) {
-      try {
-        const { createHikeEvent } = await import('../utils/employee-events.js');
-        await createHikeEvent(tenantId, promotion.employee_id, {
-          oldCTC: promotion.old_ctc,
-          newCTC: promotion.new_ctc,
-          effectiveDate: promotion.effective_date,
-          sourceTable: 'promotions',
-          sourceId: promotion.id,
-        });
-      } catch (eventError) {
-        console.error('Error creating hike event:', eventError);
-        // Don't fail promotion application if event creation fails
-      }
-    }
-    
-    // Mark promotion as applied
-    await queryWithOrg(
-      `UPDATE promotions 
-       SET applied = true, applied_at = now()
-       WHERE id = $1 AND org_id = $2`,
-      [promotion.id, tenantId],
-      tenantId
-    );
-    
-    console.log(`Promotion ${promotion.id} applied to employee ${promotion.employee_id}`);
-  } catch (error) {
-    console.error('Error applying promotion:', error);
-    throw error;
-  }
-}
 
 export default router;

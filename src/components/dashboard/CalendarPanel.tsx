@@ -49,6 +49,7 @@ const EVENT_META: Record<
   birthday: { label: 'Birthday', color: 'text-amber-700', bg: 'bg-amber-50', dot: 'bg-amber-500' },
   leave: { label: 'Leave', color: 'text-rose-700', bg: 'bg-rose-50', dot: 'bg-rose-500' },
   announcement: { label: 'Announcement', color: 'text-slate-700', bg: 'bg-slate-50', dot: 'bg-slate-500' },
+  team_event: { label: 'Team Event', color: 'text-indigo-700', bg: 'bg-indigo-50', dot: 'bg-indigo-500' },
   personal: { label: 'Personal', color: 'text-gray-800', bg: 'bg-gray-100', dot: 'bg-gray-700' },
 };
 
@@ -162,7 +163,9 @@ export function CalendarPanel() {
                       ? 'birthday'
                       : resourceType === 'leave'
                         ? 'leave'
-                        : 'announcement';
+                        : resourceType === 'team_event'
+                          ? 'team_event'
+                          : 'announcement';
 
             const rawISO =
               (typeof event?.resource?.shift_date === 'string' && event.resource.shift_date) ||
@@ -187,10 +190,44 @@ export function CalendarPanel() {
               dateOnly = rawISO.split('T')[0] || rawISO;
             }
 
-            const time =
-              event?.resource?.start_time && event?.resource?.end_time
-                ? `${event.resource.start_time} - ${event.resource.end_time}`
+            // Derive a human-readable time range if available.
+            let startTime: string | undefined =
+              typeof event?.resource?.start_time === 'string' && event.resource.start_time
+                ? event.resource.start_time
                 : undefined;
+            let endTime: string | undefined =
+              typeof event?.resource?.end_time === 'string' && event.resource.end_time
+                ? event.resource.end_time
+                : undefined;
+
+            // Fallback: try to parse from start/end timestamps if explicit time fields aren't present.
+            if (!startTime && typeof event?.start === 'string') {
+              try {
+                const d = new Date(event.start);
+                if (!isNaN(d.getTime())) {
+                  startTime = format(d, 'HH:mm');
+                }
+              } catch {
+                // ignore parse errors
+              }
+            }
+            if (!endTime && typeof event?.end === 'string') {
+              try {
+                const d = new Date(event.end);
+                if (!isNaN(d.getTime())) {
+                  endTime = format(d, 'HH:mm');
+                }
+              } catch {
+                // ignore parse errors
+              }
+            }
+
+            const time =
+              startTime && endTime
+                ? `${startTime} - ${endTime}`
+                : startTime
+                  ? startTime
+                  : undefined;
 
             const shiftSubtype: CalendarEvent['shiftSubtype'] =
               normalizedType === 'shift'

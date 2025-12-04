@@ -269,6 +269,11 @@ class ApiClient {
     return this.request('/api/branches');
   }
 
+  async getBranches() {
+    const data = await this.getBranchHierarchy();
+    return data?.departments || [];
+  }
+
   async upsertBranch(payload: Record<string, any>) {
     return this.request('/api/branches/upsert', {
       method: 'POST',
@@ -1085,6 +1090,34 @@ class ApiClient {
     return this.request('/api/leave-requests');
   }
 
+  // Team schedule events (ad-hoc meetings, milestones)
+  async getTeamScheduleEvents(params: { team_id?: string; start_date?: string; end_date?: string }) {
+    const search = new URLSearchParams();
+    if (params.team_id) search.append('team_id', params.team_id);
+    if (params.start_date) search.append('start_date', params.start_date);
+    if (params.end_date) search.append('end_date', params.end_date);
+    const qs = search.toString();
+    const suffix = qs ? `?${qs}` : '';
+    return this.request(`/api/team-schedule/events${suffix}`);
+  }
+
+  async createTeamScheduleEvent(data: {
+    team_id?: string | null;
+    employee_id?: string | null;
+    title: string;
+    event_type?: string;
+    start_date: string;
+    end_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
+    notes?: string | null;
+  }) {
+    return this.request('/api/team-schedule/events', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async createLeaveRequest(data: {
     leave_type_id: string;
     start_date: string;
@@ -1515,7 +1548,7 @@ class ApiClient {
     if (params?.employeeId) search.append('employeeId', params.employeeId);
     if (params?.year) search.append('year', params.year.toString());
     const suffix = search.toString() ? `?${search.toString()}` : '';
-    return this.request(`/api/promotion${suffix}`);
+    return this.request(`/api/promotions${suffix}`);
   }
 
   async getPromotion(id: string) {
@@ -1537,7 +1570,7 @@ class ApiClient {
     effective_date: string;
     status?: string;
   }) {
-    return this.request('/api/promotion', {
+    return this.request('/api/promotions', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -1552,26 +1585,26 @@ class ApiClient {
     effective_date: string;
     appraisal_id: string;
   }>) {
-    return this.request(`/api/promotion/${id}`, {
+    return this.request(`/api/promotions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
   async submitPromotion(id: string) {
-    return this.request(`/api/promotion/${id}/submit`, {
+    return this.request(`/api/promotions/${id}/submit`, {
       method: 'POST',
     });
   }
 
   async approvePromotion(id: string) {
-    return this.request(`/api/promotion/${id}/approve`, {
+    return this.request(`/api/promotions/${id}/approve`, {
       method: 'POST',
     });
   }
 
   async rejectPromotion(id: string, rejection_reason?: string) {
-    return this.request(`/api/promotion/${id}/reject`, {
+    return this.request(`/api/promotions/${id}/reject`, {
       method: 'POST',
       body: JSON.stringify({ rejection_reason }),
     });

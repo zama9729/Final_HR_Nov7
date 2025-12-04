@@ -9,7 +9,9 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Plus, Download, X, Search } from "lucide-react";
+import { Plus, Download, X, Search, ArrowLeft } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { PayrollLayout } from "@/components/layout/PayrollLayout";
 import { api } from "../lib/api";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -39,6 +41,7 @@ interface Employee {
 }
 
 export default function AdvanceSalary() {
+  const navigate = useNavigate();
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -227,19 +230,25 @@ export default function AdvanceSalary() {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <PayrollLayout>
+      <div className="container mx-auto p-6 space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Advance Salary Management</h1>
           <p className="text-muted-foreground mt-1">Manage employee salary advances and EMI deductions</p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Grant Advance
-            </Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="liquid-glass-nav-item">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Dashboard
+          </Button>
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Grant Advance
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Grant Advance Salary</DialogTitle>
@@ -361,6 +370,7 @@ export default function AdvanceSalary() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <Card>
@@ -469,7 +479,8 @@ export default function AdvanceSalary() {
           )}
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </PayrollLayout>
   );
 }
 

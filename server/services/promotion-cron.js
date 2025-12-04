@@ -1,5 +1,6 @@
 import cron from 'node-cron';
-import { query, queryWithOrg } from '../db/pool.js';
+import { query } from '../db/pool.js';
+import { applyPromotion } from './promotion-service.js';
 
 /**
  * Apply approved promotions that have reached their effective date
@@ -36,90 +37,6 @@ async function applyPendingPromotions() {
 }
 
 /**
- * Apply a promotion to employee profile
- */
-async function applyPromotion(promotion, tenantId) {
-  try {
-    // Update employee profile
-    const updateFields = [];
-    const values = [];
-    let paramIndex = 1;
-    
-    if (promotion.new_designation) {
-      updateFields.push(`position = $${paramIndex++}`);
-      values.push(promotion.new_designation);
-      updateFields.push(`designation = $${paramIndex++}`);
-      values.push(promotion.new_designation);
-    }
-    
-    if (promotion.new_grade) {
-      updateFields.push(`grade = $${paramIndex++}`);
-      values.push(promotion.new_grade);
-    }
-    
-    if (promotion.new_department_id) {
-      // Get department name
-      const deptResult = await query(
-        'SELECT name FROM org_branches WHERE id = $1',
-        [promotion.new_department_id]
-      );
-      if (deptResult.rows.length > 0) {
-        updateFields.push(`department = $${paramIndex++}`);
-        values.push(deptResult.rows[0].name);
-      }
-    }
-    
-    // Update CTC if provided
-    if (promotion.new_ctc !== null && promotion.new_ctc !== undefined) {
-      updateFields.push(`ctc = $${paramIndex++}`);
-      values.push(promotion.new_ctc);
-    }
-    
-    if (updateFields.length > 0) {
-      values.push(promotion.employee_id, tenantId);
-      await queryWithOrg(
-        `UPDATE employees 
-         SET ${updateFields.join(', ')}, updated_at = now()
-         WHERE id = $${paramIndex++} AND tenant_id = $${paramIndex++}`,
-        values,
-        tenantId
-      );
-    }
-    
-    // Create HIKE event if CTC changed
-    if (promotion.new_ctc && promotion.old_ctc && promotion.new_ctc !== promotion.old_ctc) {
-      try {
-        const { createHikeEvent } = await import('../utils/employee-events.js');
-        await createHikeEvent(tenantId, promotion.employee_id, {
-          oldCTC: promotion.old_ctc,
-          newCTC: promotion.new_ctc,
-          effectiveDate: promotion.effective_date,
-          sourceTable: 'promotions',
-          sourceId: promotion.id,
-        });
-      } catch (eventError) {
-        console.error('[Promotion Cron] Error creating hike event:', eventError);
-        // Don't fail promotion application if event creation fails
-      }
-    }
-    
-    // Mark promotion as applied
-    await queryWithOrg(
-      `UPDATE promotions 
-       SET applied = true, applied_at = now()
-       WHERE id = $1 AND org_id = $2`,
-      [promotion.id, tenantId],
-      tenantId
-    );
-    
-    console.log(`[Promotion Cron] Promotion ${promotion.id} applied successfully`);
-  } catch (error) {
-    console.error('[Promotion Cron] Error in applyPromotion:', error);
-    throw error;
-  }
-}
-
-/**
  * Schedule the promotion application cron job
  * Runs daily at 2 AM
  */
@@ -135,5 +52,5 @@ export function schedulePromotionApplication() {
   console.log('[Promotion Cron] Scheduled daily promotion application job (2:00 AM IST)');
 }
 
-export { applyPendingPromotions, applyPromotion };
+export { applyPendingPromotions };
 

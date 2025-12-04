@@ -21,6 +21,16 @@ interface SimpleEmployee {
   employee_id?: string;
   department?: string;
   position?: string;
+  /**
+   * Optional career grade / band for the employee.
+   * Populated from the employees.grade column when available.
+   */
+  grade?: string;
+  /**
+   * Optional explicit designation/title for the employee.
+   * Populated from the employees.designation column when available.
+   */
+  designation?: string;
   work_location?: string;
   join_date?: string;
   status?: string;
@@ -74,7 +84,7 @@ export default function MyProfile() {
 
         if (me?.id) {
           const emp = await api.getEmployee(me.id);
-          setEmployee(emp);
+          setEmployee(emp as SimpleEmployee);
         } else {
           const profile = await api.getProfile();
           setEmployee({
@@ -82,6 +92,7 @@ export default function MyProfile() {
             employee_id: profile.employee_code || profile.employee_id,
             department: profile.department,
             position: profile.position || profile.job_title,
+            designation: profile.position || profile.job_title,
             work_location: profile.work_location || profile.location,
             join_date: profile.created_at,
             status: profile.status || 'active',
@@ -343,7 +354,9 @@ export default function MyProfile() {
                       />
                     </div>
                     <h2 className="text-lg font-bold text-gray-900">{fullName}</h2>
-                    <p className="mt-1 text-sm font-medium text-gray-700">{employee.position || 'Employee'}</p>
+                    <p className="mt-1 text-sm font-medium text-gray-700">
+                      {employee.designation || employee.position || 'Employee'}
+                    </p>
                     <p className="mt-0.5 text-xs text-gray-500">{employee.department || ''}</p>
                   </div>
 
@@ -573,11 +586,15 @@ export default function MyProfile() {
                               </div>
                               <div>
                                 <p className="text-xs font-semibold text-gray-600">Department</p>
-                                <p className="mt-1 text-sm font-bold text-gray-900">{employee.department || 'N/A'}</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {employee.department || 'N/A'}
+                                </p>
                               </div>
                               <div>
                                 <p className="text-xs font-semibold text-gray-600">Designation</p>
-                                <p className="mt-1 text-sm font-bold text-gray-900">{employee.position || 'N/A'}</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {employee.designation || employee.position || 'N/A'}
+                                </p>
                               </div>
                             </div>
                             <div className="space-y-4">

@@ -137,14 +137,6 @@ router.post("/", authenticateToken, async (req, res) => {
       }
     }
     
-    // Check for promotion based on performance
-    if (performance_score && performance_score >= 4.0) {
-      await query(
-        `SELECT check_performance_promotion($1, $2, $3)`,
-        [employee_id, performance_score, tenant_id]
-      );
-    }
-    
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error?.message || "Failed to upsert" });

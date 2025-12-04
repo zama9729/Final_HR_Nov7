@@ -3106,9 +3106,9 @@ async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string,
     SELECT 
       e.employee_id as employee_code,
       COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as employee_name,
-      COALESCE(od.bank_account_number, e.bank_account_number, 'N/A') as bank_account_number,
-      COALESCE(od.ifsc_code, e.bank_ifsc_code, 'N/A') as bank_ifsc_code,
-      COALESCE(od.bank_name, e.bank_name, 'N/A') as bank_name,
+      COALESCE(od.bank_account_number, 'N/A') as bank_account_number,
+      COALESCE(od.ifsc_code, 'N/A') as bank_ifsc_code,
+      COALESCE(od.bank_name, 'N/A') as bank_name,
       pi.net_salary
     FROM payroll_items pi
     JOIN employees e ON e.id = pi.employee_id
@@ -3151,15 +3151,36 @@ async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string,
   };
 
   // Get all active employees who were employed by the payroll month
-  const employeesResult = await query(
-    `SELECT employee_id, full_name, email, employee_code
-     FROM payroll_employee_view
-     WHERE org_id = $1
-       AND employment_status = 'active'
-       AND (date_of_joining IS NULL OR date_of_joining <= $2)
-     ORDER BY date_of_joining ASC`,
-    [tenantId, payrollMonthEnd.toISOString()]
-  );
+  // Try payroll_employee_view first, fallback to employees table if view doesn't exist
+  let employeesResult;
+  try {
+    employeesResult = await query(
+      `SELECT employee_id, full_name, email, employee_code
+       FROM payroll_employee_view
+       WHERE org_id = $1
+         AND employment_status = 'active'
+         AND (date_of_joining IS NULL OR date_of_joining <= $2)
+       ORDER BY date_of_joining ASC`,
+      [tenantId, payrollMonthEnd.toISOString()]
+    );
+  } catch (viewError: any) {
+    console.warn('[BANK EXPORT] payroll_employee_view not available, using employees table:', viewError.message);
+    // Fallback to employees table
+    employeesResult = await query(
+      `SELECT 
+        e.id as employee_id,
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as full_name,
+        p.email,
+        e.employee_id as employee_code
+       FROM employees e
+       JOIN profiles p ON p.id = e.user_id
+       WHERE e.tenant_id = $1
+         AND e.status = 'active'
+         AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
+       ORDER BY e.date_of_joining ASC`,
+      [tenantId, payrollMonthEnd.toISOString()]
+    );
+  }
 
   const employees = employeesResult.rows;
   const calculatedItems: any[] = [];
@@ -3248,14 +3269,14 @@ async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string,
 
     if (netSalary <= 0) continue;
 
-    // Get bank details from onboarding_data (HR portal) or employees table as fallback
+    // Get bank details from onboarding_data (HR portal) - bank details are only in onboarding_data
     const employeeDetailsResult = await query(
       `SELECT 
         e.id,
         e.employee_id,
-        COALESCE(od.bank_account_number, e.bank_account_number, 'N/A') as bank_account_number,
-        COALESCE(od.ifsc_code, e.bank_ifsc_code, 'N/A') as bank_ifsc_code,
-        COALESCE(od.bank_name, e.bank_name, 'N/A') as bank_name,
+        COALESCE(od.bank_account_number, 'N/A') as bank_account_number,
+        COALESCE(od.ifsc_code, 'N/A') as bank_ifsc_code,
+        COALESCE(od.bank_name, 'N/A') as bank_name,
         COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as employee_name
       FROM employees e
       JOIN profiles p ON p.id = e.user_id
@@ -3335,7 +3356,11 @@ appRouter.get("/payroll-cycles/:cycleId/export/bank-transfer/preview", requireAu
     });
   } catch (e: any) {
     console.error("Error fetching bank transfer preview:", e);
-    res.status(500).json({ error: e.message || "Failed to fetch bank transfer preview" });
+    console.error("Stack trace:", e.stack);
+    res.status(500).json({ 
+      error: e.message || "Failed to fetch bank transfer preview",
+      details: process.env.NODE_ENV === 'development' ? e.stack : undefined
+    });
   }
 });
 
@@ -5635,9 +5660,59 @@ appRouter.get("/reports/statutory/tds-summary", requireAuth, async (req, res) =>
 
 // ========== ADVANCE SALARY & EMI MODULE ==========
 
+// Ensure salary_advances table exists
+async function ensureSalaryAdvancesTable() {
+  try {
+    // Create enum type for advance status
+    await query(`
+      DO $$
+      BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'advance_status_enum') THEN
+              CREATE TYPE advance_status_enum AS ENUM ('active', 'completed', 'cancelled');
+          END IF;
+      END$$;
+    `);
+
+    // Create salary_advances table
+    await query(`
+      CREATE TABLE IF NOT EXISTS salary_advances (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          employee_id UUID REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
+          tenant_id UUID NOT NULL,
+          total_amount NUMERIC(12,2) NOT NULL,
+          tenure_months INTEGER NOT NULL CHECK (tenure_months > 0),
+          monthly_emi NUMERIC(12,2) NOT NULL,
+          paid_amount NUMERIC(12,2) DEFAULT 0 CHECK (paid_amount >= 0),
+          remaining_amount NUMERIC(12,2) GENERATED ALWAYS AS (total_amount - paid_amount) STORED,
+          status advance_status_enum NOT NULL DEFAULT 'active',
+          start_month DATE NOT NULL,
+          disbursement_date DATE NOT NULL,
+          notes TEXT,
+          created_by UUID,
+          created_at TIMESTAMPTZ DEFAULT now(),
+          updated_at TIMESTAMPTZ DEFAULT now(),
+          CONSTRAINT check_paid_not_exceed_total CHECK (paid_amount <= total_amount)
+      );
+    `);
+
+    // Create indexes for performance
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_employee ON salary_advances(employee_id);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_status ON salary_advances(status);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_tenant ON salary_advances(tenant_id);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_start_month ON salary_advances(start_month);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_active_employee ON salary_advances(employee_id, status) WHERE status = 'active';`);
+  } catch (error: any) {
+    console.error("Error ensuring salary_advances table:", error);
+    // Don't throw - let the endpoint handle the error
+  }
+}
+
 // Get all active advances for a tenant
 appRouter.get("/advance-salary", requireAuth, async (req, res) => {
   try {
+    // Ensure table exists
+    await ensureSalaryAdvancesTable();
+    
     const tenantId = (req as any).tenantId as string;
     if (!tenantId) {
       return res.status(403).json({ error: "User tenant not found" });
@@ -5699,6 +5774,10 @@ appRouter.get("/advance-salary", requireAuth, async (req, res) => {
       result = await query(fallbackQuery, fallbackParams);
     }
     
+    if (!result || !result.rows) {
+      return res.json([]);
+    }
+    
     res.json(result.rows);
   } catch (error: any) {
     console.error("Error fetching advances:", error);
@@ -5709,6 +5788,9 @@ appRouter.get("/advance-salary", requireAuth, async (req, res) => {
 // Create a new advance salary
 appRouter.post("/advance-salary", requireAuth, async (req, res) => {
   try {
+    // Ensure table exists
+    await ensureSalaryAdvancesTable();
+    
     const tenantId = (req as any).tenantId as string;
     const userId = (req as any).userId as string;
     const hrUserId = (req as any).hrUserId as string | null;
@@ -5911,6 +5993,9 @@ appRouter.post("/advance-salary", requireAuth, async (req, res) => {
 // Generate advance salary slip PDF
 appRouter.get("/advance-salary/:id/slip", requireAuth, async (req, res) => {
   try {
+    // Ensure table exists
+    await ensureSalaryAdvancesTable();
+    
     const tenantId = (req as any).tenantId as string;
     const { id } = req.params;
 
@@ -6122,6 +6207,9 @@ appRouter.get("/advance-salary/:id/slip", requireAuth, async (req, res) => {
 // Cancel an advance (optional - for business logic)
 appRouter.post("/advance-salary/:id/cancel", requireAuth, async (req, res) => {
   try {
+    // Ensure table exists
+    await ensureSalaryAdvancesTable();
+    
     const tenantId = (req as any).tenantId as string;
     const { id } = req.params;
 

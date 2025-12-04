@@ -7,8 +7,9 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, Megaphone, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay, isSameDay } from "date-fns";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ReferenceLine } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ReferenceLine, Area, AreaChart } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
 import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
@@ -56,6 +57,28 @@ interface ClockStatusResponse {
   last_event?: { event_type: string; raw_timestamp: string } | null;
 }
 
+// Make URLs inside announcement text clickable
+const renderAnnouncementBody = (body: string) => {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = body.split(urlRegex);
+  return parts.map((part, idx) => {
+    if (urlRegex.test(part)) {
+      return (
+        <a
+          key={idx}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline text-blue-600 hover:text-blue-800"
+        >
+          {part}
+        </a>
+      );
+    }
+    return <span key={idx}>{part}</span>;
+  });
+};
+
 export default function Dashboard() {
   const { user, userRole } = useAuth();
   const navigate = useNavigate();
@@ -83,6 +106,8 @@ export default function Dashboard() {
   const [workDuration, setWorkDuration] = useState('0h 00m');
   const [isBirthday, setIsBirthday] = useState(false);
   const [employeeData, setEmployeeData] = useState<any>(null);
+  const [announcementDialogOpen, setAnnouncementDialogOpen] = useState(false);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<DashboardStats["announcements"][number] | null>(null);
   const presenceIndicators: Record<string, string> = {
     online: "bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.7)]",
     away: "bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.7)]",
@@ -510,6 +535,11 @@ export default function Dashboard() {
 
   const handleApplyLeave = () => {
     navigate('/leaves');
+  };
+
+  const handleAnnouncementOpen = (announcement: DashboardStats["announcements"][number]) => {
+    setSelectedAnnouncement(announcement);
+    setAnnouncementDialogOpen(true);
   };
 
   const formatShiftTime = (time: string) => {
@@ -1005,49 +1035,54 @@ export default function Dashboard() {
                   View All
                 </Link>
               )}
-            </CardHeader>
-            <CardContent>
-              {stats.announcements.length === 0 ? (
-                <div className="text-center py-6 text-muted-foreground text-sm">
-                  No announcements yet.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {stats.announcements.map((a) => (
-                    <div
-                      key={a.id}
-                      className={`p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
-                        a.type === 'birthday' 
-                          ? 'border-amber-300 bg-amber-50/70' 
-                          : a.priority === 'urgent' 
-                            ? 'border-red-300 bg-red-50/70' 
-                            : 'border-border'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-medium text-sm line-clamp-1">{a.title}</p>
-                        <div className="flex items-center gap-1">
-                          {a.type === 'birthday' && (
-                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-400 text-amber-700">
-                              Birthday
-                            </Badge>
-                          )}
-                          {a.priority === 'urgent' && a.type !== 'birthday' && (
-                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                              Urgent
-                            </Badge>
-                          )}
-                        </div>
+          </CardHeader>
+          <CardContent className="max-h-64 overflow-y-auto pr-1">
+            {stats.announcements.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground text-sm">
+                No announcements yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {stats.announcements.map((a) => (
+                  <button
+                    type="button"
+                    key={a.id}
+                    onDoubleClick={() => handleAnnouncementOpen(a)}
+                    className={`w-full text-left p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
+                      a.type === 'birthday'
+                        ? 'border-amber-300 bg-amber-50/70'
+                        : a.priority === 'urgent'
+                          ? 'border-red-300 bg-red-50/70'
+                          : 'border-border'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium text-sm line-clamp-1">{a.title}</p>
+                      <div className="flex items-center gap-1">
+                        {a.type === 'birthday' && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0 border-amber-400 text-amber-700"
+                          >
+                            Birthday
+                          </Badge>
+                        )}
+                        {a.priority === 'urgent' && a.type !== 'birthday' && (
+                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                            Urgent
+                          </Badge>
+                        )}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {a.body}
-                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      {renderAnnouncementBody(a.body)}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
           {/* Attendance Trends */}
           <Card className="shadow-sm">
@@ -1071,9 +1106,15 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={attendanceTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <AreaChart data={attendanceTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#E41E26" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#E41E26" stopOpacity={0.05}/>
+                      </linearGradient>
+                    </defs>
                     {/* Light background grid for subtle guidance */}
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-100 dark:stroke-slate-800" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" opacity={0.3} />
                     {/* Hide axes and labels */}
                     <XAxis dataKey="date" hide />
                     <YAxis hide domain={[0, 'dataMax + 2']} />
@@ -1081,10 +1122,11 @@ export default function Dashboard() {
                       contentStyle={{ 
                         backgroundColor: 'white', 
                         border: '1px solid #e5e7eb',
-                        borderRadius: '6px',
-                        fontSize: '12px'
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                       }}
-                      formatter={(value: any) => [`${value} hrs`, 'Average']}
+                      formatter={(value: any) => [`${value} hrs`, 'Hours Worked']}
                       labelFormatter={(label) => `${label}`}
                     />
                     {/* Threshold line at 8 hours */}
@@ -1092,18 +1134,30 @@ export default function Dashboard() {
                       y={8}
                       stroke="#ef4444"
                       strokeDasharray="4 4"
+                      strokeWidth={1.5}
+                      opacity={0.6}
                       ifOverflow="extendDomain"
                     />
+                    {/* Smooth area fill */}
+                    <Area
+                      type="basis"
+                      dataKey="hours"
+                      stroke="#E41E26"
+                      strokeWidth={2.5}
+                      fill="url(#colorHours)"
+                      fillOpacity={1}
+                    />
+                    {/* Smooth line overlay */}
                     <Line 
-                      type="monotone" 
+                      type="basis" 
                       dataKey="hours" 
                       stroke="#E41E26"
-                      strokeWidth={3}
+                      strokeWidth={2.5}
                       dot={false}
-                      activeDot={false}
+                      activeDot={{ r: 4, fill: '#E41E26', strokeWidth: 2, stroke: '#fff' }}
                       name="Hours Worked"
                     />
-                  </LineChart>
+                  </AreaChart>
                 </ResponsiveContainer>
               )}
             </CardContent>
@@ -1121,6 +1175,49 @@ export default function Dashboard() {
         onConfirm={handleClockConsentConfirm}
         action={pendingClockAction || 'IN'}
       />
+      <Dialog open={announcementDialogOpen} onOpenChange={setAnnouncementDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+              <Megaphone className="h-4 w-4 text-amber-600" />
+              {selectedAnnouncement?.title || "Announcement"}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed information about this announcement.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-4 py-2 space-y-3 text-sm">
+            {selectedAnnouncement && (
+              <>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {new Date(selectedAnnouncement.created_at).toLocaleString(undefined, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
+                  </span>
+                  {selectedAnnouncement.type === "birthday" && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1.5 py-0 border-amber-400 text-amber-700"
+                    >
+                      Birthday
+                    </Badge>
+                  )}
+                  {selectedAnnouncement.priority === "urgent" && selectedAnnouncement.type !== "birthday" && (
+                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                      Urgent
+                    </Badge>
+                  )}
+                </div>
+                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm leading-relaxed">
+                  {renderAnnouncementBody(selectedAnnouncement.body)}
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

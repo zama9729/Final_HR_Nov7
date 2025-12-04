@@ -66,9 +66,18 @@ export default function PromotionForm() {
   const fetchDepartments = async () => {
     try {
       const data = await api.getBranches();
-      setDepartments(data || []);
+      // Filter out invalid entries and ensure unique IDs
+      const validDepartments = (data || []).filter((dept: any) => dept && dept.id).reduce((acc: any[], dept: any) => {
+        // Remove duplicates by ID
+        if (!acc.find((d: any) => d.id === dept.id)) {
+          acc.push(dept);
+        }
+        return acc;
+      }, []);
+      setDepartments(validDepartments);
     } catch (error) {
       console.error('Error fetching departments:', error);
+      setDepartments([]);
     }
   };
 
@@ -124,10 +133,13 @@ export default function PromotionForm() {
     if (employeeId) {
       try {
         const employee = await api.getEmployee(employeeId);
+        const homeAssignment = employee.home_assignment || {};
         setFormData(prev => ({
           ...prev,
-          old_designation: employee.position || '',
-          old_department_id: employee.department || '',
+          old_designation: employee.position || employee.designation || '',
+          old_grade: employee.grade || '',
+          old_department_id: homeAssignment.department_id || '',
+          old_ctc: employee.ctc?.toString() || '',
         }));
         await fetchAppraisals(employeeId);
       } catch (error) {
@@ -166,13 +178,25 @@ export default function PromotionForm() {
     try {
       setLoading(true);
       
+      // Validate department IDs are UUIDs or empty
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let oldDeptId = formData.old_department_id || null;
+      let newDeptId = formData.new_department_id || null;
+      
+      if (oldDeptId && !uuidRegex.test(oldDeptId)) {
+        oldDeptId = null;
+      }
+      if (newDeptId && !uuidRegex.test(newDeptId)) {
+        newDeptId = null;
+      }
+      
       const payload = {
         ...formData,
         old_ctc: formData.old_ctc ? parseFloat(formData.old_ctc) : undefined,
         new_ctc: formData.new_ctc ? parseFloat(formData.new_ctc) : undefined,
         appraisal_id: formData.appraisal_id || undefined,
-        old_department_id: formData.old_department_id || undefined,
-        new_department_id: formData.new_department_id || undefined,
+        old_department_id: oldDeptId,
+        new_department_id: newDeptId,
         status: submitForApproval ? 'PENDING_APPROVAL' : 'DRAFT',
       };
 
@@ -251,8 +275,8 @@ export default function PromotionForm() {
                     <SelectValue placeholder="Select employee" />
                   </SelectTrigger>
                   <SelectContent>
-                    {employees.map((emp) => (
-                      <SelectItem key={emp.id} value={emp.id}>
+                    {employees.map((emp, idx) => (
+                      <SelectItem key={emp.id || `emp-${idx}`} value={emp.id}>
                         {emp.profiles?.first_name} {emp.profiles?.last_name} - {emp.position || 'Employee'}
                       </SelectItem>
                     ))}
@@ -263,23 +287,22 @@ export default function PromotionForm() {
               {/* Link to Appraisal (Optional) */}
               <div className="space-y-2">
                 <Label htmlFor="appraisal_id">Linked Appraisal (Optional)</Label>
-                <Select
-                  value={formData.appraisal_id}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, appraisal_id: value }))}
-                >
+                  <Select
+                    value={formData.appraisal_id || '__none__'}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, appraisal_id: value === '__none__' ? '' : value }))}
+                  >
                   <SelectTrigger id="appraisal_id">
                     <SelectValue placeholder="Select appraisal (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
-                    {appraisals.length > 0 ? (
-                      appraisals.map((appr) => (
-                        <SelectItem key={appr.id} value={appr.id}>
-                          {appr.cycle_name} {appr.cycle_year} - Rating: {appr.rating || 'N/A'}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value="" disabled>No appraisals found</SelectItem>
+                    <SelectItem key="__none_appr__" value="__none__">None</SelectItem>
+                    {appraisals.length > 0 && appraisals.map((appr, idx) => (
+                      <SelectItem key={appr.id || `appr-${idx}`} value={appr.id}>
+                        {appr.cycle_name} {appr.cycle_year} - Rating: {appr.rating || 'N/A'}
+                      </SelectItem>
+                    ))}
+                    {appraisals.length === 0 && (
+                      <SelectItem key="__no_appr__" value="__none__" disabled>No appraisals found</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
@@ -335,16 +358,16 @@ export default function PromotionForm() {
                 <div className="space-y-2">
                   <Label htmlFor="old_department_id">Current Department</Label>
                   <Select
-                    value={formData.old_department_id}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, old_department_id: value }))}
+                    value={formData.old_department_id || '__none__'}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, old_department_id: value === '__none__' ? '' : value }))}
                   >
                     <SelectTrigger id="old_department_id">
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None</SelectItem>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.id}>
+                      <SelectItem key="__none_old__" value="__none__">None</SelectItem>
+                      {departments.map((dept, idx) => (
+                        <SelectItem key={dept.id || `dept-${idx}`} value={dept.id}>
                           {dept.name}
                         </SelectItem>
                       ))}
@@ -354,16 +377,16 @@ export default function PromotionForm() {
                 <div className="space-y-2">
                   <Label htmlFor="new_department_id">New Department</Label>
                   <Select
-                    value={formData.new_department_id}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, new_department_id: value }))}
+                    value={formData.new_department_id || '__none__'}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, new_department_id: value === '__none__' ? '' : value }))}
                   >
                     <SelectTrigger id="new_department_id">
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None (No change)</SelectItem>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.id}>
+                      <SelectItem key="__none_new__" value="__none__">None (No change)</SelectItem>
+                      {departments.map((dept, idx) => (
+                        <SelectItem key={dept.id || `dept-new-${idx}`} value={dept.id}>
                           {dept.name}
                         </SelectItem>
                       ))}

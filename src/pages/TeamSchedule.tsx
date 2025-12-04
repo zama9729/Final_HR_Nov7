@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { addDays, format, startOfWeek } from "date-fns";
-import { CalendarDays, ChevronLeft, ChevronRight, Megaphone, Clock, Users } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Megaphone, Clock, Users, Plus, X, UserPlus, UserMinus, GripVertical } from "lucide-react";
 
 type Role = "employee" | "manager" | "hr" | "director" | "ceo" | "admin" | "super_user" | "accountant";
 
@@ -50,6 +50,19 @@ interface TeamScheduleEvent {
 const coversDate = (ev: TeamScheduleEvent, dateStr: string) =>
   ev.start_date <= dateStr && ev.end_date >= dateStr;
 
+// Format "HH:mm" or "HH:mm:ss" into a friendly "h:mm AM/PM"
+const formatTime = (value?: string | null): string => {
+  if (!value) return "--:--";
+  // Support both "HH:mm" and "HH:mm:ss"
+  const [h, m] = value.split(":");
+  const hour = Number(h);
+  const min = Number(m || 0);
+  if (isNaN(hour) || isNaN(min)) return value;
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${min.toString().padStart(2, "0")} ${ampm}`;
+};
+
 export default function TeamSchedule() {
   const { userRole } = useAuth();
   const { toast } = useToast();
@@ -75,6 +88,10 @@ export default function TeamSchedule() {
   const [publishTitle, setPublishTitle] = useState("");
   const [publishBody, setPublishBody] = useState("");
   const [publishPinned, setPublishPinned] = useState(false);
+  const [teamEditDialogOpen, setTeamEditDialogOpen] = useState(false);
+  const [availableEmployees, setAvailableEmployees] = useState<any[]>([]);
+  const [draggedEmployee, setDraggedEmployee] = useState<string | null>(null);
+  const [employeeSearch, setEmployeeSearch] = useState("");
 
   const isManagerLike = useMemo(
     () => !!userRole && ["manager", "hr", "director", "ceo", "admin"].includes(userRole as Role),
@@ -98,6 +115,12 @@ export default function TeamSchedule() {
       setMembers([]);
     }
   }, [selectedTeamId]);
+
+  useEffect(() => {
+    if (teamEditDialogOpen && selectedTeamId !== "all") {
+      fetchAvailableEmployees();
+    }
+  }, [teamEditDialogOpen, selectedTeamId]);
 
   const fetchTeams = async () => {
     try {
@@ -128,7 +151,86 @@ export default function TeamSchedule() {
     }
   };
 
-  // Seed time-off events from existing leave requests so they show up immediately.
+  const fetchAvailableEmployees = async () => {
+    if (!selectedTeamId || selectedTeamId === "all") return;
+    try {
+      const allEmployees = await api.getEmployees();
+      const currentMemberIds = new Set(members.map(m => m.employee_id));
+      const available = (allEmployees || []).filter((emp: any) => !currentMemberIds.has(emp.id));
+      setAvailableEmployees(available);
+    } catch (error) {
+      console.error("Failed to fetch available employees:", error);
+      setAvailableEmployees([]);
+    }
+  };
+
+  const handleAddTeamMember = async (employeeId: string) => {
+    if (!selectedTeamId || selectedTeamId === "all") return;
+    try {
+      await api.addTeamMember(selectedTeamId, {
+        employee_id: employeeId,
+        role: "MEMBER",
+        is_primary: false,
+      });
+      toast({
+        title: "Success",
+        description: "Employee added to team",
+      });
+      fetchMembers(selectedTeamId);
+      fetchAvailableEmployees();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add employee",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRemoveTeamMember = async (memberId: string, employeeName?: string) => {
+    if (!selectedTeamId || selectedTeamId === "all") return;
+    try {
+      await api.updateTeamMembership(selectedTeamId, memberId, {
+        end_date: new Date().toISOString().split("T")[0],
+      });
+      toast({
+        title: "Success",
+        description: `${employeeName || "Employee"} removed from team`,
+      });
+      fetchMembers(selectedTeamId);
+      fetchAvailableEmployees();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to remove employee",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDragStart = (employeeId: string) => {
+    setDraggedEmployee(employeeId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.currentTarget.classList.add("bg-primary/10");
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.currentTarget.classList.remove("bg-primary/10");
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.currentTarget.classList.remove("bg-primary/10");
+    if (draggedEmployee) {
+      handleAddTeamMember(draggedEmployee);
+      setDraggedEmployee(null);
+    }
+  };
+
+  // Seed time-off events from existing leave requests and load persisted team events
   const fetchInitialEvents = async () => {
     setLoading(true);
     try {
@@ -163,9 +265,29 @@ export default function TeamSchedule() {
         });
       }
 
-      setEvents(mapped);
+      // Load persisted team schedule events for the current week
+      const start = format(currentWeek, "yyyy-MM-dd");
+      const end = format(addDays(currentWeek, 6), "yyyy-MM-dd");
+      const persisted = await api.getTeamScheduleEvents({
+        team_id: selectedTeamId !== "all" ? selectedTeamId : undefined,
+        start_date: start,
+        end_date: end,
+      });
+      const persistedMapped: TeamScheduleEvent[] = (persisted?.events || []).map((ev: any) => ({
+        id: ev.id,
+        type: (ev.event_type || "event") as EventType,
+        title: ev.title,
+        start_date: ev.start_date,
+        end_date: ev.end_date,
+        start_time: ev.start_time,
+        end_time: ev.end_time,
+        team_id: ev.team_id,
+        employee_id: ev.employee_id,
+      }));
+
+      setEvents([...mapped, ...persistedMapped]);
     } catch (error) {
-      console.error("Failed to seed time off events:", error);
+      console.error("Failed to seed time off / team events:", error);
     } finally {
       setLoading(false);
     }
@@ -243,7 +365,7 @@ export default function TeamSchedule() {
     setNewEventOpen(true);
   };
 
-  const handleCreateEvent = () => {
+  const handleCreateEvent = async () => {
     if (!newEventTitle.trim()) {
       toast({ title: "Title required", description: "Please add a title for the event.", variant: "destructive" });
       return;
@@ -254,33 +376,64 @@ export default function TeamSchedule() {
     // If manager-like and specific employees have been selected, create one entry per employee
     if (isManagerLike && selectedEmployeeIds.length > 0) {
       const now = Date.now();
-      const newItems: TeamScheduleEvent[] = selectedEmployeeIds.map((empId, idx) => ({
-        id: `local-${now}-${idx}`,
-        type: newEventType,
-        title: newEventTitle.trim(),
-        start_date: baseDate,
-        end_date: baseDate,
-        start_time: newEventStartTime || null,
-        end_time: newEventEndTime || null,
-        employee_id: empId,
-        team_id: selectedTeamId !== "all" ? selectedTeamId : null,
-      }));
+      const newItems: TeamScheduleEvent[] = [];
+
+      for (let idx = 0; idx < selectedEmployeeIds.length; idx++) {
+        const empId = selectedEmployeeIds[idx];
+        // Persist to backend
+        const created = await api.createTeamScheduleEvent({
+          team_id: selectedTeamId !== "all" ? selectedTeamId : null,
+          employee_id: empId,
+          title: newEventTitle.trim(),
+          event_type: newEventType,
+          start_date: baseDate,
+          end_date: baseDate,
+          start_time: newEventStartTime || null,
+          end_time: newEventEndTime || null,
+          notes: null,
+        });
+
+        newItems.push({
+          id: created.id || `local-${now}-${idx}`,
+          type: (created.event_type || newEventType) as EventType,
+          title: created.title,
+          start_date: created.start_date,
+          end_date: created.end_date,
+          start_time: created.start_time,
+          end_time: created.end_time,
+          employee_id: created.employee_id,
+          team_id: created.team_id,
+        });
+      }
+
       setEvents((prev) => [...prev, ...newItems]);
     } else {
       // Fallback: single-target event (either specific employee from defaults, or team-wide)
       const targetEmployeeId = newEventDefaults.employee_id || null;
       const targetTeamId = !targetEmployeeId && selectedTeamId !== "all" ? selectedTeamId : null;
 
-      const newItem: TeamScheduleEvent = {
-        id: `local-${Date.now()}`,
-        type: newEventType,
+      const created = await api.createTeamScheduleEvent({
+        team_id: targetTeamId,
+        employee_id: targetEmployeeId,
         title: newEventTitle.trim(),
+        event_type: newEventType,
         start_date: baseDate,
         end_date: baseDate,
         start_time: newEventStartTime || null,
         end_time: newEventEndTime || null,
-        employee_id: targetEmployeeId,
-        team_id: targetTeamId,
+        notes: null,
+      });
+
+      const newItem: TeamScheduleEvent = {
+        id: created.id,
+        type: (created.event_type || newEventType) as EventType,
+        title: created.title,
+        start_date: created.start_date,
+        end_date: created.end_date,
+        start_time: created.start_time,
+        end_time: created.end_time,
+        employee_id: created.employee_id,
+        team_id: created.team_id,
       };
 
       setEvents((prev) => [...prev, newItem]);
@@ -343,6 +496,17 @@ export default function TeamSchedule() {
                     ))}
                   </SelectContent>
                 </Select>
+                {isManagerLike && selectedTeamId !== "all" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTeamEditDialogOpen(true)}
+                    className="h-9"
+                  >
+                    <UserPlus className="h-4 w-4 mr-1" />
+                    Manage Team
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -475,33 +639,40 @@ export default function TeamSchedule() {
                                   className="px-3 py-2 align-top"
                                 >
                                   <div className="flex flex-col gap-1">
-                                    {dayEvents.map((ev) => (
-                                      <div
-                                        key={ev.id}
-                                        className={`rounded-full px-2 py-1 text-[11px] border shadow-sm ${
-                                          ev.type === "time_off"
-                                            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                            : "bg-sky-50 text-sky-800 border-sky-200"
-                                        }`}
-                                      >
-                                        <span className="font-medium">
-                                          {ev.type === "time_off"
-                                            ? ev.status === "approved"
-                                              ? "On leave"
-                                              : ev.status === "pending"
-                                                ? "Leave (pending)"
-                                                : "Leave (declined)"
-                                            : ev.title}
-                                        </span>
-                                        {(ev.start_time || ev.end_time) && (
-                                          <span className="ml-1 text-[10px] opacity-80">
-                                            <Clock className="inline-block h-3 w-3 mr-0.5 align-middle" />
-                                            {ev.start_time || "--:--"}
-                                            {ev.end_time ? ` – ${ev.end_time}` : ""}
+                                    {dayEvents.map((ev) => {
+                                      const isTimeOff = ev.type === "time_off";
+                                      const baseLeaveLabel = ev.title || "Leave";
+                                      const personName = fullName || member.employee_email || member.employee_id || "Employee";
+                                      const leaveLabel = isTimeOff
+                                        ? ev.status === "approved"
+                                          ? `${personName} - ${baseLeaveLabel}`
+                                          : ev.status === "pending"
+                                            ? `${personName} - ${baseLeaveLabel} (pending)`
+                                            : `${personName} - ${baseLeaveLabel} (declined)`
+                                        : ev.title;
+
+                                      return (
+                                        <div
+                                          key={ev.id}
+                                          className={`rounded-full px-2 py-1 text-[11px] border shadow-sm ${
+                                            isTimeOff
+                                              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                              : "bg-sky-50 text-sky-800 border-sky-200"
+                                          }`}
+                                        >
+                                          <span className="font-medium">
+                                            {leaveLabel}
                                           </span>
-                                        )}
-                                      </div>
-                                    ))}
+                                          {(ev.start_time || ev.end_time) && (
+                                            <span className="ml-1 text-[10px] opacity-80">
+                                              <Clock className="inline-block h-3 w-3 mr-0.5 align-middle" />
+                                              {formatTime(ev.start_time || undefined)}
+                                              {ev.end_time ? ` – ${formatTime(ev.end_time)}` : ""}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -673,6 +844,126 @@ export default function TeamSchedule() {
             </Button>
             <Button onClick={submitPublish} disabled={publishing}>
               {publishing ? "Publishing…" : "Publish"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Team Edit Dialog */}
+      <Dialog open={teamEditDialogOpen} onOpenChange={setTeamEditDialogOpen}>
+        <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Manage Team Members</DialogTitle>
+            <DialogDescription>
+              Add or remove employees from {teams.find(t => t.id === selectedTeamId)?.name || "the team"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-4 py-4">
+            {/* Current Team Members */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Current Team Members ({members.length})</Label>
+              <div className="space-y-2 max-h-48 overflow-y-auto border rounded-md p-2">
+                {members.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No members in this team</p>
+                ) : (
+                  members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-2 rounded-md border bg-card hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 flex-1">
+                        <GripVertical className="h-4 w-4 text-muted-foreground" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">
+                            {member.employee_name || "Unknown"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {member.employee_email || member.employee_id}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveTeamMember(member.id, member.employee_name)}
+                        className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                      >
+                        <UserMinus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Available Employees - Drag and Drop */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Available Employees ({availableEmployees.length})</Label>
+              <Input
+                placeholder="Search employees..."
+                value={employeeSearch}
+                onChange={(e) => setEmployeeSearch(e.target.value)}
+                className="mb-2"
+              />
+              <div
+                className="space-y-2 max-h-64 overflow-y-auto border-2 border-dashed rounded-md p-4 min-h-[200px] transition-colors"
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                {availableEmployees.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    {employeeSearch ? "No employees found" : "No available employees"}
+                  </p>
+                ) : (
+                  availableEmployees
+                    .filter((emp: any) => {
+                      if (!employeeSearch) return true;
+                      const search = employeeSearch.toLowerCase();
+                      const name = `${emp.profiles?.first_name || ""} ${emp.profiles?.last_name || ""}`.toLowerCase();
+                      const email = (emp.profiles?.email || "").toLowerCase();
+                      return name.includes(search) || email.includes(search);
+                    })
+                    .map((emp: any) => {
+                      const employeeId = emp.id;
+                      const name = `${emp.profiles?.first_name || ""} ${emp.profiles?.last_name || ""}`.trim() || "Unknown";
+                      const email = emp.profiles?.email || "";
+                      return (
+                        <div
+                          key={employeeId}
+                          draggable
+                          onDragStart={() => handleDragStart(employeeId)}
+                          className="flex items-center justify-between p-3 rounded-md border bg-card hover:bg-primary/5 cursor-move transition-all hover:shadow-sm"
+                        >
+                          <div className="flex items-center gap-3 flex-1">
+                            <GripVertical className="h-4 w-4 text-muted-foreground" />
+                            <div className="flex-1">
+                              <p className="text-sm font-medium">{name}</p>
+                              <p className="text-xs text-muted-foreground">{email || employeeId}</p>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleAddTeamMember(employeeId)}
+                            className="h-8"
+                          >
+                            <Plus className="h-4 w-4 mr-1" />
+                            Add
+                          </Button>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                💡 Drag an employee to the drop zone above or click "Add" to add them to the team
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTeamEditDialogOpen(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

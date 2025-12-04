@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 // Updated import paths to be relative
 import { EmployeeList } from "../components/employees/EmployeeList";
 import { SalaryImportDialog } from "../components/employees/SalaryImportDialog";
+import { PayrollLayout } from "@/components/layout/PayrollLayout";
 import { api } from "../lib/api";
 import { toast } from "sonner";
 
@@ -96,28 +97,26 @@ const Employees = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="mb-2">
+    <PayrollLayout>
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-6">
+          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="mb-2 liquid-glass-nav-item">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
+            Dashboard
           </Button>
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-foreground">Employees - {companyName}</h1>
               <p className="text-muted-foreground">Manage your workforce</p>
             </div>
-            <div className="flex gap-2"> {/* Wrap buttons in a flex container */}
-            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setIsImportDialogOpen(true)} className="liquid-glass-nav-item">
                 <Upload className="mr-2 h-4 w-4" />
                 Import Salaries
-                </Button>
-          </div>
+              </Button>
+            </div>
           </div>
         </div>
-      </header>
-      <main className="container mx-auto px-4 py-8">
         <Card className="p-6 shadow-md">
           <div className="flex items-center space-x-2 mb-6">
             <Search className="h-4 w-4 text-muted-foreground" />
@@ -132,17 +131,17 @@ const Employees = () => {
           {/* Remove tenantId prop from EmployeeList */}
           <EmployeeList searchTerm={searchTerm} />
         </Card>
-      </main>
 
-      <SalaryImportDialog 
-        open={isImportDialogOpen} 
-        onOpenChange={setIsImportDialogOpen}
-        onSuccess={() => {
-          // Refresh employee list after successful import
-          toast.success("Salary structures imported successfully");
-        }}
-      />
-    </div>
+        <SalaryImportDialog 
+          open={isImportDialogOpen} 
+          onOpenChange={setIsImportDialogOpen}
+          onSuccess={() => {
+            // Refresh employee list after successful import
+            toast.success("Salary structures imported successfully");
+          }}
+        />
+      </div>
+    </PayrollLayout>
   );
 };
 

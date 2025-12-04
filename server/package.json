@@ -8,6 +8,7 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "test": "node server/tests/permissions.test.js && node server/tests/routes.test.js && node server/tests/timesheet-clock.test.js && node server/tests/profile-change.test.js && node server/tests/roster-engine.test.js",
+    "test:promotions": "node ./scripts/test-promotion-workflow.js",
     "test:permissions": "node server/tests/permissions.test.js",
     "test:routes": "node server/tests/routes.test.js",
     "seed:policies": "node server/scripts/seed-policy-catalog.js",

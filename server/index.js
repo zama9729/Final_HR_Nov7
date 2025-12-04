@@ -55,6 +55,7 @@ import taxDeclarationsRoutes from './routes/tax-declarations.js';
 import reimbursementRoutes from './routes/reimbursements.js';
 import reportsRoutes from './routes/reports.js';
 import announcementsRoutes from './routes/announcements.js';
+import teamScheduleEventsRoutes from './routes/team-schedule-events.js';
 import setupRoutes from './routes/setup.js';
 import branchesRoutes from './routes/branches.js';
 import superRoutes from './routes/super.js';
@@ -212,6 +213,7 @@ app.use('/api/tax/declarations', taxDeclarationsRoutes);
 app.use('/api/v1/reimbursements', reimbursementRoutes);
 app.use('/api/reports', authenticateToken, reportsRoutes);
 app.use('/api/announcements', authenticateToken, announcementsRoutes);
+app.use('/api/team-schedule/events', teamScheduleEventsRoutes);
 
 // Tenant info endpoint for payroll service compatibility
 app.get('/api/tenant', authenticateToken, async (req, res) => {
@@ -374,6 +376,14 @@ createPool().then(async () => {
       console.log('✅ Scheduling tables created successfully');
     } else {
       console.log('✅ Scheduling tables found');
+      // Always ensure new columns exist, even if tables already exist
+      console.log('🔄 Ensuring team scheduling columns exist...');
+      try {
+        await createSchedulingTables();
+        console.log('✅ Team scheduling columns verified');
+      } catch (colError) {
+        console.warn('⚠️  Could not verify team scheduling columns:', colError.message);
+      }
     }
   } catch (error) {
     console.error('Error checking/creating scheduling tables:', error);

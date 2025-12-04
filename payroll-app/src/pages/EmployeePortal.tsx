@@ -5,7 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 // Use the new API client
 import { api } from "../lib/api";
-import { DollarSign, LogOut, Receipt, FileText, Key } from "lucide-react";
+import { DollarSign, Receipt, FileText, Key } from "lucide-react";
+import { PayrollLayout } from "@/components/layout/PayrollLayout";
 // Use sonner for toasts, consistent with other components
 import { toast } from "sonner";
 // Import the child components
@@ -93,15 +94,6 @@ const EmployeePortal = () => {
     fetchData();
   }, [navigate]);
 
-  const handleSignOut = async () => {
-    try {
-      await api.auth.logout();
-      toast.success("Signed out successfully");
-      navigate("/pin-auth");
-    } catch (error: any) {
-      toast.error(`Sign out failed: ${error.message}`);
-    }
-  };
 
   if (loading) {
     return (
@@ -112,29 +104,12 @@ const EmployeePortal = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-foreground">Employee Portal</h1>
-              <p className="text-muted-foreground">Welcome, {employee?.full_name || user?.id}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" onClick={() => navigate("/change-pin")}>
-                <Key className="mr-2 h-4 w-4" />
-                Change PIN
-              </Button>
-              <Button variant="ghost" onClick={handleSignOut}>
-                <LogOut className="mr-2 h-4 w-4" />
-                Sign Out
-              </Button>
-            </div>
-          </div>
+    <PayrollLayout>
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-foreground">Employee Portal</h1>
+          <p className="text-muted-foreground">Welcome, {employee?.full_name || user?.id}</p>
         </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
         {!employee ? (
           <Card>
             <CardHeader>
@@ -220,8 +195,8 @@ const EmployeePortal = () => {
             </TabsContent>
           </Tabs>
         )}
-      </main>
-    </div>
+      </div>
+    </PayrollLayout>
   );
 };
 

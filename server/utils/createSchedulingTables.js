@@ -188,6 +188,26 @@ export async function createSchedulingTables() {
       );
     `);
 
+    // Ensure new team scheduling columns exist on schedule_assignments
+    await query(`
+      DO $$
+      BEGIN
+        BEGIN
+          ALTER TABLE schedule_assignments
+            ADD COLUMN team_id UUID REFERENCES teams(id) ON DELETE SET NULL;
+        EXCEPTION
+          WHEN duplicate_column THEN NULL;
+        END;
+        BEGIN
+          ALTER TABLE schedule_assignments
+            ADD COLUMN assignment_type TEXT DEFAULT 'employee' CHECK (assignment_type IN ('employee', 'team'));
+        EXCEPTION
+          WHEN duplicate_column THEN NULL;
+        END;
+      END
+      $$;
+    `);
+
     await query(`
       DO $$
       BEGIN

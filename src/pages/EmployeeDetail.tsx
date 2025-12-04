@@ -120,6 +120,16 @@ interface EmployeeData {
   employee_id: string;
   department: string;
   position: string;
+  /**
+   * Optional explicit designation/title for the employee.
+   * Populated from employees.designation when available.
+   */
+  designation?: string;
+  /**
+   * Optional career grade / band for the employee.
+   * Populated from employees.grade when available.
+   */
+  grade?: string;
   work_location: string;
   join_date: string;
   status: string;
@@ -520,7 +530,9 @@ export default function EmployeeDetail() {
                 <div className="flex items-center gap-4 mb-4">
                   <div>
                     <h2 className="text-2xl font-bold">{getFullName()}</h2>
-                    <p className="text-muted-foreground">{employee.position || 'Employee'}</p>
+                    <p className="text-muted-foreground">
+                      {employee.designation || employee.position || 'Employee'}
+                    </p>
                     {employee.verified_at && (
                       <p className="text-xs text-sky-600 flex items-center gap-1 mt-1">
                         <UserCheck className="h-3 w-3" />
@@ -636,6 +648,14 @@ export default function EmployeeDetail() {
                     <div>
                       <Label className="text-muted-foreground">Position</Label>
                       <p className="font-medium">{employee.position || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Designation</Label>
+                      <p className="font-medium">{employee.designation || employee.position || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Grade</Label>
+                      <p className="font-medium">{employee.grade || 'N/A'}</p>
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Work Location</Label>

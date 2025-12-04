@@ -7,6 +7,7 @@ import { ArrowLeft, Calendar, Settings } from "lucide-react";
 import { api } from "../lib/api";
 import { CreatePayrollDialog } from "@/components/payroll/CreatePayrollDialog";
 import { PayrollCycleList } from "@/components/payroll/PayrollCycleList";
+import { PayrollLayout } from "@/components/layout/PayrollLayout";
 import { toast } from "sonner";
 
 const Payroll = () => {
@@ -32,12 +33,12 @@ const Payroll = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="mb-2">
+    <PayrollLayout>
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-6">
+          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="mb-2 liquid-glass-nav-item">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
+            Dashboard
           </Button>
           <div className="flex items-center justify-between">
             <div>
@@ -51,6 +52,7 @@ const Payroll = () => {
                   sessionStorage.setItem("payroll_last_screen", "/payroll/settings");
                   navigate("/payroll/settings");
                 }}
+                className="liquid-glass-nav-item"
               >
                 <Settings className="mr-2 h-4 w-4" />
                 Configure Payroll
@@ -64,9 +66,6 @@ const Payroll = () => {
             </div>
           </div>
         </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
         <Card className="shadow-md">
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -86,8 +85,8 @@ const Payroll = () => {
             )}
           </CardContent>
         </Card>
-      </main>
-    </div>
+      </div>
+    </PayrollLayout>
   );
 };
 
