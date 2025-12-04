@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, Megaphone, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2 } from "lucide-react";
 import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay, isSameDay } from "date-fns";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ReferenceLine } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
 import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
@@ -606,55 +606,54 @@ export default function Dashboard() {
         return;
       }
 
-      // Get last 4 weeks of attendance data for this specific employee
+      // Get last 14 days of attendance data for this specific employee
       const today = startOfDay(new Date());
-      const trends: Array<{ date: string; hours: number }> = [];
-      
-      // Fetch data week by week - this is employee-specific via getTimesheet()
-      for (let i = 0; i < 4; i++) {
-        const weekStartDate = subDays(today, (i + 1) * 7);
-        const weekEndDate = subDays(today, i * 7);
-        const weekKey = format(weekStartDate, 'MMM d');
-        
-        try {
-          // getTimesheet() automatically uses the logged-in employee's ID
-          const timesheet = await api.getTimesheet(
-            format(weekStartDate, 'yyyy-MM-dd'),
-            format(weekEndDate, 'yyyy-MM-dd')
-          );
-          
-          let totalHours = 0;
-          // Calculate total hours worked by this employee in this week
-          if (timesheet.total_hours !== undefined && timesheet.total_hours !== null) {
-            totalHours = parseFloat(timesheet.total_hours) || 0;
-          } else if (timesheet.entries && Array.isArray(timesheet.entries)) {
-            // Sum hours from all entries (excluding holidays) for this employee
-            totalHours = timesheet.entries
-              .filter((entry: any) => !entry.is_holiday && entry.hours > 0)
-              .reduce((total: number, entry: any) => {
-                return total + (parseFloat(entry.hours || 0));
-              }, 0);
-          }
-          
-          // Store weekly total hours for this employee
-          trends.push({
-            date: weekKey,
-            hours: Math.round(totalHours * 10) / 10, // Round to 1 decimal place
-          });
-        } catch (error) {
-          console.error(`Error fetching timesheet for week ${weekKey}:`, error);
-          // Add zero hours for weeks with errors
-          trends.push({
-            date: weekKey,
-            hours: 0,
-          });
-        }
+      const fromDate = subDays(today, 13); // 14 days including today
+
+      const resp = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/v1/attendance/employee/${employeeId.id}/timesheet?from=${format(
+          fromDate,
+          'yyyy-MM-dd',
+        )}&to=${format(today, 'yyyy-MM-dd')}`,
+        {
+          headers: {
+            Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}`,
+          },
+        },
+      );
+
+      if (!resp.ok) {
+        console.error('Error fetching attendance trends:', await resp.text());
+        setAttendanceTrends([]);
+        return;
       }
-      
-      // Reverse to show chronological order (oldest to newest)
-      const sortedTrends = trends.reverse();
-      
-      setAttendanceTrends(sortedTrends);
+
+      const data = await resp.json();
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+
+      // Aggregate hours per day for this employee
+      const hoursByDate: Record<string, number> = {};
+      entries.forEach((entry: any) => {
+        if (!entry.work_date) return;
+        const dateKey = format(new Date(entry.work_date), 'MMM d');
+        const hrs = parseFloat(entry.hours || 0);
+        if (!Number.isFinite(hrs) || hrs <= 0) return;
+        hoursByDate[dateKey] = (hoursByDate[dateKey] || 0) + hrs;
+      });
+
+      // Build sorted array over the last 14 days so missing days show as 0
+      const trends: Array<{ date: string; hours: number }> = [];
+      for (let i = 13; i >= 0; i--) {
+        const d = subDays(today, i);
+        const key = format(d, 'MMM d');
+        const hrs = hoursByDate[key] || 0;
+        trends.push({
+          date: key,
+          hours: Math.round(hrs * 10) / 10,
+        });
+      }
+
+      setAttendanceTrends(trends);
     } catch (error) {
       console.error('Error fetching attendance trends:', error);
       setAttendanceTrends([]);
@@ -1073,18 +1072,11 @@ export default function Dashboard() {
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={attendanceTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
-                    <XAxis 
-                      dataKey="date"
-                      tick={{ fontSize: 10 }}
-                      angle={-45}
-                      textAnchor="end"
-                      height={60}
-                    />
-                    <YAxis 
-                      tick={{ fontSize: 10 }}
-                      label={{ value: 'Hours', angle: -90, position: 'insideLeft' }}
-                    />
+                    {/* Light background grid for subtle guidance */}
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-100 dark:stroke-slate-800" />
+                    {/* Hide axes and labels */}
+                    <XAxis dataKey="date" hide />
+                    <YAxis hide domain={[0, 'dataMax + 2']} />
                     <Tooltip 
                       contentStyle={{ 
                         backgroundColor: 'white', 
@@ -1093,15 +1085,22 @@ export default function Dashboard() {
                         fontSize: '12px'
                       }}
                       formatter={(value: any) => [`${value} hrs`, 'Average']}
-                      labelFormatter={(label) => `Week: ${label}`}
+                      labelFormatter={(label) => `${label}`}
+                    />
+                    {/* Threshold line at 8 hours */}
+                    <ReferenceLine
+                      y={8}
+                      stroke="#ef4444"
+                      strokeDasharray="4 4"
+                      ifOverflow="extendDomain"
                     />
                     <Line 
                       type="monotone" 
                       dataKey="hours" 
-                      stroke="#3b82f6" 
+                      stroke="#E41E26"
                       strokeWidth={3}
-                      dot={{ r: 4 }}
-                      activeDot={{ r: 6, fill: "#3b82f6" }}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 6, fill: "#E41E26" }}
                       name="Average Hours"
                     />
                   </LineChart>
