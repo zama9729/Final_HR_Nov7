@@ -39,6 +39,8 @@ interface TeamScheduleEvent {
   title: string;
   start_date: string; // yyyy-MM-dd
   end_date: string; // yyyy-MM-dd
+  start_time?: string | null; // HH:mm (optional)
+  end_time?: string | null; // HH:mm (optional)
   team_id?: string | null;
   employee_id?: string | null;
   status?: "pending" | "approved" | "declined";
@@ -65,6 +67,14 @@ export default function TeamSchedule() {
   }>({});
   const [newEventTitle, setNewEventTitle] = useState("");
   const [newEventType, setNewEventType] = useState<EventType>("event");
+  const [newEventStartTime, setNewEventStartTime] = useState("09:00");
+  const [newEventEndTime, setNewEventEndTime] = useState("10:00");
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [publishing, setPublishing] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [publishTitle, setPublishTitle] = useState("");
+  const [publishBody, setPublishBody] = useState("");
+  const [publishPinned, setPublishPinned] = useState(false);
 
   const isManagerLike = useMemo(
     () => !!userRole && ["manager", "hr", "director", "ceo", "admin"].includes(userRole as Role),
@@ -169,20 +179,67 @@ export default function TeamSchedule() {
     setCurrentWeek((prev) => addDays(prev, 7));
   };
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (!isManagerLike) {
+      toast({
+        title: "Not allowed",
+        description: "Only managers, HR, directors, CEOs and admins can publish announcements.",
+        variant: "destructive",
+      });
       return;
     }
-    toast({
-      title: "Coming soon",
-      description: "Publish announcements from the team schedule will be enabled in the next phase.",
-    });
+    setPublishDialogOpen(true);
+  };
+
+  const submitPublish = async () => {
+    if (!publishTitle.trim() || !publishBody.trim()) {
+      toast({
+        title: "Title and message required",
+        description: "Please enter both a title and a short message.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      setPublishing(true);
+      await api.createAnnouncement({
+        title: publishTitle.trim(),
+        body: publishBody.trim(),
+        priority: "normal",
+        pinned: publishPinned,
+      });
+      toast({
+        title: "Announcement published",
+        description: "Your message will appear in the dashboard announcements for everyone.",
+      });
+      setPublishDialogOpen(false);
+      setPublishTitle("");
+      setPublishBody("");
+      setPublishPinned(false);
+    } catch (error: any) {
+      toast({
+        title: "Failed to publish",
+        description: error?.message || "Unable to publish announcement.",
+        variant: "destructive",
+      });
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const openNewEvent = (defaults?: { employee_id?: string; date?: string }) => {
-    setNewEventDefaults(defaults || {});
+    const d = defaults || {};
+    setNewEventDefaults(d);
     setNewEventTitle("");
     setNewEventType("event");
+    setNewEventStartTime("09:00");
+    setNewEventEndTime("10:00");
+    // Pre-select employee (for row-level Add) when manager-like
+    if (isManagerLike && d.employee_id) {
+      setSelectedEmployeeIds([d.employee_id]);
+    } else {
+      setSelectedEmployeeIds([]);
+    }
     setNewEventOpen(true);
   };
 
@@ -193,17 +250,44 @@ export default function TeamSchedule() {
     }
 
     const baseDate = newEventDefaults.date || format(new Date(), "yyyy-MM-dd");
-    const newItem: TeamScheduleEvent = {
-      id: `local-${Date.now()}`,
-      type: newEventType,
-      title: newEventTitle.trim(),
-      start_date: baseDate,
-      end_date: baseDate,
-      employee_id: newEventDefaults.employee_id,
-    };
 
-    setEvents((prev) => [...prev, newItem]);
+    // If manager-like and specific employees have been selected, create one entry per employee
+    if (isManagerLike && selectedEmployeeIds.length > 0) {
+      const now = Date.now();
+      const newItems: TeamScheduleEvent[] = selectedEmployeeIds.map((empId, idx) => ({
+        id: `local-${now}-${idx}`,
+        type: newEventType,
+        title: newEventTitle.trim(),
+        start_date: baseDate,
+        end_date: baseDate,
+        start_time: newEventStartTime || null,
+        end_time: newEventEndTime || null,
+        employee_id: empId,
+        team_id: selectedTeamId !== "all" ? selectedTeamId : null,
+      }));
+      setEvents((prev) => [...prev, ...newItems]);
+    } else {
+      // Fallback: single-target event (either specific employee from defaults, or team-wide)
+      const targetEmployeeId = newEventDefaults.employee_id || null;
+      const targetTeamId = !targetEmployeeId && selectedTeamId !== "all" ? selectedTeamId : null;
+
+      const newItem: TeamScheduleEvent = {
+        id: `local-${Date.now()}`,
+        type: newEventType,
+        title: newEventTitle.trim(),
+        start_date: baseDate,
+        end_date: baseDate,
+        start_time: newEventStartTime || null,
+        end_time: newEventEndTime || null,
+        employee_id: targetEmployeeId,
+        team_id: targetTeamId,
+      };
+
+      setEvents((prev) => [...prev, newItem]);
+    }
+
     setNewEventOpen(false);
+    setSelectedEmployeeIds([]);
   };
 
   const visibleMembers = members.length > 0 ? members : [];
@@ -355,9 +439,11 @@ export default function TeamSchedule() {
                               const dateStr = format(day, "yyyy-MM-dd");
                               const dayEvents = events.filter(
                                 (ev) =>
-                                  ev.employee_id === member.employee_id &&
-                                  ev.type === "time_off" &&
-                                  coversDate(ev, dateStr),
+                                  coversDate(ev, dateStr) &&
+                                  (
+                                    ev.employee_id === member.employee_id ||
+                                    (!!ev.team_id && selectedTeamId !== "all" && ev.team_id === selectedTeamId)
+                                  ),
                               );
 
                               if (dayEvents.length === 0) {
@@ -392,15 +478,28 @@ export default function TeamSchedule() {
                                     {dayEvents.map((ev) => (
                                       <div
                                         key={ev.id}
-                                        className="rounded-full px-2 py-1 text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-sm"
+                                        className={`rounded-full px-2 py-1 text-[11px] border shadow-sm ${
+                                          ev.type === "time_off"
+                                            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                            : "bg-sky-50 text-sky-800 border-sky-200"
+                                        }`}
                                       >
                                         <span className="font-medium">
-                                          {ev.status === "approved"
-                                            ? "On leave"
-                                            : ev.status === "pending"
-                                              ? "Leave (pending)"
-                                              : "Leave (declined)"}
+                                          {ev.type === "time_off"
+                                            ? ev.status === "approved"
+                                              ? "On leave"
+                                              : ev.status === "pending"
+                                                ? "Leave (pending)"
+                                                : "Leave (declined)"
+                                            : ev.title}
                                         </span>
+                                        {(ev.start_time || ev.end_time) && (
+                                          <span className="ml-1 text-[10px] opacity-80">
+                                            <Clock className="inline-block h-3 w-3 mr-0.5 align-middle" />
+                                            {ev.start_time || "--:--"}
+                                            {ev.end_time ? ` – ${ev.end_time}` : ""}
+                                          </span>
+                                        )}
                                       </div>
                                     ))}
                                     <button
@@ -451,6 +550,57 @@ export default function TeamSchedule() {
                 placeholder="e.g. Sprint planning, client call, release"
               />
             </div>
+            {isManagerLike && visibleMembers.length > 0 && (
+              <div className="space-y-2">
+                <Label>Invite employees (optional)</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Select one or more team members to add this event to their row. If you leave this empty, the event will apply to the whole team.
+                </p>
+                <div className="max-h-32 overflow-y-auto border rounded-md px-2 py-1.5 space-y-1 bg-muted/40">
+                  {visibleMembers.map((m) => {
+                    const id = m.employee_id;
+                    if (!id) return null;
+                    const checked = selectedEmployeeIds.includes(id);
+                    const label = (m.employee_name || "").trim() || id;
+                    return (
+                      <label key={id} className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5"
+                          checked={checked}
+                          onChange={(e) => {
+                            setSelectedEmployeeIds((prev) =>
+                              e.target.checked ? [...prev, id] : prev.filter((x) => x !== id),
+                            );
+                          }}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="event-start-time">Start time</Label>
+                <Input
+                  id="event-start-time"
+                  type="time"
+                  value={newEventStartTime}
+                  onChange={(e) => setNewEventStartTime(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="event-end-time">End time</Label>
+                <Input
+                  id="event-end-time"
+                  type="time"
+                  value={newEventEndTime}
+                  onChange={(e) => setNewEventEndTime(e.target.value)}
+                />
+              </div>
+            </div>
             <div className="space-y-1">
               <Label htmlFor="event-type">Type</Label>
               <Select
@@ -474,6 +624,56 @@ export default function TeamSchedule() {
               Cancel
             </Button>
             <Button onClick={handleCreateEvent}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Publish announcement dialog */}
+      <Dialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Publish announcement</DialogTitle>
+            <DialogDescription>
+              Send a short announcement to the whole company. It will appear in the dashboard announcement box.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="publish-title">Title</Label>
+              <Input
+                id="publish-title"
+                value={publishTitle}
+                onChange={(e) => setPublishTitle(e.target.value)}
+                placeholder="e.g. HR townhall with engineering team"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="publish-body">Message</Label>
+              <Input
+                id="publish-body"
+                value={publishBody}
+                onChange={(e) => setPublishBody(e.target.value)}
+                placeholder="Short description or meeting link"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="publish-pinned"
+                type="checkbox"
+                className="h-4 w-4"
+                checked={publishPinned}
+                onChange={(e) => setPublishPinned(e.target.checked)}
+              />
+              <Label htmlFor="publish-pinned">Pin to top of announcements</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPublishDialogOpen(false)} disabled={publishing}>
+              Cancel
+            </Button>
+            <Button onClick={submitPublish} disabled={publishing}>
+              {publishing ? "Publishing…" : "Publish"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

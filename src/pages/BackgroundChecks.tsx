@@ -66,17 +66,29 @@ interface EmployeeOption {
 }
 
 const statusClass = (status: string) => {
-  switch (status) {
-    case "completed_green":
-      return "bg-emerald-500";
-    case "completed_amber":
-      return "bg-amber-500 text-black";
-    case "completed_red":
-      return "bg-red-500";
-    case "in_progress":
+  const normalized = (status || "").toLowerCase();
+  switch (normalized) {
+    case "pending":
+      // Pending – blue
       return "bg-blue-500";
+    case "in_progress":
     case "vendor_delay":
+      // Anything actively moving – keep in the blue family
+      return "bg-blue-500";
+    case "on_hold":
+    case "hold":
+      // Hold – yellow
       return "bg-yellow-500 text-black";
+    case "completed":
+    case "completed_green":
+    case "completed_amber":
+    case "completed_red":
+      // Any completed flavour – show as green
+      return "bg-emerald-500";
+    case "failed":
+    case "rejected":
+    case "cancelled":
+      return "bg-red-500";
     default:
       return "bg-gray-500";
   }
@@ -270,26 +282,28 @@ export default function BackgroundChecks() {
   const statusSummary = useMemo(() => {
     return checks.reduce(
       (acc, check) => {
-        const status = (check.status || '').toLowerCase();
+        const status = (check.status || "").toLowerCase();
         switch (status) {
-          case 'pending':
+          case "pending":
             acc.pending += 1;
             break;
-          case 'in_progress':
-          case 'vendor_delay':
+          case "in_progress":
+          case "vendor_delay":
             acc.inProgress += 1;
             break;
-          case 'on_hold':
+          case "on_hold":
+          case "hold":
             acc.onHold += 1;
             break;
-          case 'completed_green':
-          case 'completed_amber':
-          case 'completed_red':
+          case "completed":
+          case "completed_green":
+          case "completed_amber":
+          case "completed_red":
             acc.completed += 1;
             break;
-          case 'failed':
-          case 'rejected':
-          case 'cancelled':
+          case "failed":
+          case "rejected":
+          case "cancelled":
             acc.rejected += 1;
             break;
           default:

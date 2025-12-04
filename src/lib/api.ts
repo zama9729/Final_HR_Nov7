@@ -469,6 +469,13 @@ class ApiClient {
     return this.request(`/api/announcements?${query.toString()}`);
   }
 
+  async createAnnouncement(data: { title: string; body: string; priority?: 'normal' | 'urgent'; pinned?: boolean }) {
+    return this.request('/api/announcements', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Background check methods
   async getBackgroundChecks() {
     return this.request('/api/background-checks');

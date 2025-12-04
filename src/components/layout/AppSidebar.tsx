@@ -549,7 +549,7 @@ export function AppSidebar() {
   return (
     <Sidebar
       collapsible="offcanvas"
-      className="bg-white text-slate-800 dark:bg-slate-950/80 supports-[backdrop-filter]:bg-white/85 dark:supports-[backdrop-filter]:bg-slate-950/65 backdrop-blur-[24px] border-r border-white/60 dark:border-slate-900/70 shadow-[10px_0_50px_rgba(15,23,42,0.2)] transition-colors"
+      className="bg-white text-slate-900 dark:bg-slate-950 border-r border-slate-200/90 dark:border-slate-900 shadow-[10px_0_40px_rgba(15,23,42,0.18)] transition-colors"
     >
       <SidebarHeader className="px-4 py-3 border-b border-white/70 dark:border-slate-900/60 bg-white dark:bg-transparent supports-[backdrop-filter]:bg-white/90 dark:supports-[backdrop-filter]:bg-slate-950/60 backdrop-blur-[20px] transition-colors">
         {!isCollapsed && (
@@ -559,7 +559,7 @@ export function AppSidebar() {
         )}
       </SidebarHeader>
 
-      <SidebarContent className="px-2 py-4 flex h-full flex-col gap-4 bg-white dark:bg-transparent supports-[backdrop-filter]:bg-white/90 dark:supports-[backdrop-filter]:bg-slate-950/55 backdrop-blur-[20px] text-slate-700 dark:text-slate-200 transition-colors">
+      <SidebarContent className="px-2 py-4 flex h-full flex-col gap-4 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 transition-colors">
         <div className="flex-1 overflow-y-auto space-y-4">
           {isCollapsed ? (
             <SidebarMenu className="space-y-1">

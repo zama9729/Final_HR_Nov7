@@ -281,7 +281,6 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Overview",
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-        { title: "Analytics", url: "/analytics", icon: BarChart3 },
         { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
@@ -299,7 +298,6 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       id: "manager-attendance",
       label: "Attendance & Leave",
       items: [
-        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },

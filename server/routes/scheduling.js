@@ -574,8 +574,8 @@ router.get('/schedules/:id', authenticateToken, setTenantContext, async (req, re
        FROM schedule_assignments a
        LEFT JOIN employees e ON e.id = a.employee_id
        LEFT JOIN profiles p ON p.id = e.user_id
-       LEFT JOIN teams tm ON tm.id = a.team_id
        JOIN shift_templates t ON t.id = a.shift_template_id
+       LEFT JOIN teams tm ON tm.id = t.team_id
        LEFT JOIN profiles ap ON ap.id = a.assigned_by_user_id
        WHERE a.schedule_id = $1 AND a.tenant_id = $2
        ORDER BY a.shift_date ASC, a.start_time ASC`,
