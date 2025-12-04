@@ -14,7 +14,7 @@ export const getActiveProbation = async (tenantId, employeeId) => {
      FROM probations
      WHERE tenant_id = $1
        AND employee_id = $2
-       AND status = ANY($3::text[])
+       AND status::text = ANY($3::text[])
      ORDER BY created_at DESC
      LIMIT 1`,
     [tenantId, employeeId, ACTIVE_PROBATION_STATUSES]

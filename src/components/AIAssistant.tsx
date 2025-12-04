@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sidebar, SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { Bot, Send, X, Loader2, MessageSquare, Trash2, Plus, Edit2, Check, XIcon } from "lucide-react";
 import { format } from "date-fns";
@@ -532,7 +531,7 @@ export function AIAssistant() {
           </div>
 
           {/* Chat Messages - Minimal */}
-          <ScrollArea className="flex-1" ref={scrollRef}>
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
             <div className="p-4 space-y-4">
               {messages.length === 0 && (
                 <div className="text-center text-muted-foreground py-12">
@@ -567,7 +566,7 @@ export function AIAssistant() {
                 </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
 
           {/* Minimal Input */}
           <div className="border-t p-3">

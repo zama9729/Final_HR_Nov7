@@ -95,6 +95,25 @@ export default function Dashboard() {
     [presenceStatus]
   );
 
+  const normalizeName = (name: string | undefined | null) =>
+    (name || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const getCurrentUserNameVariants = () => {
+    const variants: string[] = [];
+    const authName = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
+    if (authName) variants.push(normalizeName(authName));
+
+    const employeeName = [employeeData?.first_name, employeeData?.last_name]
+      .filter(Boolean)
+      .join(' ');
+    if (employeeName) variants.push(normalizeName(employeeName));
+
+    return new Set(variants);
+  };
+
   // Get time-based greeting
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -278,6 +297,8 @@ export default function Dashboard() {
           event.resource?.type === 'birthday' || event.event_type === 'birthday'
         );
         
+        const currentUserNames = getCurrentUserNameVariants();
+
         // Convert birthday events to announcement-like format
         const birthdayAnnouncements = birthdayEvents.map((event: any) => {
           // Calendar API uses 'start' field for the date
@@ -290,17 +311,32 @@ export default function Dashboard() {
           const employeeName = event.resource?.employee_name || 
                                event.title?.replace(/🎂\s*/g, '').replace(/'s Birthday/g, '') || 
                                'someone';
+
+          const isSelfBirthday =
+            employeeName &&
+            currentUserNames.size > 0 &&
+            currentUserNames.has(normalizeName(employeeName));
           
           return {
             id: `birthday-${event.id || event.resource?.employee_id || Math.random()}`,
-            title: isToday 
-              ? `🎉 Today is ${employeeName}'s birthday!` 
-              : daysUntil === 1 
-                ? `🎂 Tomorrow: ${employeeName}'s Birthday` 
-                : `🎂 ${format(eventDate, 'MMM dd')}: ${employeeName}'s Birthday`,
-            body: isToday 
-              ? `Wish ${employeeName} a wonderful day! 🎈` 
-              : `Birthday coming up in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`,
+            title: isToday
+              ? isSelfBirthday
+                ? '🎉 Today is your birthday!'
+                : `🎉 Today is ${employeeName}'s birthday!`
+              : daysUntil === 1
+                ? isSelfBirthday
+                  ? '🎂 Tomorrow is your birthday'
+                  : `🎂 Tomorrow: ${employeeName}'s Birthday`
+                : isSelfBirthday
+                  ? `🎂 ${format(eventDate, 'MMM dd')}: Your birthday`
+                  : `🎂 ${format(eventDate, 'MMM dd')}: ${employeeName}'s Birthday`,
+            body: isToday
+              ? isSelfBirthday
+                ? 'Enjoy your special day! 🎈'
+                : `Wish ${employeeName} a wonderful day! 🎈`
+              : isSelfBirthday
+                ? `Your birthday is coming up in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}.`
+                : `Birthday coming up in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`,
             priority: isToday ? 'urgent' : 'normal',
             created_at: eventDateStr,
             type: 'birthday' as const,

@@ -56,12 +56,22 @@ function toKey(date: Date) {
 }
 
 export function CalendarPanel() {
-  const { userRole } = useAuth();
+  const { user, userRole } = useAuth();
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
   const [viewLevel, setViewLevel] = useState<'employee' | 'organization'>('employee');
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const normalizeName = (name: string | undefined | null) =>
+    (name || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const selfName = normalizeName(
+    [user?.firstName, user?.lastName].filter(Boolean).join(' '),
+  );
 
   useEffect(() => {
     if (!privilegedRoles.has(userRole || '') && viewLevel !== 'employee') {
@@ -135,13 +145,34 @@ export function CalendarPanel() {
                   : 'day'
                 : undefined;
 
+            const employeeNameFromResource =
+              typeof event?.resource?.employee_name === 'string'
+                ? event.resource.employee_name
+                : undefined;
+
+            const isSelfBirthdayEvent =
+              normalizedType === 'birthday' &&
+              !!selfName &&
+              normalizeName(employeeNameFromResource) === selfName;
+
+            const title =
+              isSelfBirthdayEvent
+                ? 'Your birthday'
+                : event.title || event?.resource?.template_name || 'Event';
+
+            const description = isSelfBirthdayEvent
+              ? undefined
+              : employeeNameFromResource ||
+                event?.resource?.project_name ||
+                event?.resource?.name;
+
             return {
               id: event.id || `event-${idx}`,
               type: normalizedType,
-              title: event.title || event?.resource?.template_name || 'Event',
+              title,
               date: dateOnly,
               time,
-              description: event?.resource?.employee_name || event?.resource?.project_name || event?.resource?.name,
+              description,
               shiftSubtype,
             } as CalendarEvent;
           })
