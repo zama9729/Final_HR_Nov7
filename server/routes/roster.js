@@ -245,38 +245,123 @@ router.get('/schedules/:id', requireRole('hr', 'director', 'ceo', 'admin'), asyn
   if (!ensureTenant(req, res)) return;
   try {
     const { id } = req.params;
+
+    // 1. Fetch Schedule from generated_schedules
     const scheduleResult = await queryWithOrg(
-      `SELECT s.*, t.name AS template_name, r.summary AS run_summary
-       FROM schedules s
-       LEFT JOIN schedule_templates t ON t.id = s.template_id
-       LEFT JOIN scheduler_runs r ON r.id = s.run_id
+      `SELECT s.*
+       FROM generated_schedules s
        WHERE s.id = $1 AND s.tenant_id = $2`,
       [id, req.orgId],
       req.orgId
     );
+
     if (!scheduleResult.rows.length) {
       return res.status(404).json({ error: 'Schedule not found' });
     }
-    const slotsResult = await queryWithOrg(
-      `SELECT *
-       FROM schedule_slots
-       WHERE schedule_id = $1
-       ORDER BY shift_date ASC, start_time ASC, position_index ASC`,
-      [id],
+
+    const scheduleData = scheduleResult.rows[0];
+
+    // Parse telemetry
+    let telemetryObj = scheduleData.telemetry;
+    if (telemetryObj && typeof telemetryObj === 'string') {
+      try {
+        telemetryObj = JSON.parse(telemetryObj);
+      } catch {
+        telemetryObj = null;
+      }
+    }
+
+    // 2. Fetch Assignments
+    const assignmentsResult = await queryWithOrg(
+      `SELECT a.*,
+        t.name as template_name,
+        t.shift_type,
+        tm.name as team_name
+       FROM schedule_assignments a
+       JOIN shift_templates t ON t.id = a.shift_template_id
+       LEFT JOIN teams tm ON tm.id = a.team_id
+       WHERE a.schedule_id = $1 AND a.tenant_id = $2
+       ORDER BY a.shift_date ASC, a.start_time ASC`,
+      [id, req.orgId],
       req.orgId
     );
-    const conflictsResult = await queryWithOrg(
-      `SELECT *
-       FROM schedule_conflicts
-       WHERE schedule_id = $1
-       ORDER BY created_at DESC`,
-      [id],
-      req.orgId
-    );
+
+    // 3. Construct Slots (Assignments + Unfilled)
+    const slots = [];
+
+    // Add assigned slots
+    assignmentsResult.rows.forEach((a, index) => {
+      slots.push({
+        id: a.id,
+        schedule_id: a.schedule_id,
+        shift_date: a.shift_date instanceof Date ? a.shift_date.toISOString().split('T')[0] : a.shift_date,
+        shift_name: a.template_name,
+        start_time: a.start_time,
+        end_time: a.end_time,
+        assigned_employee_id: a.employee_id,
+        assigned_team_id: a.team_id,
+        assignment_type: a.assignment_type,
+        assignment_status: 'assigned',
+        assignment_source: a.assigned_by === 'system' ? 'auto' : 'manual',
+        position_index: index, // Approximate
+        manual_lock: false // Not tracked in assignments currently
+      });
+    });
+
+    // Add unfilled slots from telemetry
+    const unfilledSlots = telemetryObj?.unfilledSlots || [];
+    unfilledSlots.forEach((u, index) => {
+      slots.push({
+        id: `unfilled-${index}`,
+        schedule_id: id,
+        shift_date: u.date,
+        shift_name: 'Unfilled Slot', // Need template name?
+        start_time: u.startTime,
+        end_time: u.endTime,
+        assigned_employee_id: null,
+        assignment_status: 'unassigned',
+        assignment_source: 'auto',
+        position_index: 1000 + index,
+        manual_lock: false
+      });
+    });
+
+    // 4. Extract Conflicts from Telemetry
+    const conflicts = (telemetryObj?.conflicts || []).map((c, index) => ({
+      id: `conflict-${index}`,
+      schedule_id: id,
+      conflict_type: 'unassigned_slot',
+      severity: 'high',
+      details: {
+        reason: c.reason,
+        slot: c.slot,
+        shift_date: c.slot?.date,
+        shift_name: c.slot?.shiftName
+      }
+    }));
+
+    // Map conflicts back to slots
+    slots.forEach(slot => {
+      const slotConflicts = conflicts.filter(c => {
+        const conflictDate = c.details.shift_date;
+        const conflictStart = c.details.slot?.startTime;
+        return conflictDate === slot.shift_date && conflictStart === slot.start_time;
+      });
+
+      if (slotConflicts.length > 0) {
+        slot.conflict_flags = slotConflicts.map(c => c.details.reason);
+        slot.assignment_status = 'conflict'; // Update status if conflict exists
+      }
+    });
+
     res.json({
-      schedule: scheduleResult.rows[0],
-      slots: slotsResult.rows,
-      conflicts: conflictsResult.rows,
+      schedule: {
+        ...scheduleData,
+        template_name: 'Generated Schedule', // Fallback
+        run_summary: telemetryObj
+      },
+      slots: slots,
+      conflicts: conflicts,
     });
   } catch (error) {
     console.error('Roster schedule detail error:', error);

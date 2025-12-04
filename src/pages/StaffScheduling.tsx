@@ -61,6 +61,7 @@ interface ShiftTemplate {
   duration_hours?: number;
   crosses_midnight: boolean;
   is_default: boolean;
+  schedule_mode?: 'employee' | 'team' | 'mixed'; // [NEW]
 }
 
 interface RuleSet {
@@ -136,6 +137,8 @@ interface ScheduleAssignment {
   assigned_by_user_id?: string;
   assigned_by_first_name?: string;
   assigned_by_last_name?: string;
+  assignment_type?: 'employee' | 'team'; // [NEW]
+  team_id?: string; // [NEW]
 }
 
 const normalizeAssignments = (assignments: ScheduleAssignment[] | undefined) => {
@@ -153,6 +156,8 @@ const normalizeAssignments = (assignments: ScheduleAssignment[] | undefined) => 
         return assignment.shift_date as unknown as string;
       }
     })(),
+    assignment_type: assignment.assignment_type,
+    team_id: assignment.team_id,
   }));
 };
 
@@ -173,6 +178,7 @@ export default function StaffScheduling() {
   const [ruleSets, setRuleSets] = useState<RuleSet[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
+  const [teams, setTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showManualDialog, setShowManualDialog] = useState(false);
@@ -189,6 +195,7 @@ export default function StaffScheduling() {
     duration_hours: 8,
     crosses_midnight: false,
     is_default: false,
+    schedule_mode: "employee" as "employee" | "team" | "mixed",
   });
   const [previewStartDate, setPreviewStartDate] = useState<Date | null>(null);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
@@ -214,6 +221,7 @@ export default function StaffScheduling() {
     rule_set_id: "",
     template_ids: [] as string[],
     employee_ids: [] as string[],
+    team_id: "",
   });
 
   // ScoreRank Settings
@@ -233,7 +241,17 @@ export default function StaffScheduling() {
     fetchTemplates();
     fetchRuleSets();
     fetchSchedules();
+    fetchTeams();
   }, []);
+
+  const fetchTeams = async () => { // [NEW]
+    try {
+      const data = await api.getTeams({ active: true });
+      setTeams(data);
+    } catch (error) {
+      console.error("Failed to fetch teams", error);
+    }
+  };
 
   const fetchTemplates = async () => {
     try {
@@ -303,6 +321,7 @@ export default function StaffScheduling() {
         duration_hours: 8,
         crosses_midnight: false,
         is_default: false,
+        schedule_mode: "employee",
       });
       fetchTemplates();
     } catch (error: any) {
@@ -363,6 +382,7 @@ export default function StaffScheduling() {
         // algorithm: schedulerForm.algorithm, // Deprecated
         template_ids: schedulerForm.template_ids.length > 0 ? schedulerForm.template_ids : undefined,
         employee_ids: schedulerForm.employee_ids.length > 0 ? schedulerForm.employee_ids : undefined,
+        team_id: schedulerForm.team_id || undefined, // [NEW]
         seed: randomSeed, // Add random seed for variation
         replace_schedule_id: rerunScheduleId || undefined, // Replace existing schedule if rerunning
         decayRate,
@@ -964,6 +984,7 @@ export default function StaffScheduling() {
                     duration_hours: 8,
                     crosses_midnight: false,
                     is_default: false,
+                    schedule_mode: "employee",
                   });
                   setShowTemplateDialog(true);
                 }}>
@@ -1006,6 +1027,7 @@ export default function StaffScheduling() {
                                 duration_hours: template.duration_hours || 8,
                                 crosses_midnight: template.crosses_midnight,
                                 is_default: template.is_default,
+                                schedule_mode: template.schedule_mode || "employee",
                               });
                               setShowTemplateDialog(true);
                             }}
@@ -1382,6 +1404,24 @@ export default function StaffScheduling() {
                   </SelectContent>
                 </Select>
               </div>
+              <div>
+                <Label>Schedule Mode</Label>
+                <Select
+                  value={templateForm.schedule_mode}
+                  onValueChange={(value: any) =>
+                    setTemplateForm({ ...templateForm, schedule_mode: value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="employee">Employee Only</SelectItem>
+                    <SelectItem value="team">Team Only</SelectItem>
+                    <SelectItem value="mixed">Mixed (Employee & Team)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
                   <input
@@ -1658,6 +1698,27 @@ export default function StaffScheduling() {
                     }
                   />
                 </div>
+              </div>
+              <div>
+                <Label>Team (Optional)</Label>
+                <Select
+                  value={schedulerForm.team_id}
+                  onValueChange={(value) =>
+                    setSchedulerForm({ ...schedulerForm, team_id: value === "all" ? "" : value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select team (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Teams</SelectItem>
+                    {teams.map((team) => (
+                      <SelectItem key={team.id} value={team.id}>
+                        {team.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label>Rule Set</Label>

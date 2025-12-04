@@ -508,9 +508,7 @@ class ApiClient {
     });
   }
 
-  async getBackgroundCheckReport(id: string) {
-    return this.request(`/api/background-checks/${id}/report`);
-  }
+
 
   // AI assistant conversation methods
   async listAIConversations() {
@@ -949,7 +947,7 @@ class ApiClient {
     });
   }
 
-  async getTeamMembers() {
+  async getMyTeamMembers() {
     return this.request('/api/employees?team=mine');
   }
 
@@ -963,9 +961,7 @@ class ApiClient {
   }
 
   // Project methods
-  async getProjects() {
-    return this.request('/api/v1/projects');
-  }
+
 
   async getProject(id: string) {
     return this.request(`/api/v1/projects/${id}`);
@@ -1182,7 +1178,15 @@ class ApiClient {
   async uploadAttendance(file: File, etlConfig?: any) {
     const formData = new FormData();
     formData.append('file', file);
-    
+<<<<<<< HEAD
+
+=======
+<<<<<<< Updated upstream
+    if (mapping) {
+      formData.append('mapping', JSON.stringify(mapping));
+=======
+
+>>>>>>> Latest_20-11
     // Support both old format (just mapping) and new format (full ETL config)
     if (etlConfig) {
       if (etlConfig.mapping) {
@@ -1191,11 +1195,19 @@ class ApiClient {
         // Old format - just mapping object
         formData.append('mapping', JSON.stringify(etlConfig));
       }
-      
+<<<<<<< HEAD
+
       if (etlConfig.transformations && Array.isArray(etlConfig.transformations)) {
         formData.append('transformations', JSON.stringify(etlConfig.transformations));
       }
-      
+
+=======
+
+      if (etlConfig.transformations && Array.isArray(etlConfig.transformations)) {
+        formData.append('transformations', JSON.stringify(etlConfig.transformations));
+      }
+
+>>>>>>> Latest_20-11
       if (etlConfig.validations && Array.isArray(etlConfig.validations)) {
         formData.append('validations', JSON.stringify(etlConfig.validations));
       }
@@ -1203,6 +1215,10 @@ class ApiClient {
       if (typeof etlConfig.matrixDetected === 'boolean') {
         formData.append('matrixDetected', JSON.stringify(etlConfig.matrixDetected));
       }
+<<<<<<< HEAD
+=======
+>>>>>>> Stashed changes
+>>>>>>> Latest_20-11
     }
 
     return this.request('/api/v1/attendance/upload', {
@@ -1501,6 +1517,11 @@ class ApiClient {
     return res?.policies ?? [];
   }
 
+<<<<<<< HEAD
+=======
+<<<<<<< Updated upstream
+=======
+>>>>>>> Latest_20-11
   async publishManagedPolicy(id: string, change_note?: string) {
     return this.request(`/api/policy-management/policies/${id}/publish`, {
       method: 'POST',
@@ -1600,12 +1621,20 @@ class ApiClient {
 
   async downloadOrgPolicyPDF(policyId: string): Promise<Blob> {
     const url = `/api/policies/org/${policyId}/download`;
-    
+<<<<<<< HEAD
+
+=======
+
+>>>>>>> Latest_20-11
     const headers: HeadersInit = {};
     if (this._token) {
       headers['Authorization'] = `Bearer ${this._token}`;
     }
-    
+<<<<<<< HEAD
+
+=======
+
+>>>>>>> Latest_20-11
     const response = await fetch(`${this.baseURL}${url}`, {
       method: 'GET',
       headers,
@@ -1620,15 +1649,26 @@ class ApiClient {
   }
 
   async downloadPolicyPDF(policyId: string, version?: string): Promise<Blob> {
-    const url = version 
+<<<<<<< HEAD
+    const url = version
       ? `/api/policy-management/policies/${policyId}/download?version=${version}`
       : `/api/policy-management/policies/${policyId}/download`;
-    
+
+=======
+    const url = version
+      ? `/api/policy-management/policies/${policyId}/download?version=${version}`
+      : `/api/policy-management/policies/${policyId}/download`;
+
+>>>>>>> Latest_20-11
     const headers: HeadersInit = {};
     if (this._token) {
       headers['Authorization'] = `Bearer ${this._token}`;
     }
-    
+<<<<<<< HEAD
+
+=======
+
+>>>>>>> Latest_20-11
     const response = await fetch(`${this.baseURL}${url}`, {
       method: 'GET',
       headers,
@@ -1642,6 +1682,10 @@ class ApiClient {
     return await response.blob();
   }
 
+<<<<<<< HEAD
+=======
+>>>>>>> Stashed changes
+>>>>>>> Latest_20-11
   // Promotion methods
   async getPromotionHealth() {
     return this.request('/api/promotion/health');
@@ -1684,11 +1728,7 @@ class ApiClient {
     });
   }
 
-  async approvePromotion(id: string) {
-    return this.request(`/api/promotion/approve/${id}`, {
-      method: 'POST',
-    });
-  }
+
 
   // User invite methods
   async inviteUsers(data: {
@@ -2087,13 +2127,16 @@ class ApiClient {
     week_start_date: string;
     week_end_date: string;
     rule_set_id: string;
-    algorithm: 'greedy' | 'ilp' | 'simulated_annealing';
+    algorithm?: 'greedy' | 'ilp' | 'simulated_annealing';
     template_ids?: string[];
     employee_ids?: string[];
     branch_id?: string;
     team_id?: string;
     seed?: number;
     replace_schedule_id?: string;
+    decayRate?: number;
+    shiftWeights?: { morning: number; evening: number; night: number };
+    overwriteLocked?: boolean;
   }) {
     return this.request('/api/scheduling/schedules/run', {
       method: 'POST',
@@ -2125,56 +2168,26 @@ class ApiClient {
     });
   }
 
-  async manualEditSchedule(
-    id: string,
-    data: {
-      assignments: Array<{
-        id?: string;
-        employee_id: string;
-        shift_date: string;
-        shift_template_id: string;
-        start_time: string;
-        end_time: string;
-      }>;
-      reason?: string;
-    }
-  ) {
+  async manualEditSchedule(id: string, data: { assignments: any[]; reason?: string }) {
     return this.request(`/api/scheduling/schedules/${id}/manual-edit`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
-  async createException(data: {
-    schedule_id?: string;
-    employee_id: string;
-    rule_id: string;
-    exception_type: 'allow_violation' | 'force_assignment' | 'prevent_assignment';
-    reason: string;
-  }) {
-    return this.request('/api/scheduling/exceptions', {
-      method: 'POST',
-      body: JSON.stringify(data),
+  async exportScheduleCSV(id: string): Promise<Blob> {
+    const response = await fetch(`${this.baseURL}/api/scheduling/schedules/${id}/export/csv`, {
+      headers: {
+        'Authorization': `Bearer ${this._token}`,
+      },
     });
-  }
 
-  async approveException(id: string) {
-    return this.request(`/api/scheduling/exceptions/${id}/approve`, {
-      method: 'PATCH',
-    });
-  }
-
-  async exportScheduleCSV(id: string) {
-    const url = `${this.baseURL}/api/scheduling/schedules/${id}/export/csv`;
-    const headers: HeadersInit = {};
-    if (this._token) {
-      headers['Authorization'] = `Bearer ${this._token}`;
-    }
-    const response = await fetch(url, { headers });
     if (!response.ok) {
-      throw new Error('Failed to export schedule');
+      const error = await response.json().catch(() => ({ error: 'Failed to download CSV' }));
+      throw new Error(error.error || 'Failed to download CSV');
     }
-    return response.blob();
+
+    return await response.blob();
   }
 
   async getCalendar(params: {
@@ -2193,6 +2206,10 @@ class ApiClient {
     return this.request(`/api/calendar?${query.toString()}`);
   }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> Latest_20-11
   // Profile picture upload
   async getProfilePicturePresignedUrl(contentType: string) {
     return this.request('/api/employees/profile-picture/presign', {
@@ -2271,7 +2288,11 @@ class ApiClient {
         'Authorization': `Bearer ${this._token}`,
       },
     });
-    
+<<<<<<< HEAD
+
+=======
+
+>>>>>>> Latest_20-11
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
       throw new Error(error.error || 'Failed to download PDF');
@@ -2279,7 +2300,11 @@ class ApiClient {
 
     // Check if response is JSON (presigned URL) or PDF blob
     const contentType = response.headers.get('content-type');
-    
+<<<<<<< HEAD
+
+=======
+
+>>>>>>> Latest_20-11
     if (contentType?.includes('application/json')) {
       // It's a presigned URL
       const data = await response.json();
@@ -2289,7 +2314,11 @@ class ApiClient {
         return;
       }
     }
-    
+<<<<<<< HEAD
+
+=======
+
+>>>>>>> Latest_20-11
     // It's a PDF blob
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
@@ -2518,6 +2547,7 @@ class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
 }
 
 export const api = new ApiClient(API_URL);

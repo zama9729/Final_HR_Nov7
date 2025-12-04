@@ -66,7 +66,8 @@ router.post('/templates', authenticateToken, setTenantContext, requireRole('hr',
       crosses_midnight,
       is_default,
       team_id,
-      branch_id
+      branch_id,
+      schedule_mode // [NEW]
     } = req.body;
 
     if (!name || !start_time || !end_time || !shift_type) {
@@ -77,8 +78,8 @@ router.post('/templates', authenticateToken, setTenantContext, requireRole('hr',
     const result = await query(
       `INSERT INTO shift_templates (
         tenant_id, name, start_time, end_time, shift_type,
-        duration_hours, crosses_midnight, is_default, team_id, branch_id, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        duration_hours, crosses_midnight, is_default, team_id, branch_id, schedule_mode, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
         orgId,
@@ -91,6 +92,7 @@ router.post('/templates', authenticateToken, setTenantContext, requireRole('hr',
         is_default || false,
         team_id || null,
         branch_id || null,
+        schedule_mode || 'employee',
         req.user.id
       ]
     );
@@ -124,20 +126,21 @@ router.put('/templates/:id', authenticateToken, setTenantContext, requireRole('h
       crosses_midnight,
       is_default,
       team_id,
-      branch_id
+      branch_id,
+      schedule_mode // [NEW]
     } = req.body;
 
     const result = await query(
       `UPDATE shift_templates
        SET name = $1, start_time = $2, end_time = $3, shift_type = $4,
            duration_hours = $5, crosses_midnight = $6, is_default = $7,
-           team_id = $8, branch_id = $9, updated_at = now()
-       WHERE id = $10 AND tenant_id = $11
+           team_id = $8, branch_id = $9, schedule_mode = $10, updated_at = now()
+       WHERE id = $11 AND tenant_id = $12
        RETURNING *`,
       [
         name, start_time, end_time, shift_type,
         duration_hours, crosses_midnight, is_default,
-        team_id, branch_id, id, orgId
+        team_id, branch_id, schedule_mode || 'employee', id, orgId
       ]
     );
 
@@ -476,7 +479,8 @@ router.post('/schedules/run', authenticateToken, setTenantContext, requireRole('
       decayRate,
       shiftWeights,
       overwriteLocked,
-      ruleSetId: rule_set_id
+      ruleSetId: rule_set_id,
+      teamId: team_id // [NEW]
     });
 
     res.json(result);
@@ -562,13 +566,15 @@ router.get('/schedules/:id', authenticateToken, setTenantContext, async (req, re
         e.employee_id,
         p.first_name,
         p.last_name,
+        tm.name as team_name,
         t.name as template_name,
         t.shift_type,
         ap.first_name as assigned_by_first_name,
         ap.last_name as assigned_by_last_name
        FROM schedule_assignments a
-       JOIN employees e ON e.id = a.employee_id
-       JOIN profiles p ON p.id = e.user_id
+       LEFT JOIN employees e ON e.id = a.employee_id
+       LEFT JOIN profiles p ON p.id = e.user_id
+       LEFT JOIN teams tm ON tm.id = a.team_id
        JOIN shift_templates t ON t.id = a.shift_template_id
        LEFT JOIN profiles ap ON ap.id = a.assigned_by_user_id
        WHERE a.schedule_id = $1 AND a.tenant_id = $2
@@ -612,12 +618,25 @@ router.get('/schedules/:id', authenticateToken, setTenantContext, async (req, re
     const fairnessSummary = telemetryObj?.fairness || null;
     const exceptionSuggestions = telemetryObj?.unfilledSlots || [];
 
+    // Extract and map conflicts from telemetry
+    const conflicts = (telemetryObj?.conflicts || []).map((c, index) => ({
+      id: `conflict-${index}`,
+      schedule_id: id,
+      conflict_type: 'unassigned_slot',
+      severity: 'high',
+      details: {
+        reason: c.reason,
+        slot: c.slot
+      }
+    }));
+
     res.json({
       ...scheduleData,
       assignments: assignmentsResult.rows,
       employees: rosterResult.rows,
       fairness_summary: fairnessSummary,
-      exception_suggestions: exceptionSuggestions
+      exception_suggestions: exceptionSuggestions,
+      conflicts: conflicts
     });
   } catch (error) {
     console.error('Error fetching schedule:', error);

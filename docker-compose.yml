@@ -100,9 +100,9 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
-    volumes:
-      - ./server:/app
-      - /app/node_modules
+    # volumes:
+    #   - ./server:/app
+    #   - /app/node_modules
     restart: unless-stopped
 
   # Frontend application (development)

@@ -27,12 +27,12 @@ async function getOpenAIClient() {
   if (!OpenAI && !openaiImportAttempted) {
     await loadOpenAI();
   }
-  
+
   if (!OpenAI) {
     console.warn('⚠️  OpenAI package not installed. Install with: npm install openai');
     return null;
   }
-  
+
   if (!openaiClient) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -307,7 +307,7 @@ export function getFunctionDefinitions() {
  */
 export async function getFunctionDefinitionsWithMiniApps(tenantId) {
   const baseFunctions = getFunctionDefinitions();
-  
+
   try {
     const { getAvailableMiniApps } = await import('./ai/opal-integration.js');
     const miniApps = await getAvailableMiniApps(tenantId);
@@ -342,87 +342,27 @@ export async function streamChatCompletion(messages, options = {}) {
     throw new Error('OpenAI client is not initialized. Please install openai package and configure OPENAI_API_KEY.');
   }
   const model = options.model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  
+
   // Get system context and role context
   const systemContext = getSystemContext();
   const roleContext = options.role ? getRoleContext(options.role) : '';
   const userContextMessage = options.userContext ? options.userContext : '';
-  
+
   const systemMessage = options.systemMessage || `${systemContext}
-
 ${roleContext}
-
 ${userContextMessage}
 
-You are a helpful HR assistant for Petal HR Suite. You can help users with:
-- Employee information and management
-- Leave requests and policies - CREATE LEAVE REQUESTS using create_leave_request function
-- Timesheet tracking
-- Dashboard statistics
-- General HR queries
-- Workflow creation and automation (create workflows from natural language, execute workflows)
+You are a helpful HR assistant for Petal HR Suite.
+Capabilities:
+- Employee info & management
+- Leave requests (create with 'create_leave_request')
+- Timesheets & Stats
+- Workflows
 
-You have access to functions that allow you to retrieve real-time data from the HR system. 
-Use these functions when users ask about specific information like:
-- Employee details
-- Leave requests - USE create_leave_request WHEN USER WANTS TO APPLY FOR LEAVE
-- Timesheets
-- Statistics
-- Policies
-- Workflows (list, create, execute)
-
-CRITICAL: LEAVE REQUEST CREATION
-When users say ANY of these phrases, IMMEDIATELY call create_leave_request:
-- "apply for leave" / "apply leave" / "I want to take leave"
-- "I need annual leave" / "sick leave" / "casual leave"
-- "request time off" / "book leave" / "take leave"
-- "I want leave from [date] to [date]"
-
-Steps to handle leave requests:
-1. Extract leave_type from user message (annual, sick, casual, maternity, paternity, bereavement)
-2. Extract start_date and end_date (convert to YYYY-MM-DD format if needed)
-3. Extract reason (if mentioned)
-4. IMMEDIATELY call create_leave_request with these parameters
-5. DO NOT ask for confirmation - just create the leave request
-6. Tell the user their leave request has been created and is pending approval
-
-Leave types mapping:
-- "annual" or "annual leave" → annual
-- "sick" or "sick leave" → sick
-- "casual" → casual
-- "maternity" → maternity
-- "paternity" → paternity
-- "bereavement" → bereavement
-
-IMPORTANT WORKFLOW RULES:
-- When user wants to create/design a workflow, use create_workflow_from_natural_language
-- When user wants to start/run a workflow, use start_workflow with the workflow_id
-- All workflows are automatically scoped to the user's organization (tenant_id)
-- Workflows can automate approval processes, notifications, and business logic
-
-OPAL MINI APPS:
-- Mini apps are discoverable functions that extend AI capabilities
-- Use list_mini_apps to see available mini apps
-- Use execute_mini_app to run a mini app
-- Mini apps can be called directly by their function_name
-- All mini apps are organization-scoped and secure
-
-EXAMPLES:
-User: "I want to apply for annual leave from 2024-12-01 to 2024-12-05"
-You: [IMMEDIATELY call create_leave_request with leave_type='annual', start_date='2024-12-01', end_date='2024-12-05']
-
-User: "Apply for sick leave tomorrow for 2 days"
-You: [Calculate dates, then call create_leave_request with leave_type='sick', dates, reason if provided]
-
-IMPORTANT BEHAVIOR RULES:
-- For simple conversational questions (greetings, "how are you", general questions), respond naturally WITHOUT calling functions
-- Only call functions when users explicitly ask for specific information (employee data, leave requests, timesheets, statistics)
-- If you're unsure whether to call a function, err on the side of answering directly
-- If a function call fails, provide a helpful response explaining the issue
-- Always be helpful even when functions are not needed
-
-Be professional, friendly, and concise. Always provide accurate information based on the system data.
-When users want to apply for leave, CREATE IT IMMEDIATELY without asking for extra information you already have.`;
+Rules:
+1. For leave requests ("apply for leave", "sick leave", etc.), IMMEDIATELY call 'create_leave_request'. Do not ask for confirmation if you have the details.
+2. Use functions for specific data lookups.
+3. Be concise.`;
 
   // Only include functions if explicitly enabled AND tenantId provided
   let functionDefinitions = null;
@@ -434,12 +374,15 @@ When users want to apply for leave, CREATE IT IMMEDIATELY without asking for ext
       // Continue without functions
     }
   }
-  
+
+  // Truncate history to last 10 messages to save tokens
+  const recentMessages = messages.slice(-10);
+
   const requestOptions = {
     model: model,
     messages: [
       { role: 'system', content: systemMessage },
-      ...messages
+      ...recentMessages
     ],
     stream: true,
     temperature: options.temperature || 0.7,
@@ -483,11 +426,11 @@ export async function chatWithFunctions(messages, options = {}, executeFunction 
     throw new Error('OpenAI client is not initialized. Please install openai package and configure OPENAI_API_KEY.');
   }
   const model = options.model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  
+
   const systemContext = getSystemContext();
   const roleContext = options.role ? getRoleContext(options.role) : '';
   const userContextMessage = options.userContext ? options.userContext : '';
-  
+
   const systemMessage = `${systemContext}
 
 ${roleContext}
@@ -544,13 +487,13 @@ Be professional, friendly, and concise.`;
     const response = await client.chat.completions.create(requestOptions);
 
     const message = response.choices[0].message;
-    
+
     // Add assistant message (with tool_calls if any)
     const assistantMessage = {
       role: message.role,
       content: message.content || null,
     };
-    
+
     // Only add tool_calls if they exist
     if (message.tool_calls && message.tool_calls.length > 0) {
       assistantMessage.tool_calls = message.tool_calls.map(tc => ({
@@ -562,7 +505,7 @@ Be professional, friendly, and concise.`;
         },
       }));
     }
-    
+
     conversationMessages.push(assistantMessage);
 
     // Check if function calls are needed
@@ -573,10 +516,10 @@ Be professional, friendly, and concise.`;
           console.error('Invalid tool call:', toolCall);
           continue;
         }
-        
+
         const functionName = toolCall.function.name;
         let functionArgs = {};
-        
+
         try {
           if (typeof toolCall.function.arguments === 'string') {
             functionArgs = JSON.parse(toolCall.function.arguments);
@@ -590,7 +533,7 @@ Be professional, friendly, and concise.`;
 
         try {
           const functionResult = await executeFunction(functionName, functionArgs);
-          
+
           conversationMessages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
@@ -621,7 +564,7 @@ Be professional, friendly, and concise.`;
   if (lastMessage && lastMessage.content) {
     return lastMessage.content;
   }
-  
+
   // Fallback: return a helpful message
   return 'I apologize, but I encountered an issue processing your request. Please try asking your question differently.';
 }
@@ -638,12 +581,12 @@ export async function getChatCompletion(messages, options = {}) {
     throw new Error('OpenAI client is not initialized. Please install openai package and configure OPENAI_API_KEY.');
   }
   const model = options.model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  
+
   // Get system context
   const systemContext = getSystemContext();
   const roleContext = options.role ? getRoleContext(options.role) : '';
   const userContextMessage = options.userContext ? options.userContext : '';
-  
+
   const systemMessage = `${systemContext}
 
 ${roleContext}
@@ -696,11 +639,11 @@ Be professional, friendly, and concise.`;
   try {
     const response = await client.chat.completions.create(requestOptions);
     const content = response.choices[0].message.content;
-    
+
     if (!content) {
       return 'I apologize, but I could not generate a response. Please try rephrasing your question.';
     }
-    
+
     return content;
   } catch (error) {
     console.error('OpenAI API error in getChatCompletion:', error);
@@ -744,9 +687,9 @@ Keep the response concise and actionable.`;
     const response = await client.chat.completions.create({
       model: model,
       messages: [
-        { 
-          role: 'system', 
-          content: 'You are an expert HR recruiter specializing in technical talent matching. Provide clear, actionable recommendations.' 
+        {
+          role: 'system',
+          content: 'You are an expert HR recruiter specializing in technical talent matching. Provide clear, actionable recommendations.'
         },
         { role: 'user', content: prompt }
       ],
@@ -798,9 +741,9 @@ Keep response professional and constructive.`;
     const response = await client.chat.completions.create({
       model: model,
       messages: [
-        { 
-          role: 'system', 
-          content: 'You are an expert HR performance analyst. Provide professional, constructive insights on employee performance reviews.' 
+        {
+          role: 'system',
+          content: 'You are an expert HR performance analyst. Provide professional, constructive insights on employee performance reviews.'
         },
         { role: 'user', content: prompt }
       ],
@@ -837,12 +780,12 @@ Max Hours per Employee: ${requirements.max_hours_per_employee || 40}
 Roles Needed: ${JSON.stringify(requirements.roles_needed || [])}
 
 Available Employees:
-${JSON.stringify(employees.map(e => ({ 
-  id: e.id, 
-  name: e.name,
-  department: e.department,
-  position: e.position 
-})), null, 2)}
+${JSON.stringify(employees.map(e => ({
+    id: e.id,
+    name: e.name,
+    department: e.department,
+    position: e.position
+  })), null, 2)}
 
 Return ONLY valid JSON in this format:
 {
@@ -867,9 +810,9 @@ Return ONLY valid JSON in this format:
     const response = await client.chat.completions.create({
       model: model,
       messages: [
-        { 
-          role: 'system', 
-          content: 'You are an expert shift scheduler. Generate fair, balanced rosters considering work-life balance, equal distribution, and operational needs. Return ONLY valid JSON, no markdown.' 
+        {
+          role: 'system',
+          content: 'You are an expert shift scheduler. Generate fair, balanced rosters considering work-life balance, equal distribution, and operational needs. Return ONLY valid JSON, no markdown.'
         },
         { role: 'user', content: prompt }
       ],

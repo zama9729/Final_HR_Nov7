@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     openai_api_version: Optional[str] = None
     openai_proxy: Optional[str] = None
     embedding_model: str = "text-embedding-ada-002"
-    chat_model: str = "gpt-4-turbo-preview"
+    chat_model: str = "gpt-4o-mini"
     vite_rag_api_url: Optional[str] = None  # ignore frontend env var when inherited
     
     # JWT - Use same secret as HR app for compatibility
@@ -32,10 +32,10 @@ class Settings(BaseSettings):
     jwt_expiration_hours: int = 24
     
     # RAG Configuration
-    chunk_size: int = 800
-    chunk_overlap: int = 200
-    top_k_retrieval: int = 15
-    top_k_final: int = 5
+    chunk_size: int = 500
+    chunk_overlap: int = 100
+    top_k_retrieval: int = 10
+    top_k_final: int = 3
     rerank_enabled: bool = True
     min_confidence_threshold: float = 0.3
     
