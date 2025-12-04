@@ -283,30 +283,23 @@ export default function MyProfile() {
 
   return (
     <AppLayout>
-      <div className="min-h-screen bg-gray-50 px-6 py-4">
+      <div className="min-h-screen bg-gray-50 px-4 py-3">
         <div className="mx-auto max-w-7xl">
           {/* Header */}
-          <div className="mb-5 flex items-center justify-between">
+          <div className="mb-4 flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">My Profile</h1>
-              <p className="mt-1 text-sm text-gray-600">
+              <h1 className="text-2xl font-bold text-gray-900">My Profile</h1>
+              <p className="mt-0.5 text-xs text-gray-600">
                 Manage your profile information and preferences
               </p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 rounded-lg border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Customise questions
-            </Button>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-[260px,minmax(0,1fr),280px]">
+          <div className="grid gap-4 lg:grid-cols-[240px,minmax(0,1fr),260px]">
             {/* Left sidebar */}
-            <aside className="space-y-4">
+            <aside className="space-y-3">
               <Card className="liquid-glass-card rounded-xl">
-                <CardContent className="p-5">
+                <CardContent className="p-4">
                   <div className="flex flex-col items-center text-center">
                     <div className="relative mb-3">
                       <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-gray-200 bg-gray-100">
@@ -403,9 +396,9 @@ export default function MyProfile() {
             {/* Center panel - Tabbed */}
             <main>
               <Card className="liquid-glass-card rounded-xl">
-                <CardContent className="p-6">
+                <CardContent className="p-4">
                   {/* Tab Bar */}
-                  <div className="mb-6 flex gap-1 border-b border-gray-200/30">
+                  <div className="mb-4 flex gap-1 border-b border-gray-200/30">
                     {[
                       { key: 'personal', label: 'Personal Details' },
                       { key: 'skills', label: 'Skills' },
@@ -426,7 +419,7 @@ export default function MyProfile() {
                       >
                         <span className="relative z-10">{tab.label}</span>
                         {activeTab === tab.key && (
-                          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 z-20 rounded-full" />
+                          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-red-700 via-red-600 to-red-800 z-20 rounded-full" />
                         )}
                       </button>
                     ))}
@@ -436,10 +429,10 @@ export default function MyProfile() {
                   <div className="relative" style={{ minHeight: '500px' }}>
                       {/* Personal Details Tab */}
                       {activeTab === 'personal' && (
-                        <div className="space-y-6">
+                        <div className="space-y-4">
                           {/* About Section */}
                           <div>
-                            <div className="mb-4 flex items-center justify-between">
+                            <div className="mb-3 flex items-center justify-between">
                               <h3 className="text-lg font-bold text-gray-900">About</h3>
                               {canEdit && (
                                 <Button
@@ -459,7 +452,7 @@ export default function MyProfile() {
                               <p className="text-sm text-gray-400">Loading about section…</p>
                             ) : aboutEditing ? (
                               <form
-                                className="space-y-4"
+                                className="space-y-3"
                                 onSubmit={async (e) => {
                                   e.preventDefault();
                                   if (!canEdit) return;
@@ -573,7 +566,7 @@ export default function MyProfile() {
                           </div>
 
                           {/* Personal Info Grid */}
-                          <div className="grid gap-5 border-t border-gray-100 pt-6 md:grid-cols-2">
+                          <div className="grid gap-4 border-t border-gray-100 pt-4 md:grid-cols-2">
                             <div className="space-y-4">
                               <div>
                                 <p className="text-xs font-semibold text-gray-600">Employee ID</p>

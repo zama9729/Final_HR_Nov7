@@ -97,10 +97,8 @@ export function Notifications() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:text-sky-300 dark:hover:text-sky-200 dark:hover:bg-slate-800/60 transition-colors"
+        <button
+          className="relative h-9 w-9 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
         >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
@@ -111,7 +109,7 @@ export function Notifications() {
               {unreadCount}
             </Badge>
           )}
-        </Button>
+        </button>
       </PopoverTrigger>
       <PopoverContent className="w-80" align="end">
         <div className="space-y-2">

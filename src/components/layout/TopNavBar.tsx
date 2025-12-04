@@ -397,9 +397,9 @@ export function TopNavBar() {
 
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="ghost" className="h-9 w-9 p-0 text-slate-700 hover:text-slate-900 liquid-glass-nav-item">
-                  <span className={`h-3 w-3 rounded-full border border-slate-300 ${getPresenceDotGlow(presenceStatus)}`} />
-                </Button>
+                <button className="h-9 w-9 p-0 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none">
+                  <span className={`h-3 w-3 rounded-full ${getPresenceDotGlow(presenceStatus)}`} />
+                </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-56 p-2 liquid-glass-dropdown">
                 <div className="space-y-1">
@@ -410,14 +410,14 @@ export function TopNavBar() {
                       key={status}
                       onClick={() => handlePresenceChange(status)}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm liquid-glass-dropdown-item ${presenceStatus === status
-                          ? 'bg-blue-50/60 text-blue-700'
+                          ? 'bg-red-50/60 text-red-700'
                           : 'text-gray-700'
                         }`}
                     >
                       <span className={`h-2.5 w-2.5 rounded-full border border-white/40 ${getPresenceDotGlow(status)}`} />
                       <span>{getPresenceLabel(status)}</span>
                       {presenceStatus === status && (
-                        <span className="ml-auto text-xs text-blue-600">✓</span>
+                        <span className="ml-auto text-xs text-red-600">✓</span>
                       )}
                     </button>
                   ))}
@@ -427,14 +427,14 @@ export function TopNavBar() {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="gap-2 h-9 px-2 text-slate-700 hover:text-slate-900 liquid-glass-nav-item">
-                  <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-400/20 via-indigo-400/20 to-purple-400/20 backdrop-blur-sm border border-slate-200 flex items-center justify-center">
+                <button className="gap-2 h-9 px-2 flex items-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none">
+                  <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-400/20 via-indigo-400/20 to-purple-400/20 backdrop-blur-sm flex items-center justify-center">
                     <User className="h-4 w-4 text-slate-700" />
                   </div>
                   <span className="hidden lg:inline-block text-sm font-medium">
                     {getRoleLabel(userRole)}
                   </span>
-                </Button>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48 liquid-glass-dropdown">
                 <DropdownMenuLabel className="text-sm font-semibold">My Account</DropdownMenuLabel>

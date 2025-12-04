@@ -234,18 +234,17 @@ export function CalendarPanel() {
               type="single"
               value={viewLevel}
               onValueChange={(val) => val && setViewLevel(val as 'employee' | 'organization')}
-              className="rounded-lg border border-gray-200 bg-white px-1 shadow-sm"
             >
               <ToggleGroupItem
                 value="employee"
-                className="rounded-md px-4 text-sm font-medium data-[state=on]:bg-gray-900 data-[state=on]:text-white"
+                className="rounded-md px-4 text-sm font-medium data-[state=on]:liquid-glass-nav-item-active data-[state=on]:text-gray-900"
               >
                 My calendar
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="organization"
                 disabled={!privilegedRoles.has(userRole || '')}
-                className="rounded-md px-4 text-sm font-medium data-[state=on]:bg-gray-900 data-[state=on]:text-white disabled:opacity-40"
+                className="rounded-md px-4 text-sm font-medium data-[state=on]:liquid-glass-nav-item-active data-[state=on]:text-gray-900 disabled:opacity-40"
               >
                 Organization
               </ToggleGroupItem>

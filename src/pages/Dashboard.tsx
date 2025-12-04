@@ -688,9 +688,9 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-blue-200/60 dark:border-blue-500/30 bg-blue-50/80 dark:bg-blue-500/10 p-4 flex items-center justify-between gap-4">
+              <div className="rounded-2xl border border-gray-200/60 dark:border-gray-500/30 bg-gray-50/80 dark:bg-gray-500/10 p-4 flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                  <p className="text-xs uppercase tracking-wide text-gray-600 dark:text-gray-300">
                     {clockStatus?.is_clocked_in ? 'Clocked in since' : 'You are off the clock'}
                   </p>
                   <p className="text-lg font-semibold text-slate-900 dark:text-white">
@@ -702,7 +702,7 @@ export default function Dashboard() {
                 <Button
                   onClick={handleClockButtonClick}
                   disabled={clockActionLoading || clockStatusLoading || !isClockFeatureEnabled}
-                  className="min-w-[110px] bg-blue-600 hover:bg-blue-700 text-white"
+                  className="min-w-[110px]"
                 >
                   {clockActionLoading ? (
                     <>
@@ -838,7 +838,7 @@ export default function Dashboard() {
                 )}
                 <Button
                   onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/calendar')}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)]"
+                  className="w-full"
                 >
                   {isEmployee ? 'View My Shifts' : 'View Calendar'}
                 </Button>
@@ -856,7 +856,7 @@ export default function Dashboard() {
                 <Briefcase className="h-5 w-5 text-primary" />
                 My Projects
               </CardTitle>
-              <Link to="/projects" className="text-sm text-blue-600 hover:underline">
+                <Link to="/projects" className="text-sm text-red-600 hover:underline">
                 View All
               </Link>
             </CardHeader>
@@ -890,7 +890,7 @@ export default function Dashboard() {
                 Announcements
               </CardTitle>
               {(userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') && (
-                <Link to="/announcements" className="text-sm text-blue-600 hover:underline">
+                <Link to="/announcements" className="text-sm text-red-600 hover:underline">
                   View All
                 </Link>
               )}
@@ -931,7 +931,7 @@ export default function Dashboard() {
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Activity className="h-5 w-5 text-blue-600" />
+                <Activity className="h-5 w-5 text-red-600" />
                 Attendance Trends
               </CardTitle>
             </CardHeader>
@@ -939,7 +939,7 @@ export default function Dashboard() {
               {loadingTrends ? (
                 <div className="h-[200px] flex items-center justify-center text-muted-foreground">
                   <div className="flex items-center gap-2">
-                    <div className="h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    <div className="h-4 w-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
                     Loading trends...
                   </div>
                 </div>
