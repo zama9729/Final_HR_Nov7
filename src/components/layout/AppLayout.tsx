@@ -17,7 +17,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     <div className="flex min-h-screen w-full flex-col">
       <TopNavBar />
       {showSetupBanner && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="fixed top-16 left-0 right-0 z-40 bg-amber-50 border-b border-amber-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-amber-900">Finish organization setup</p>
             <p className="text-sm text-amber-800">Complete the guided wizard to unlock the dashboard.</p>
@@ -27,6 +27,8 @@ export function AppLayout({ children }: AppLayoutProps) {
           </Button>
         </div>
       )}
+      {/* Spacer to account for fixed header */}
+      <div className={`${showSetupBanner ? 'h-32' : 'h-16'}`}></div>
       <main className="flex-1 p-2 lg:p-3 bg-muted/30 overflow-auto scroll-smooth">
         <div className="max-w-full">
           {children}

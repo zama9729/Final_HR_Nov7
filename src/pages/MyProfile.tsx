@@ -305,7 +305,7 @@ export default function MyProfile() {
           <div className="grid gap-5 lg:grid-cols-[260px,minmax(0,1fr),280px]">
             {/* Left sidebar */}
             <aside className="space-y-4">
-              <Card className="glass-card glass-card-hover rounded-xl">
+              <Card className="liquid-glass-card rounded-xl">
                 <CardContent className="p-5">
                   <div className="flex flex-col items-center text-center">
                     <div className="relative mb-3">
@@ -402,10 +402,10 @@ export default function MyProfile() {
 
             {/* Center panel - Tabbed */}
             <main>
-              <Card className="glass-card rounded-xl">
+              <Card className="liquid-glass-card rounded-xl">
                 <CardContent className="p-6">
                   {/* Tab Bar */}
-                  <div className="mb-6 flex gap-1 border-b border-gray-200/50">
+                  <div className="mb-6 flex gap-1 border-b border-gray-200/30">
                     {[
                       { key: 'personal', label: 'Personal Details' },
                       { key: 'skills', label: 'Skills' },
@@ -418,15 +418,15 @@ export default function MyProfile() {
                         key={tab.key}
                         type="button"
                         onClick={() => handleTabChange(tab.key as any)}
-                        className={`relative px-4 py-2.5 text-sm font-medium transition-all duration-500 liquid-glass-tab ${
+                        className={`relative px-4 py-2.5 text-sm font-medium liquid-glass-nav-item rounded-lg ${
                           activeTab === tab.key
-                            ? 'liquid-glass-tab-active text-gray-900'
-                            : 'text-gray-500 hover:text-gray-700'
+                            ? 'liquid-glass-nav-item-active text-gray-900'
+                            : 'text-gray-600 hover:text-gray-900'
                         }`}
                       >
                         <span className="relative z-10">{tab.label}</span>
                         {activeTab === tab.key && (
-                          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-900 z-20" />
+                          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 z-20 rounded-full" />
                         )}
                       </button>
                     ))}
@@ -736,7 +736,7 @@ export default function MyProfile() {
 
             {/* Right sidebar */}
             <aside>
-              <Card className="glass-card glass-card-hover flex h-full flex-col rounded-xl">
+              <Card className="liquid-glass-card flex h-full flex-col rounded-xl">
                 <CardContent className="flex h-full flex-col p-5">
                   <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-sm font-bold text-gray-900">Reporting team</h3>
@@ -773,7 +773,7 @@ export default function MyProfile() {
                         <button
                           key={member.id}
                           type="button"
-                          className="glass-card glass-card-hover flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-xs"
+                          className="liquid-glass-card flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-xs"
                         >
                           <div className="flex items-center gap-2.5">
                             <div className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-[11px] font-semibold text-gray-700">

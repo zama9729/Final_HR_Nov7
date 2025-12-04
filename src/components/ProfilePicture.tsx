@@ -50,8 +50,12 @@ export function ProfilePicture({ userId, src, className, alt }: ProfilePicturePr
         } else {
           setPresignedUrl(src); // Fallback to original URL
         }
-      } catch (error) {
-        console.error('Failed to get presigned URL for profile picture:', error);
+      } catch (error: any) {
+        // Silently handle 404 or other errors - just use the original URL
+        // Only log non-404 errors to avoid console spam
+        if (error?.message && !error.message.includes('not found') && !error.message.includes('404')) {
+          console.error('Failed to get presigned URL for profile picture:', error);
+        }
         setPresignedUrl(src); // Fallback to original URL
       } finally {
         setLoading(false);

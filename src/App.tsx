@@ -113,6 +113,31 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      {/* SVG Filters for Liquid Glass Distortion Effect */}
+      <svg className="liquid-filters" aria-hidden="true">
+        <defs>
+          {/* Turbulence for liquid distortion */}
+          <filter id="liquid-distortion" x="0%" y="0%" width="100%" height="100%">
+            <feTurbulence
+              baseFrequency="0.02 0.03"
+              numOctaves="3"
+              result="turbulence"
+              seed="2"
+            />
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="turbulence"
+              scale="2"
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+          {/* Subtle blur for glass effect */}
+          <filter id="glass-blur">
+            <feGaussianBlur stdDeviation="1" />
+          </filter>
+        </defs>
+      </svg>
       <BrowserRouter>
         <AuthProvider>
           <OrgSetupProvider>

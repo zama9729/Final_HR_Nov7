@@ -256,9 +256,9 @@ export function TopNavBar() {
             openPayrollSso();
             setMobileMenuOpen(false);
           }}
-          className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-300 hover:bg-white/40 hover:translate-y-[-1px] hover:shadow-[0_2px_8px_rgba(15,23,42,0.08)] ${
+          className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm liquid-glass-nav-item ${
             isActive 
-              ? 'bg-white/60 text-slate-900 font-medium shadow-sm backdrop-blur-md border border-white/40' 
+              ? 'liquid-glass-nav-item-active text-slate-900 font-medium' 
               : 'text-slate-700'
           }`}
         >
@@ -281,9 +281,9 @@ export function TopNavBar() {
           setMobileMenuOpen(false);
         }}
         className={({ isActive: navIsActive }) =>
-          `w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-300 hover:bg-white/40 hover:translate-y-[-1px] hover:shadow-[0_2px_8px_rgba(15,23,42,0.08)] ${
+          `w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm liquid-glass-nav-item ${
             navIsActive || isActive 
-              ? 'bg-white/60 text-slate-900 font-medium shadow-sm backdrop-blur-md border border-white/40' 
+              ? 'liquid-glass-nav-item-active text-slate-900 font-medium' 
               : 'text-slate-700'
           }`
         }
@@ -304,14 +304,14 @@ export function TopNavBar() {
 
   return (
     <>
-      <header className="sticky top-0 z-50 w-full bg-gradient-to-r from-blue-50/95 via-indigo-50/90 to-purple-50/95 backdrop-blur-2xl border-b border-white/40 shadow-[0_4px_24px_rgba(15,23,42,0.08)]">
+      <header className="fixed top-0 left-0 right-0 z-50 w-full liquid-glass-navbar">
         <div className="flex h-16 items-center justify-between px-4 lg:px-8 gap-4">
           {/* Logo & App Name - Left */}
           <div className="flex items-center gap-3 shrink-0">
             {/* Mobile Menu Button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="lg:hidden p-2 rounded-lg text-slate-700 transition-all duration-300 hover:bg-white/40 hover:translate-y-[-1px] hover:shadow-[0_2px_8px_rgba(15,23,42,0.08)]"
+              className="lg:hidden p-2 rounded-lg text-slate-700 liquid-glass-nav-item"
               aria-label="Toggle menu"
             >
               {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -319,25 +319,19 @@ export function TopNavBar() {
 
             <NavLink
               to="/dashboard"
-              className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center relative group transition-all duration-300 hover:translate-y-[-1px] hover:shadow-[0_4px_12px_rgba(15,23,42,0.12)]"
+              className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center relative group"
               title={organization?.name || "Dashboard"}
             >
               {organization?.logo_url ? (
-                <div className="relative">
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-400/20 via-indigo-400/20 to-purple-400/20 blur-md rounded-lg transition-opacity group-hover:opacity-80"></div>
-                  <img
-                    src={organization.logo_url}
-                    alt={organization.name || "Organization"}
-                    className="relative max-h-10 w-auto object-contain cursor-pointer transition-all duration-300"
-                  />
-                </div>
+                <img
+                  src={organization.logo_url}
+                  alt={organization.name || "Organization"}
+                  className="max-h-10 w-auto object-contain"
+                />
               ) : (
-                <div className="relative">
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-400/30 via-indigo-400/30 to-purple-400/30 blur-md rounded-lg transition-opacity group-hover:opacity-80"></div>
-                  <span className="relative px-2 text-base font-semibold bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent cursor-pointer transition-all duration-300">
-                    {getLogoText()}
-                  </span>
-                </div>
+                <span className="px-2 text-base font-semibold bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                  {getLogoText()}
+                </span>
               )}
               {/* Tooltip on hover */}
               {organization?.name && (
@@ -361,17 +355,17 @@ export function TopNavBar() {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 hover:translate-y-[-1px] hover:shadow-[0_4px_12px_rgba(15,23,42,0.12)] ${
+                      className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium liquid-glass-nav-item ${
                         isActive
-                          ? 'bg-white/60 text-slate-900 shadow-sm backdrop-blur-md border border-white/40'
-                          : 'text-slate-700 hover:bg-white/40 hover:text-slate-900 backdrop-blur-sm'
+                          ? 'liquid-glass-nav-item-active text-slate-900'
+                          : 'text-slate-700 hover:text-slate-900'
                       }`}
                     >
                       <span>{group.label}</span>
                       <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-64 max-h-[80vh] overflow-y-auto bg-white/95 backdrop-blur-xl border border-white/40 shadow-[0_8px_32px_rgba(15,23,42,0.12)]">
+                  <DropdownMenuContent align="start" className="w-64 max-h-[80vh] overflow-y-auto liquid-glass-dropdown">
                     {rendered.length > 0 ? rendered : <div className="px-4 py-2 text-sm text-slate-500">No items</div>}
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -382,10 +376,10 @@ export function TopNavBar() {
               <NavLink
                 to="/settings"
                 className={({ isActive }) =>
-                  `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 hover:translate-y-[-1px] hover:shadow-[0_4px_12px_rgba(15,23,42,0.12)] ${
+                  `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium liquid-glass-nav-item ${
                     isActive 
-                      ? 'bg-white/60 text-slate-900 shadow-sm backdrop-blur-md border border-white/40'
-                      : 'text-slate-700 hover:bg-white/40 hover:text-slate-900 backdrop-blur-sm'
+                      ? 'liquid-glass-nav-item-active text-slate-900'
+                      : 'text-slate-700 hover:text-slate-900'
                   }`
                 }
               >
@@ -403,11 +397,11 @@ export function TopNavBar() {
 
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="ghost" className="h-9 w-9 p-0 text-slate-700 hover:text-slate-900 hover:bg-white/50 transition-all duration-300 hover:translate-y-[-1px] hover:shadow-[0_4px_12px_rgba(15,23,42,0.12)]">
+                <Button variant="ghost" className="h-9 w-9 p-0 text-slate-700 hover:text-slate-900 liquid-glass-nav-item">
                   <span className={`h-3 w-3 rounded-full border border-slate-300 ${getPresenceDotGlow(presenceStatus)}`} />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-56 p-2 bg-white/95 backdrop-blur-xl border border-white/40 shadow-[0_8px_32px_rgba(15,23,42,0.12)]">
+              <PopoverContent align="end" className="w-56 p-2 liquid-glass-dropdown">
                 <div className="space-y-1">
                   <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Presence Status</div>
                   <DropdownMenuSeparator />
@@ -415,9 +409,9 @@ export function TopNavBar() {
                     <button
                       key={status}
                       onClick={() => handlePresenceChange(status)}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${presenceStatus === status
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'hover:bg-blue-50 text-gray-700'
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm liquid-glass-dropdown-item ${presenceStatus === status
+                          ? 'bg-blue-50/60 text-blue-700'
+                          : 'text-gray-700'
                         }`}
                     >
                       <span className={`h-2.5 w-2.5 rounded-full border border-white/40 ${getPresenceDotGlow(status)}`} />
@@ -433,7 +427,7 @@ export function TopNavBar() {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="gap-2 h-9 px-2 text-slate-700 hover:text-slate-900 hover:bg-white/50 transition-all duration-300 hover:translate-y-[-1px] hover:shadow-[0_4px_12px_rgba(15,23,42,0.12)]">
+                <Button variant="ghost" className="gap-2 h-9 px-2 text-slate-700 hover:text-slate-900 liquid-glass-nav-item">
                   <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-400/20 via-indigo-400/20 to-purple-400/20 backdrop-blur-sm border border-slate-200 flex items-center justify-center">
                     <User className="h-4 w-4 text-slate-700" />
                   </div>
@@ -442,19 +436,19 @@ export function TopNavBar() {
                   </span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 bg-white/95 backdrop-blur-xl border border-white/40 shadow-[0_8px_32px_rgba(15,23,42,0.12)]">
+              <DropdownMenuContent align="end" className="w-48 liquid-glass-dropdown">
                 <DropdownMenuLabel className="text-sm font-semibold">My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => navigate('/my/profile')}
-                  className="text-sm"
+                  className="text-sm liquid-glass-dropdown-item"
                 >
                   <User className="mr-2 h-4 w-4" />
                   Profile
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={handleLogout}
-                  className="text-sm"
+                  className="text-sm liquid-glass-dropdown-item"
                 >
                   <LogOut className="mr-2 h-4 w-4" />
                   Log out
@@ -468,7 +462,7 @@ export function TopNavBar() {
         {mobileMenuOpen && (
           <div
             ref={mobileMenuRef}
-            className="lg:hidden absolute top-full left-0 right-0 bg-white/95 backdrop-blur-2xl border-b border-white/40 shadow-[0_8px_32px_rgba(15,23,42,0.12)] max-h-[calc(100vh-4rem)] overflow-y-auto z-50"
+            className="lg:hidden absolute top-full left-0 right-0 liquid-glass-dropdown border-b max-h-[calc(100vh-4rem)] overflow-y-auto z-50"
           >
             <div className="p-4 space-y-2">
               {filteredGroups.map((group) => {
@@ -485,9 +479,9 @@ export function TopNavBar() {
                           openPayrollSso();
                           setMobileMenuOpen(false);
                         }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-300 hover:bg-white/40 hover:translate-y-[-1px] hover:shadow-[0_2px_8px_rgba(15,23,42,0.08)] ${
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm liquid-glass-nav-item ${
                           isActive 
-                            ? 'bg-white/60 text-slate-900 font-medium shadow-sm backdrop-blur-md border border-white/40' 
+                            ? 'liquid-glass-nav-item-active text-slate-900 font-medium' 
                             : 'text-slate-700'
                         }`}
                       >
@@ -510,9 +504,9 @@ export function TopNavBar() {
                         setMobileMenuOpen(false);
                       }}
                         className={({ isActive: navIsActive }) =>
-                          `w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-300 hover:bg-white/40 hover:translate-y-[-1px] hover:shadow-[0_2px_8px_rgba(15,23,42,0.08)] ${
+                          `w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm liquid-glass-nav-item ${
                             navIsActive || isActive 
-                              ? 'bg-white/60 text-slate-900 font-medium shadow-sm backdrop-blur-md border border-white/40' 
+                              ? 'liquid-glass-nav-item-active text-slate-900 font-medium' 
                               : 'text-slate-700'
                           }`
                         }
@@ -546,8 +540,8 @@ export function TopNavBar() {
                   to="/settings"
                   onClick={() => setMobileMenuOpen(false)}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-3 rounded-lg text-sm transition-all ${
-                      isActive ? 'bg-white/60 text-slate-900 font-medium shadow-sm backdrop-blur-md border border-white/40' : 'hover:bg-white/40 hover:translate-y-[-1px] hover:shadow-[0_2px_8px_rgba(15,23,42,0.08)] text-slate-700'
+                    `flex items-center gap-3 px-4 py-3 rounded-lg text-sm liquid-glass-nav-item ${
+                      isActive ? 'liquid-glass-nav-item-active text-slate-900 font-medium' : 'text-slate-700'
                     }`
                   }
                 >
