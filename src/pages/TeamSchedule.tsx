@@ -80,6 +80,7 @@ export default function TeamSchedule() {
   }>({});
   const [newEventTitle, setNewEventTitle] = useState("");
   const [newEventType, setNewEventType] = useState<EventType>("event");
+  const [newEventDate, setNewEventDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [newEventStartTime, setNewEventStartTime] = useState("09:00");
   const [newEventEndTime, setNewEventEndTime] = useState("10:00");
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
@@ -354,6 +355,7 @@ export default function TeamSchedule() {
     setNewEventDefaults(d);
     setNewEventTitle("");
     setNewEventType("event");
+    setNewEventDate(d.date || format(new Date(), "yyyy-MM-dd"));
     setNewEventStartTime("09:00");
     setNewEventEndTime("10:00");
     // Pre-select employee (for row-level Add) when manager-like
@@ -371,7 +373,7 @@ export default function TeamSchedule() {
       return;
     }
 
-    const baseDate = newEventDefaults.date || format(new Date(), "yyyy-MM-dd");
+    const baseDate = newEventDate || newEventDefaults.date || format(new Date(), "yyyy-MM-dd");
 
     // If manager-like and specific employees have been selected, create one entry per employee
     if (isManagerLike && selectedEmployeeIds.length > 0) {
@@ -711,7 +713,7 @@ export default function TeamSchedule() {
               This adds a local schedule entry. Backend saving and drag-to-resize will come in a later step.
             </DialogDescription>
           </DialogHeader>
-          <div className="px-4 py-3 space-y-3">
+          <div className="px-4 py-3 space-y-4 max-h-[70vh] overflow-y-auto">
             <div className="space-y-1">
               <Label htmlFor="event-title">Title</Label>
               <Input
@@ -720,6 +722,35 @@ export default function TeamSchedule() {
                 onChange={(e) => setNewEventTitle(e.target.value)}
                 placeholder="e.g. Sprint planning, client call, release"
               />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="event-date">Date</Label>
+              <Input
+                id="event-date"
+                type="date"
+                value={newEventDate}
+                onChange={(e) => setNewEventDate(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="event-start-time">Start time</Label>
+                <Input
+                  id="event-start-time"
+                  type="time"
+                  value={newEventStartTime}
+                  onChange={(e) => setNewEventStartTime(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="event-end-time">End time</Label>
+                <Input
+                  id="event-end-time"
+                  type="time"
+                  value={newEventEndTime}
+                  onChange={(e) => setNewEventEndTime(e.target.value)}
+                />
+              </div>
             </div>
             {isManagerLike && visibleMembers.length > 0 && (
               <div className="space-y-2">
@@ -752,26 +783,6 @@ export default function TeamSchedule() {
                 </div>
               </div>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="event-start-time">Start time</Label>
-                <Input
-                  id="event-start-time"
-                  type="time"
-                  value={newEventStartTime}
-                  onChange={(e) => setNewEventStartTime(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="event-end-time">End time</Label>
-                <Input
-                  id="event-end-time"
-                  type="time"
-                  value={newEventEndTime}
-                  onChange={(e) => setNewEventEndTime(e.target.value)}
-                />
-              </div>
-            </div>
             <div className="space-y-1">
               <Label htmlFor="event-type">Type</Label>
               <Select

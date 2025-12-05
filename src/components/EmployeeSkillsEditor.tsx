@@ -130,9 +130,9 @@ export default function EmployeeSkillsEditor({ employeeId, canEdit = false }: { 
   return (
     <div className="space-y-6">
       {canEdit && (
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader><CardTitle>{editingId ? 'Edit Skill' : 'Add Skill'}</CardTitle></CardHeader>
-          <CardContent className="flex gap-2 items-center flex-wrap">
+          <CardContent className="flex flex-wrap items-center gap-3 sm:gap-4">
             <Input 
               placeholder="Skill name" 
               value={form.name} 
@@ -154,11 +154,11 @@ export default function EmployeeSkillsEditor({ employeeId, canEdit = false }: { 
             />
             {editingId ? (
               <>
-                <Button onClick={saveEdit}>Save</Button>
-                <Button variant="outline" onClick={cancelEdit}>Cancel</Button>
+                <Button onClick={saveEdit} className="shadow-none hover:shadow-none">Save</Button>
+                <Button variant="outline" onClick={cancelEdit} className="shadow-none hover:shadow-none">Cancel</Button>
               </>
             ) : (
-              <Button onClick={addSkill}>Add</Button>
+              <Button onClick={addSkill} className="shadow-none hover:shadow-none">Add</Button>
             )}
           </CardContent>
         </Card>
