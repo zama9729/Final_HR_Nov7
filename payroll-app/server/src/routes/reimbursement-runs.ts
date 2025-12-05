@@ -397,4 +397,3 @@ router.get("/:id/export/bank-file", async (req: Request, res: Response) => {
 });
 
 export default router;
-
