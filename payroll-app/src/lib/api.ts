@@ -230,6 +230,32 @@ export const api = {
     cycles: () =>
       client.get("/api/payroll-cycles"),
   },
+
+  // --- Audit Logs ---
+  auditLogs: {
+    get: (params?: { entity_type?: string; limit?: number; action?: string; from?: string; to?: string }) => {
+      const queryParams = new URLSearchParams();
+      if (params?.entity_type) queryParams.set("entity_type", params.entity_type);
+      if (params?.limit) queryParams.set("limit", params.limit.toString());
+      if (params?.action) queryParams.set("action", params.action);
+      if (params?.from) queryParams.set("from", params.from);
+      if (params?.to) queryParams.set("to", params.to);
+      const queryString = queryParams.toString();
+      return client.get<Array<{
+        id: string;
+        actor: { id: string; email: string; first_name: string; last_name: string } | null;
+        actor_role: string;
+        action: string;
+        entity_type: string;
+        entity_id: string | null;
+        reason: string | null;
+        details: any;
+        diff: any;
+        scope: string | null;
+        created_at: string;
+      }>>(`/api/audit-logs${queryString ? `?${queryString}` : ""}`);
+    },
+  },
   
   // --- Data Endpoints ---
   employees: {

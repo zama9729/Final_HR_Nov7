@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Calendar, Settings, Receipt } from "lucide-react";
+import { ArrowLeft, Calendar, Settings, Receipt, FileText } from "lucide-react";
 // Use relative paths assuming /pages is not in /src
 import { api } from "../lib/api";
 import { CreatePayrollDialog } from "@/components/payroll/CreatePayrollDialog";
 import { PayrollCycleList } from "@/components/payroll/PayrollCycleList";
 import { ReimbursementRunList } from "@/components/reimbursements/ReimbursementRunList";
+import { PayrollAuditLogs } from "@/components/payroll/PayrollAuditLogs";
 import { PayrollLayout } from "@/components/layout/PayrollLayout";
 import { toast } from "sonner";
 
@@ -17,6 +19,24 @@ const Payroll = () => {
   const [cycles, setCycles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdmin] = useState(true);
+
+  // Fetch user profile to check role for audit logs access
+  const { data: profileData } = useQuery({
+    queryKey: ["profile"],
+    queryFn: async () => {
+      const result = await api.me.profile();
+      return result;
+    },
+  });
+
+  // Check if user has access to audit logs (ceo, hr, or accountant)
+  const canViewAuditLogs = () => {
+    if (!profileData?.profile) return false;
+    const hrRole = profileData.profile.hr_role?.toLowerCase();
+    const payrollRole = profileData.profile.payroll_role?.toLowerCase();
+    const allowedRoles = ["ceo", "hr", "accountant"];
+    return allowedRoles.includes(hrRole || "") || allowedRoles.includes(payrollRole || "");
+  };
 
   const fetchCycles = async () => {
     setLoading(true);
@@ -38,7 +58,7 @@ const Payroll = () => {
     <PayrollLayout>
       <div className="container mx-auto px-4 py-8">
         <div className="mb-6">
-          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="mb-2 liquid-glass-nav-item">
+          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="mb-2">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Dashboard
           </Button>
@@ -54,7 +74,7 @@ const Payroll = () => {
                   sessionStorage.setItem("payroll_last_screen", "/payroll/settings");
                   navigate("/payroll/settings");
                 }}
-                className="liquid-glass-nav-item"
+                className="bg-background border-border hover:bg-accent"
               >
                 <Settings className="mr-2 h-4 w-4" />
                 Configure Payroll
@@ -78,7 +98,7 @@ const Payroll = () => {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="payroll" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className={`grid w-full ${canViewAuditLogs() ? 'grid-cols-3' : 'grid-cols-2'}`}>
                 <TabsTrigger value="payroll">
                   <Calendar className="mr-2 h-4 w-4" />
                   Payroll Cycles
@@ -87,6 +107,12 @@ const Payroll = () => {
                   <Receipt className="mr-2 h-4 w-4" />
                   Expense Payouts
                 </TabsTrigger>
+                {canViewAuditLogs() && (
+                  <TabsTrigger value="audit-logs">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Audit Logs
+                  </TabsTrigger>
+                )}
               </TabsList>
               <TabsContent value="payroll" className="mt-4">
                 {loading ? (
@@ -101,6 +127,11 @@ const Payroll = () => {
               <TabsContent value="expenses" className="mt-4">
                 <ReimbursementRunList onRefresh={() => {}} />
               </TabsContent>
+              {canViewAuditLogs() && (
+                <TabsContent value="audit-logs" className="mt-4">
+                  <PayrollAuditLogs />
+                </TabsContent>
+              )}
             </Tabs>
           </CardContent>
         </Card>

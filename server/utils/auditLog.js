@@ -182,8 +182,19 @@ export async function getAuditLogs(filters = {}) {
     }
 
     if (entityType) {
-      conditions.push(`al.entity_type = $${paramIndex++}`);
-      params.push(entityType);
+      // Support comma-separated entity types (e.g., "payroll_run,payroll_run_adjustment")
+      if (entityType.includes(',')) {
+        const entityTypes = entityType.split(',').map(t => t.trim()).filter(Boolean);
+        if (entityTypes.length > 0) {
+          const placeholders = entityTypes.map((_, i) => `$${paramIndex + i}`).join(', ');
+          conditions.push(`al.entity_type IN (${placeholders})`);
+          params.push(...entityTypes);
+          paramIndex += entityTypes.length;
+        }
+      } else {
+        conditions.push(`al.entity_type = $${paramIndex++}`);
+        params.push(entityType);
+      }
     }
 
     if (entityId) {
