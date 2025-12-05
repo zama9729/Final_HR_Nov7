@@ -276,8 +276,8 @@ export async function generateRosterRun({
         const scheduleResult = await client.query(
           `INSERT INTO generated_schedules (
               tenant_id, week_start_date, week_end_date, rule_set_id, algorithm_used,
-              status, score, telemetry, created_by
-            ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7::jsonb, $8)
+              status, score, telemetry, created_by, team_id
+            ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7::jsonb, $8, $9)
             RETURNING id`,
           [
             tenantId,
@@ -287,7 +287,8 @@ export async function generateRosterRun({
             'score_rank',
             0,
             JSON.stringify(result.telemetry || {}),
-            requestedBy
+            requestedBy,
+            teamId || null
           ]
         );
         const scheduleId = scheduleResult.rows[0].id;

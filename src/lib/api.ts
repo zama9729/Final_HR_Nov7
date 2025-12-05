@@ -1062,32 +1062,24 @@ class ApiClient {
   async uploadAttendance(file: File, mapping?: any) {
     const formData = new FormData();
     formData.append('file', file);
-<<<<<<< Updated upstream
-    if (mapping) {
-      formData.append('mapping', JSON.stringify(mapping));
-=======
-
     // Support both old format (just mapping) and new format (full ETL config)
-    if (etlConfig) {
-      if (etlConfig.mapping) {
-        formData.append('mapping', JSON.stringify(etlConfig.mapping));
-      } else if (typeof etlConfig === 'object' && !etlConfig.transformations) {
-        // Old format - just mapping object
-        formData.append('mapping', JSON.stringify(etlConfig));
-      }
+    const etlConfig = mapping; // Assuming mapping argument holds the config in new usage, or we need to adjust signature. 
+    // Wait, the signature is (file, mapping). 
+    // The stashed code uses 'etlConfig' but the argument is 'mapping'.
+    // I should probably check if 'mapping' is the config.
 
-      if (etlConfig.transformations && Array.isArray(etlConfig.transformations)) {
-        formData.append('transformations', JSON.stringify(etlConfig.transformations));
+    if (mapping) {
+      if (mapping.mapping || mapping.transformations) {
+        // It's an ETL config
+        const config = mapping;
+        if (config.mapping) formData.append('mapping', JSON.stringify(config.mapping));
+        if (config.transformations) formData.append('transformations', JSON.stringify(config.transformations));
+        if (config.validations) formData.append('validations', JSON.stringify(config.validations));
+        if (typeof config.matrixDetected === 'boolean') formData.append('matrixDetected', JSON.stringify(config.matrixDetected));
+      } else {
+        // Old format
+        formData.append('mapping', JSON.stringify(mapping));
       }
-
-      if (etlConfig.validations && Array.isArray(etlConfig.validations)) {
-        formData.append('validations', JSON.stringify(etlConfig.validations));
-      }
-
-      if (typeof etlConfig.matrixDetected === 'boolean') {
-        formData.append('matrixDetected', JSON.stringify(etlConfig.matrixDetected));
-      }
->>>>>>> Stashed changes
     }
 
     return this.request('/api/v1/attendance/upload', {
@@ -1369,8 +1361,7 @@ class ApiClient {
     return res?.policies ?? [];
   }
 
-<<<<<<< Updated upstream
-=======
+
   async publishManagedPolicy(id: string, change_note?: string) {
     return this.request(`/api/policy-management/policies/${id}/publish`, {
       method: 'POST',
@@ -1512,7 +1503,7 @@ class ApiClient {
     return await response.blob();
   }
 
->>>>>>> Stashed changes
+
   // Promotion methods
   async getPromotionHealth() {
     return this.request('/api/promotion/health');
@@ -1785,33 +1776,6 @@ class ApiClient {
   }
 
   async getRosterRuns() {
-    return this.request('/api/roster/runs');
-  }
-
-  async startRosterRun(data: {
-    templateId?: string;
-    startDate: string;
-    endDate: string;
-    preserveManualEdits?: boolean;
-    seed?: number | string | null;
-    name?: string;
-    existingScheduleId?: string | null;
-  }) {
-    return this.request('/api/roster/runs', {
-      method: 'POST',
-      body: JSON.stringify({
-        templateId: data.templateId,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        preserveManualEdits: data.preserveManualEdits,
-        seed: data.seed ?? null,
-        name: data.name,
-        existingScheduleId: data.existingScheduleId,
-      }),
-    });
-  }
-
-  async getRosterSchedules(params?: { status?: string; start_date?: string; end_date?: string }) {
     const query = new URLSearchParams();
     if (params?.status) query.append('status', params.status);
     if (params?.start_date) query.append('start_date', params.start_date);
@@ -1880,7 +1844,6 @@ class ApiClient {
       crosses_midnight: boolean;
       is_default: boolean;
       team_id: string;
-      branch_id: string;
       branch_id: string;
     }>
   ) {

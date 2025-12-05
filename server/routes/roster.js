@@ -213,6 +213,7 @@ router.post('/runs', requireRole('hr', 'director', 'ceo', 'admin'), async (req, 
       name,
       requestedBy: req.user.id,
       existingScheduleId,
+      teamId: req.body.teamId,
       // ScoreRank options
       decayRate: req.body.decayRate,
       shiftWeights: req.body.shiftWeights,

@@ -60,6 +60,7 @@ interface RosterSchedule {
   template_name?: string;
   run_summary?: Record<string, any>;
   created_at: string;
+  team_id?: string;
 }
 
 interface RosterSlot {
@@ -169,6 +170,7 @@ export default function ShiftManagement() {
     endDate: "",
     preserveManualEdits: true,
     seed: "",
+    teamId: "",
   });
   const [runContextSchedule, setRunContextSchedule] = useState<string | null>(null);
   const [generateLoading, setGenerateLoading] = useState(false);
@@ -392,6 +394,7 @@ export default function ShiftManagement() {
         endDate: schedule.end_date,
         preserveManualEdits: true,
         seed: schedule.run_summary?.seed ? String(schedule.run_summary.seed) : "",
+        teamId: schedule.team_id || "",
       });
     } else {
       setRunContextSchedule(null);
@@ -401,6 +404,7 @@ export default function ShiftManagement() {
         endDate: "",
         preserveManualEdits: true,
         seed: "",
+        teamId: "",
       });
     }
     setGenerateDialogOpen(true);
@@ -424,6 +428,7 @@ export default function ShiftManagement() {
         preserveManualEdits: generateForm.preserveManualEdits,
         seed: generateForm.seed ? Number(generateForm.seed) : null,
         existingScheduleId: runContextSchedule,
+        teamId: generateForm.teamId || undefined,
       });
       setGenerateDialogOpen(false);
       toast({
