@@ -32,10 +32,21 @@ const Payroll = () => {
   // Check if user has access to audit logs (ceo, hr, or accountant)
   const canViewAuditLogs = () => {
     if (!profileData?.profile) return false;
-    const hrRole = profileData.profile.hr_role?.toLowerCase();
-    const payrollRole = profileData.profile.payroll_role?.toLowerCase();
     const allowedRoles = ["ceo", "hr", "accountant"];
-    return allowedRoles.includes(hrRole || "") || allowedRoles.includes(payrollRole || "");
+    
+    // Check hr_role if it exists
+    const hrRole = profileData.profile.hr_role?.toLowerCase();
+    if (hrRole && allowedRoles.includes(hrRole)) {
+      return true;
+    }
+    
+    // Check payroll_role if it exists
+    const payrollRole = profileData.profile.payroll_role?.toLowerCase();
+    if (payrollRole && allowedRoles.includes(payrollRole)) {
+      return true;
+    }
+    
+    return false;
   };
 
   const fetchCycles = async () => {
