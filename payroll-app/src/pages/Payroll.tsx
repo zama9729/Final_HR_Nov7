@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Calendar, Settings } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowLeft, Calendar, Settings, Receipt } from "lucide-react";
 // Use relative paths assuming /pages is not in /src
 import { api } from "../lib/api";
 import { CreatePayrollDialog } from "@/components/payroll/CreatePayrollDialog";
 import { PayrollCycleList } from "@/components/payroll/PayrollCycleList";
+import { ReimbursementRunList } from "@/components/reimbursements/ReimbursementRunList";
 import { PayrollLayout } from "@/components/layout/PayrollLayout";
 import { toast } from "sonner";
 
@@ -70,19 +72,36 @@ const Payroll = () => {
           <CardHeader>
             <CardTitle className="flex items-center">
               <Calendar className="mr-2 h-5 w-5 text-primary" />
-              Payroll History
+              Payroll & Expense Management
             </CardTitle>
-            <CardDescription>View and manage past and current payroll cycles</CardDescription>
+            <CardDescription>Manage payroll cycles and expense reimbursements</CardDescription>
           </CardHeader>
           <CardContent>
-            {loading ? (
-              <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-                <p className="text-muted-foreground mt-4">Loading payroll cycles...</p>
-              </div>
-            ) : (
-              <PayrollCycleList cycles={cycles} onRefresh={fetchCycles} />
-            )}
+            <Tabs defaultValue="payroll" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="payroll">
+                  <Calendar className="mr-2 h-4 w-4" />
+                  Payroll Cycles
+                </TabsTrigger>
+                <TabsTrigger value="expenses">
+                  <Receipt className="mr-2 h-4 w-4" />
+                  Expense Payouts
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="payroll" className="mt-4">
+                {loading ? (
+                  <div className="text-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                    <p className="text-muted-foreground mt-4">Loading payroll cycles...</p>
+                  </div>
+                ) : (
+                  <PayrollCycleList cycles={cycles} onRefresh={fetchCycles} />
+                )}
+              </TabsContent>
+              <TabsContent value="expenses" className="mt-4">
+                <ReimbursementRunList onRefresh={() => {}} />
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </div>

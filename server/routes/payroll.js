@@ -754,17 +754,8 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
 
       const pfCents = Math.round(pfAmount*100);
 
-      const reimbursementResult = await query(
-        `SELECT COALESCE(SUM(amount), 0) as total_reimbursements
-         FROM employee_reimbursements
-         WHERE employee_id = $1
-           AND org_id = $2
-           AND status = 'approved'
-           AND payroll_run_id IS NULL`,
-        [ts.employee_id, run.tenant_id]
-      );
-      const reimbursementTotal = Number(reimbursementResult.rows[0]?.total_reimbursements || 0);
-      const reimbursementCents = Math.round(reimbursementTotal * 100);
+      // NOTE: Reimbursements are now processed separately via reimbursement_runs
+      // They are no longer included in payroll calculations
 
       let tdsCents = 0;
       try {
@@ -779,7 +770,8 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
       const totalDeductionsCents = tdsCents + pfCents + otherDeductionsCents;
       
       // Step C: Calculate base net pay
-      let baseNetPayCents = grossPayCents - totalDeductionsCents + nonTaxableAdjustmentCents + reimbursementCents;
+      // NOTE: Reimbursements are no longer included in payroll net pay calculation
+      let baseNetPayCents = grossPayCents - totalDeductionsCents + nonTaxableAdjustmentCents;
       
       // Step C: For regular runs, deduct already paid amount from previous off_cycle runs
       const previousPaidCents = alreadyPaidByEmployee.get(ts.employee_id) || 0;
@@ -807,7 +799,6 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
       const metadata = {
         tds_cents: tdsCents,
         pf_cents: pfCents,
-        reimbursement_cents: reimbursementCents,
         non_taxable_adjustments_cents: nonTaxableAdjustmentCents,
         already_paid_cents: previousPaidCents,
       };
@@ -833,18 +824,8 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
         ]
       );
 
-      if (reimbursementCents > 0) {
-        await query(
-          `UPDATE employee_reimbursements
-           SET status = 'paid',
-               payroll_run_id = $1
-           WHERE employee_id = $2
-             AND org_id = $3
-             AND status = 'approved'
-             AND payroll_run_id IS NULL`,
-          [id, ts.employee_id, run.tenant_id]
-        );
-      }
+      // NOTE: Reimbursements are no longer processed in payroll runs
+      // They are handled separately via reimbursement_runs
 
       totalAmount += finalNetPayCents;
       totalEmployees++;

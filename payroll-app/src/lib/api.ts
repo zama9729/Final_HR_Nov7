@@ -591,5 +591,26 @@ export const api = {
     approve: (id: string) => client.post(`/api/v1/reimbursements/${id}/approve`, {}),
     reject: (id: string) => client.post(`/api/v1/reimbursements/${id}/reject`, {}),
   },
+
+  reimbursementRuns: {
+    list: () => client.get<{ runs: any[] }>("/api/v1/reimbursement-runs"),
+    get: (id: string) => client.get<{ run: any; claims: any[] }>(`/api/v1/reimbursement-runs/${id}`),
+    create: (data: { run_date?: string; reference_note?: string }) =>
+      client.post<{ run: any; claims: any[]; summary: { total_claims: number; total_amount: number } }>(
+        "/api/v1/reimbursement-runs",
+        data
+      ),
+    process: (id: string) => client.post(`/api/v1/reimbursement-runs/${id}/process`, {}),
+    exportBankFile: (id: string) => {
+      const url = resolveEndpoint(`/api/v1/reimbursement-runs/${id}/export/bank-file`);
+      return fetch(url, {
+        method: "GET",
+        credentials: "include",
+      }).then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      });
+    },
+  },
 };
 
