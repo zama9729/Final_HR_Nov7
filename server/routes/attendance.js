@@ -5,6 +5,7 @@ import { authenticateToken, requireRole } from '../middleware/auth.js';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { processAttendanceUpload } from '../services/attendance-processor.js';
+import { handlePunchEvent } from '../services/timesheet-realtime.js';
 import { geocodeAddress, reverseGeocode } from '../services/geocoding.js';
 
 const router = express.Router();
@@ -413,15 +414,31 @@ router.post('/upload', authenticateToken, requireRole('hr', 'director', 'ceo', '
       return res.status(403).json({ error: 'No organization found' });
     }
 
-    // Parse mapping config if provided
-    let mappingConfig = null;
-    if (req.body.mapping) {
+    // Parse ETL config if provided (mapping, transformations, validations)
+    let etlConfig = null;
+    if (req.body.mapping || req.body.transformations || req.body.validations || req.body.matrixDetected) {
+      try {
+        etlConfig = {
+          mapping: req.body.mapping ? JSON.parse(req.body.mapping) : null,
+          transformations: req.body.transformations ? JSON.parse(req.body.transformations) : null,
+          validations: req.body.validations ? JSON.parse(req.body.validations) : null,
+          matrixDetected: req.body.matrixDetected ? JSON.parse(req.body.matrixDetected) : false,
+        };
+      } catch (e) {
+        return res.status(400).json({ error: 'Invalid ETL config JSON' });
+      }
+    }
+    
+    // For backward compatibility, also support old mapping format
+    let mappingConfig = etlConfig?.mapping || null;
+    if (req.body.mapping && !etlConfig) {
       try {
         mappingConfig = JSON.parse(req.body.mapping);
       } catch (e) {
         return res.status(400).json({ error: 'Invalid mapping JSON' });
       }
     }
+    const configPayload = etlConfig || (mappingConfig ? { mapping: mappingConfig } : null);
 
     // Store file info (in production, save to S3/local storage)
     const storagePath = `attendance/${tenantId}/${Date.now()}_${req.file.originalname}`;
@@ -441,7 +458,7 @@ router.post('/upload', authenticateToken, requireRole('hr', 'director', 'ceo', '
         storagePath,
         req.file.size,
         req.file.mimetype,
-        mappingConfig ? JSON.stringify(mappingConfig) : null
+        configPayload ? JSON.stringify(configPayload) : null
       ]
     );
 
@@ -459,8 +476,8 @@ router.post('/upload', authenticateToken, requireRole('hr', 'director', 'ceo', '
       ]
     );
 
-    // Process file asynchronously
-    processAttendanceUpload(uploadId, req.file.buffer, req.file.originalname, tenantId, mappingConfig)
+    // Process file asynchronously (pass full ETL config)
+    processAttendanceUpload(uploadId, req.file.buffer, req.file.originalname, tenantId, configPayload)
       .catch(error => {
         console.error('Error processing attendance upload:', error);
         // Update upload status to failed - check if table exists first
@@ -954,6 +971,32 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
       [workType, event.id]
     );
 
+    // Persist punch for realtime timesheet calculations (Asia/Kolkata)
+    try {
+      await query(
+        `INSERT INTO punches (
+          tenant_id, employee_id, type, "timestamp", timestamp_local, source, created_by
+        ) VALUES ($1,$2,$3,$4, ($4 AT TIME ZONE 'Asia/Kolkata'), $5, $6)`,
+        [
+          userTenantId,
+          employeeId,
+          action,
+          punchTime,
+          finalCaptureMethod || 'unknown',
+          req.user.id,
+        ],
+      );
+
+      await handlePunchEvent({
+        tenantId: userTenantId,
+        employeeId,
+        punch: { type: action, timestamp: punchTime.toISOString() },
+      });
+    } catch (punchError) {
+      console.error('[Clock] Failed to record realtime punch:', punchError);
+      // Continue – do not fail clock action only because realtime layer failed
+    }
+
     // Handle clock in
     if (action === 'IN') {
       await query(
@@ -1176,6 +1219,149 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
     const status = error.statusCode || 500;
     console.error('Clock API error:', error);
     res.status(status).json({ error: error.message || 'Failed to process clock action' });
+  }
+});
+
+// GET /api/v1/attendance/mapping-templates - Get all mapping templates
+router.get('/mapping-templates', authenticateToken, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
+  try {
+    const tenantId = await getTenantIdForUser(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Check if table exists
+    const tableCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'attendance_mapping_templates'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      return res.json([]);
+    }
+
+    const result = await query(
+      `SELECT id, name, description, mapping_config, transformations_config, validations_config, created_at
+       FROM attendance_mapping_templates
+       WHERE tenant_id = $1
+       ORDER BY created_at DESC`,
+      [tenantId]
+    );
+
+    const templates = result.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      mapping: row.mapping_config || {},
+      transformations: row.transformations_config || [],
+      validations: row.validations_config || [],
+      created_at: row.created_at,
+    }));
+
+    res.json(templates);
+  } catch (error) {
+    console.error('Error fetching mapping templates:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch templates' });
+  }
+});
+
+// POST /api/v1/attendance/mapping-templates - Save mapping template
+router.post('/mapping-templates', authenticateToken, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
+  try {
+    const tenantId = await getTenantIdForUser(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    const { name, description, mapping, transformations, validations } = req.body;
+
+    if (!name || !mapping) {
+      return res.status(400).json({ error: 'Name and mapping are required' });
+    }
+
+    // Create table if it doesn't exist
+    await query(`
+      CREATE TABLE IF NOT EXISTS attendance_mapping_templates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        created_by UUID NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        mapping_config JSONB NOT NULL,
+        transformations_config JSONB DEFAULT '[]'::jsonb,
+        validations_config JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(tenant_id, name)
+      )
+    `);
+
+    const result = await query(
+      `INSERT INTO attendance_mapping_templates 
+       (tenant_id, created_by, name, description, mapping_config, transformations_config, validations_config)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (tenant_id, name) 
+       DO UPDATE SET 
+         description = EXCLUDED.description,
+         mapping_config = EXCLUDED.mapping_config,
+         transformations_config = EXCLUDED.transformations_config,
+         validations_config = EXCLUDED.validations_config,
+         updated_at = NOW()
+       RETURNING id, name, description, mapping_config, transformations_config, validations_config, created_at`,
+      [
+        tenantId,
+        req.user.id,
+        name,
+        description || null,
+        JSON.stringify(mapping),
+        JSON.stringify(transformations || []),
+        JSON.stringify(validations || [])
+      ]
+    );
+
+    res.json({
+      id: result.rows[0].id,
+      name: result.rows[0].name,
+      description: result.rows[0].description,
+      mapping: result.rows[0].mapping_config,
+      transformations: result.rows[0].transformations_config,
+      validations: result.rows[0].validations_config,
+      created_at: result.rows[0].created_at,
+    });
+  } catch (error) {
+    console.error('Error saving mapping template:', error);
+    res.status(500).json({ error: error.message || 'Failed to save template' });
+  }
+});
+
+// DELETE /api/v1/attendance/mapping-templates/:id - Delete mapping template
+router.delete('/mapping-templates/:id', authenticateToken, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
+  try {
+    const tenantId = await getTenantIdForUser(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    const { id } = req.params;
+
+    const result = await query(
+      `DELETE FROM attendance_mapping_templates
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id`,
+      [id, tenantId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    res.json({ message: 'Template deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting mapping template:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete template' });
   }
 });
 

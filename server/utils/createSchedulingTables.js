@@ -147,6 +147,23 @@ export async function createSchedulingTables() {
       );
     `);
 
+    // Ensure algorithm constraint includes latest options
+    await query(`
+      DO $$
+      BEGIN
+        BEGIN
+          ALTER TABLE generated_schedules
+            DROP CONSTRAINT IF EXISTS generated_schedules_algorithm_used_check;
+          ALTER TABLE generated_schedules
+            ADD CONSTRAINT generated_schedules_algorithm_used_check
+            CHECK (algorithm_used IN ('greedy', 'ilp', 'simulated_annealing', 'genetic', 'manual', 'score_rank'));
+        EXCEPTION
+          WHEN undefined_table THEN NULL;
+        END;
+      END
+      $$;
+    `);
+
     await query(`CREATE INDEX IF NOT EXISTS idx_schedules_tenant ON generated_schedules(tenant_id);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_schedules_week ON generated_schedules(week_start_date, week_end_date);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_schedules_status ON generated_schedules(status);`);
@@ -169,6 +186,26 @@ export async function createSchedulingTables() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+    `);
+
+    // Ensure new team scheduling columns exist on schedule_assignments
+    await query(`
+      DO $$
+      BEGIN
+        BEGIN
+          ALTER TABLE schedule_assignments
+            ADD COLUMN team_id UUID REFERENCES teams(id) ON DELETE SET NULL;
+        EXCEPTION
+          WHEN duplicate_column THEN NULL;
+        END;
+        BEGIN
+          ALTER TABLE schedule_assignments
+            ADD COLUMN assignment_type TEXT DEFAULT 'employee' CHECK (assignment_type IN ('employee', 'team'));
+        EXCEPTION
+          WHEN duplicate_column THEN NULL;
+        END;
+      END
+      $$;
     `);
 
     await query(`

@@ -64,6 +64,17 @@ const actionOptions = [
   "payroll_run",
   "background_check",
   "offboarding",
+  "employee_update",
+  "employee_create",
+  "promotion_create",
+  "promotion_approve",
+  "promotion_reject",
+  "department_create",
+  "department_update",
+  "team_create",
+  "team_update",
+  "compensation_change",
+  "role_change",
 ];
 
 export default function AuditLogs() {

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Lock, Shield } from "lucide-react";
+import { Lock } from "lucide-react";
 import { api } from "@/lib/api";
 
 const PinAuth = () => {
@@ -15,8 +15,44 @@ const PinAuth = () => {
   const [pin, setPin] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
   const [isSSO, setIsSSO] = useState(false);
+  const [companyName, setCompanyName] = useState<string>("Payroll");
+  const [companyLogo, setCompanyLogo] = useState<string>("");
+  const [logoLoaded, setLogoLoaded] = useState(false);
   const hasCheckedAuth = useRef(false); // Prevent multiple auth checks
   const isChecking = useRef(false); // Prevent concurrent checks
+
+  useEffect(() => {
+    // Fetch company name and logo
+    const fetchCompanyInfo = async () => {
+      try {
+        const tenantData = await api.dashboard.tenant();
+        if (tenantData?.tenant) {
+          setCompanyName(tenantData.tenant.company_name || "Payroll");
+          const logoUrl = tenantData.tenant.logo_url || "";
+          if (logoUrl) {
+            // Preload image to prevent flickering
+            const img = new Image();
+            img.onload = () => {
+              setCompanyLogo(logoUrl);
+              setLogoLoaded(true);
+            };
+            img.onerror = () => {
+              setCompanyLogo("");
+              setLogoLoaded(true);
+            };
+            img.src = logoUrl;
+          } else {
+            setCompanyLogo("");
+            setLogoLoaded(true);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch company info:", error);
+        setLogoLoaded(true);
+      }
+    };
+    fetchCompanyInfo();
+  }, []);
 
   useEffect(() => {
     // Prevent multiple auth checks using sessionStorage
@@ -209,11 +245,23 @@ const PinAuth = () => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4 shadow-xl">
-            <Shield className="w-8 h-8 text-primary-foreground" />
-          </div>
-          <h1 className="text-3xl font-bold text-foreground mb-2">PayrollPro</h1>
-          <p className="text-muted-foreground">Enter your 6-digit PIN to continue</p>
+          {logoLoaded && companyLogo ? (
+            <div className="inline-flex items-center justify-center mb-4">
+              <img
+                src={companyLogo}
+                alt={companyName}
+                className="max-h-16 w-auto object-contain transition-opacity duration-300"
+                style={{ opacity: logoLoaded ? 1 : 0 }}
+                onLoad={() => setLogoLoaded(true)}
+              />
+            </div>
+          ) : (
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4 shadow-xl">
+              <span className="text-2xl font-bold text-primary-foreground">
+                {companyName.substring(0, 2).toUpperCase()}
+              </span>
+            </div>
+          )}
         </div>
 
         <Card className="shadow-xl">
@@ -255,9 +303,6 @@ const PinAuth = () => {
                     required
                   />
                 </div>
-                <p className="text-xs text-muted-foreground text-center">
-                  Enter 6 digits (0-9)
-                </p>
               </div>
               
               <Button type="submit" className="w-full" disabled={isLoading || pin.length !== 6}>
@@ -274,7 +319,7 @@ const PinAuth = () => {
                   Forgot PIN?
                 </Button>
                 <p className="text-muted-foreground text-xs">
-                  Access Payroll through the HR system to set up your PIN
+                  Accessed only through HR system
                 </p>
               </div>
             </form>

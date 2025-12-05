@@ -5,6 +5,8 @@ import PDFDocument from "pdfkit";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import reimbursementsRouter from "./reimbursements.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
@@ -26,6 +28,14 @@ const proofUpload = multer({
   storage: proofStorage,
   limits: {
     fileSize: Number(process.env.PAYROLL_PROOF_MAX_SIZE || 5 * 1024 * 1024), // default 5MB
+  },
+});
+
+// Multer for bulk salary import
+const salaryImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max
   },
 });
 
@@ -1072,7 +1082,17 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
             totalGross += adjustedGross;
           }
 
+          // Calculate total net salary from stored payroll_items
+          const totalNetSalaryResult = await query(
+            `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary
+             FROM payroll_items
+             WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+            [cycleId, tenantId]
+          );
+          const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+
           // Update cycle totals with correct counts
+          // Store NET salary in total_amount to match Review Dialog and Bank Export
           await query(
             `UPDATE payroll_cycles SET 
                status = 'completed',
@@ -1080,7 +1100,7 @@ appRouter.get("/payslips", requireAuth, async (req, res) => {
                total_amount = $2,
                updated_at = NOW()
              WHERE id = $3 AND tenant_id = $4`,
-            [processedCount, totalGross, cycleId, tenantId]
+            [processedCount, totalNetSalary, cycleId, tenantId]
           );
         } catch (err) {
           console.error("[PAYSLIPS] Failed to process employees for cycle", cycleId, err);
@@ -2166,6 +2186,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
       da,
       lta,
       bonus,
+      cca,
+      conveyance,
+      medical_allowance,
       pf_contribution,
       esi_contribution
     } = req.body;
@@ -2181,10 +2204,10 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
     const result = await query(
       `INSERT INTO compensation_structures (
         tenant_id, employee_id, effective_from, ctc, basic_salary, 
-        hra, special_allowance, da, lta, bonus, pf_contribution, esi_contribution,
-        created_by
+        hra, special_allowance, da, lta, bonus, cca, conveyance, medical_allowance,
+        pf_contribution, esi_contribution, created_by
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
       )
       ON CONFLICT (employee_id, effective_from)
       DO UPDATE SET
@@ -2195,6 +2218,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         da = EXCLUDED.da,
         lta = EXCLUDED.lta,
         bonus = EXCLUDED.bonus,
+        cca = EXCLUDED.cca,
+        conveyance = EXCLUDED.conveyance,
+        medical_allowance = EXCLUDED.medical_allowance,
         pf_contribution = EXCLUDED.pf_contribution,
         esi_contribution = EXCLUDED.esi_contribution,
         created_by = COALESCE(compensation_structures.created_by, EXCLUDED.created_by),
@@ -2211,6 +2237,9 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
         da || 0,
         lta || 0,
         bonus || 0,
+        cca || 0,
+        conveyance || 0,
+        medical_allowance || 0,
         pf_contribution || 0,
         esi_contribution || 0,
         hrUserId || null // created_by (HR profile ID); allow null if not mapped
@@ -2222,6 +2251,279 @@ appRouter.post("/employees/:employeeId/compensation", requireAuth, async (req, r
   } catch (e: any) {
     console.error("Error adding compensation:", e);
     res.status(500).json({ error: e.message || "Failed to add compensation" });
+  }
+});
+
+// Bulk Salary Structure Import Endpoint
+appRouter.post("/imports/bulk-salary-structure", requireAuth, salaryImportUpload.single("file"), async (req, res) => {
+  try {
+    const userId = (req as any).userId as string;
+    const tenantId = (req as any).tenantId as string;
+    
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Check permissions (HR/admin only)
+    const userResult = await query(
+      `SELECT payroll_role FROM users WHERE id = $1 AND org_id = $2`,
+      [userId, tenantId]
+    );
+    
+    if (!userResult.rows[0] || userResult.rows[0].payroll_role !== 'payroll_admin') {
+      return res.status(403).json({ 
+        error: 'Insufficient permissions',
+        message: 'Only HR can import salary structures'
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const file = req.file;
+    const fileExt = path.extname(file.originalname).toLowerCase().slice(1);
+    
+    let rows: any[] = [];
+
+    // Parse file based on extension
+    if (fileExt === 'csv') {
+      // Parse CSV
+      const csvContent = file.buffer.toString('utf8');
+      const lines = csvContent.split('\n').filter(line => line.trim());
+      if (lines.length < 2) {
+        return res.status(400).json({ error: "CSV file must have at least a header row and one data row" });
+      }
+      
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const employeeIdIndex = headers.findIndex(h => h === 'employee id' || h === 'employee_id');
+      
+      if (employeeIdIndex === -1) {
+        return res.status(400).json({ error: "CSV must contain 'Employee ID' column" });
+      }
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        const row: any = {};
+        headers.forEach((header, idx) => {
+          row[header] = values[idx] || '';
+        });
+        rows.push(row);
+      }
+    } else if (['xlsx', 'xls'].includes(fileExt)) {
+      // Parse Excel
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet, { defval: null, raw: false });
+      
+      if (data.length === 0) {
+        return res.status(400).json({ error: "Excel file is empty" });
+      }
+
+      // Normalize headers (convert to lowercase, replace spaces with underscores)
+      const firstRow = data[0] as any;
+      const headers = Object.keys(firstRow).map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+      
+      const employeeIdHeader = headers.find(h => h === 'employee_id' || h === 'employeeid');
+      if (!employeeIdHeader) {
+        return res.status(400).json({ error: "Excel must contain 'Employee ID' column" });
+      }
+
+      // Transform data with normalized headers
+      rows = data.map((row: any) => {
+        const normalized: any = {};
+        Object.keys(row).forEach((key, idx) => {
+          normalized[headers[idx]] = row[key];
+        });
+        return normalized;
+      });
+    } else {
+      return res.status(400).json({ error: "Unsupported file format. Please upload CSV or Excel (.xlsx, .xls)" });
+    }
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: "No data rows found in file" });
+    }
+
+    // Get all column headers (excluding Employee ID)
+    const firstRow = rows[0];
+    const componentHeaders = Object.keys(firstRow).filter(
+      key => key.toLowerCase() !== 'employee_id' && key.toLowerCase() !== 'employee id'
+    );
+
+    // Map component names to their database column names
+    const componentMap: Record<string, string> = {
+      'basic': 'basic_salary',
+      'basic_salary': 'basic_salary',
+      'hra': 'hra',
+      'house_rent_allowance': 'hra',
+      'special_allowance': 'special_allowance',
+      'da': 'da',
+      'dearness_allowance': 'da',
+      'lta': 'lta',
+      'leave_travel_allowance': 'lta',
+      'bonus': 'bonus',
+      'cca': 'cca',
+      'city_compensatory_allowance': 'cca',
+      'conveyance': 'conveyance',
+      'conveyance_allowance': 'conveyance',
+      'medical_allowance': 'medical_allowance',
+      'medical': 'medical_allowance',
+      'pf': 'pf_contribution',
+      'pf_contribution': 'pf_contribution',
+      'esi': 'esi_contribution',
+      'esi_contribution': 'esi_contribution',
+    };
+
+    // Normalize component header names
+    const normalizeComponentName = (name: string): string => {
+      return name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    };
+
+    const report = {
+      processed: 0,
+      updated: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    // Process each row
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const employeeId = (row['employee_id'] || row['employee id'] || '').toString().trim();
+      
+      if (!employeeId) {
+        report.failed++;
+        report.errors.push(`Row ${i + 2}: Missing Employee ID`);
+        continue;
+      }
+
+      try {
+        // Find employee by employee_id
+        const employeeResult = await query(
+          `SELECT id FROM employees WHERE employee_code = $1 AND tenant_id = $2`,
+          [employeeId, tenantId]
+        );
+
+        if (employeeResult.rows.length === 0) {
+          report.failed++;
+          report.errors.push(`Row ${i + 2}: Employee ID "${employeeId}" not found`);
+          continue;
+        }
+
+        const employeeDbId = employeeResult.rows[0].id;
+
+        // Get current date for effective_from (or use a default)
+        const effectiveFrom = new Date().toISOString().split('T')[0];
+
+        // Build update object with all components
+        const updateData: any = {
+          effective_from: effectiveFrom,
+        };
+
+        // Process each component column
+        for (const header of componentHeaders) {
+          const normalizedHeader = normalizeComponentName(header);
+          const dbColumn = componentMap[normalizedHeader];
+          
+          if (dbColumn) {
+            const value = parseFloat(row[header] || '0');
+            if (!isNaN(value) && value >= 0) {
+              updateData[dbColumn] = value;
+            }
+          }
+        }
+
+        // Calculate CTC if not provided (sum of all components * 12)
+        if (!updateData.ctc) {
+          const monthlyTotal = 
+            (updateData.basic_salary || 0) +
+            (updateData.hra || 0) +
+            (updateData.special_allowance || 0) +
+            (updateData.da || 0) +
+            (updateData.lta || 0) +
+            (updateData.bonus || 0) +
+            (updateData.cca || 0) +
+            (updateData.conveyance || 0) +
+            (updateData.medical_allowance || 0);
+          updateData.ctc = monthlyTotal * 12;
+        }
+
+        // Ensure required fields
+        if (!updateData.basic_salary) {
+          updateData.basic_salary = 0;
+        }
+
+        // Delete existing compensation for this employee and effective date, then insert new
+        await query('BEGIN');
+        
+        try {
+          // Delete existing structure
+          await query(
+            `DELETE FROM compensation_structures 
+             WHERE employee_id = $1 AND tenant_id = $2 AND effective_from = $3`,
+            [employeeDbId, tenantId, effectiveFrom]
+          );
+
+          // Insert new structure
+          await query(
+            `INSERT INTO compensation_structures (
+              tenant_id, employee_id, effective_from, ctc, basic_salary,
+              hra, special_allowance, da, lta, bonus, cca, conveyance, medical_allowance,
+              pf_contribution, esi_contribution, created_by
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+            )`,
+            [
+              tenantId,
+              employeeDbId,
+              effectiveFrom,
+              updateData.ctc || 0,
+              updateData.basic_salary || 0,
+              updateData.hra || 0,
+              updateData.special_allowance || 0,
+              updateData.da || 0,
+              updateData.lta || 0,
+              updateData.bonus || 0,
+              updateData.cca || 0,
+              updateData.conveyance || 0,
+              updateData.medical_allowance || 0,
+              updateData.pf_contribution || 0,
+              updateData.esi_contribution || 0,
+              userId
+            ]
+          );
+
+          await query('COMMIT');
+          report.updated++;
+          report.processed++;
+        } catch (dbError: any) {
+          await query('ROLLBACK');
+          throw dbError;
+        }
+      } catch (error: any) {
+        report.failed++;
+        report.errors.push(`Row ${i + 2}: ${error.message || 'Unknown error'}`);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Bulk import completed. Updated ${report.updated} employee(s).`,
+      report: {
+        total: rows.length,
+        updated: report.updated,
+        failed: report.failed,
+        errors: report.errors.slice(0, 50), // Limit errors to first 50
+      },
+    });
+  } catch (error: any) {
+    console.error("Error in bulk salary import:", error);
+    res.status(500).json({ 
+      error: error.message || "Failed to import salary structures",
+      details: error.stack 
+    });
   }
 });
 
@@ -2795,6 +3097,383 @@ appRouter.get("/payroll-cycles/:cycleId/payslips", requireAuth, async (req, res)
   }
 });
 
+// Helper function to get payroll items for bank transfer (from payroll_items or calculated from preview)
+async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string, cycle: any) {
+  // ALWAYS try to get from payroll_items table first (if cycle has been saved/processed)
+  // This ensures we use stored values that match the Review Dialog
+  const existingItemsResult = await query(
+    `
+    SELECT 
+      e.employee_id as employee_code,
+      COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as employee_name,
+      COALESCE(od.bank_account_number, 'N/A') as bank_account_number,
+      COALESCE(od.ifsc_code, 'N/A') as bank_ifsc_code,
+      COALESCE(od.bank_name, 'N/A') as bank_name,
+      pi.net_salary
+    FROM payroll_items pi
+    JOIN employees e ON e.id = pi.employee_id
+    JOIN profiles p ON p.id = e.user_id
+    LEFT JOIN onboarding_data od ON od.employee_id = e.id
+    WHERE pi.payroll_cycle_id = $1 
+      AND pi.tenant_id = $2
+      AND pi.net_salary > 0
+    ORDER BY e.employee_id ASC
+    `,
+    [cycleId, tenantId]
+  );
+
+  // If items exist in payroll_items, ALWAYS use them (never calculate)
+  // This guarantees consistency with Review Dialog
+  if (existingItemsResult.rows.length > 0) {
+    console.log(`[BANK EXPORT] Using stored payroll_items for cycle ${cycleId}: ${existingItemsResult.rows.length} employees`);
+    return existingItemsResult.rows;
+  }
+  
+  // Only calculate if no items exist (draft cycle that hasn't been saved yet)
+  console.log(`[BANK EXPORT] No stored payroll_items found for cycle ${cycleId}, calculating from scratch`);
+
+  // Otherwise, calculate from preview logic (before processing) - reuse the preview endpoint logic
+  const payrollMonth = cycle.month;
+  const payrollYear = cycle.year;
+  const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
+
+  // Get payroll settings
+  const settingsResult = await query(
+    "SELECT * FROM payroll_settings WHERE tenant_id = $1",
+    [tenantId]
+  );
+  
+  const settings = settingsResult.rows[0] || {
+    pf_rate: 12.00,
+    esi_rate: 3.25,
+    pt_rate: 200.00,
+    tds_threshold: 250000.00,
+  };
+
+  // Get all active employees who were employed by the payroll month
+  // Try payroll_employee_view first, fallback to employees table if view doesn't exist
+  let employeesResult;
+  try {
+    employeesResult = await query(
+      `SELECT employee_id, full_name, email, employee_code
+       FROM payroll_employee_view
+       WHERE org_id = $1
+         AND employment_status = 'active'
+         AND (date_of_joining IS NULL OR date_of_joining <= $2)
+       ORDER BY date_of_joining ASC`,
+      [tenantId, payrollMonthEnd.toISOString()]
+    );
+  } catch (viewError: any) {
+    console.warn('[BANK EXPORT] payroll_employee_view not available, using employees table:', viewError.message);
+    // Fallback to employees table
+    employeesResult = await query(
+      `SELECT 
+        e.id as employee_id,
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as full_name,
+        p.email,
+        e.employee_id as employee_code
+       FROM employees e
+       JOIN profiles p ON p.id = e.user_id
+       WHERE e.tenant_id = $1
+         AND e.status = 'active'
+         AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
+       ORDER BY e.date_of_joining ASC`,
+      [tenantId, payrollMonthEnd.toISOString()]
+    );
+  }
+
+  const employees = employeesResult.rows;
+  const calculatedItems: any[] = [];
+
+  const incentivesResult = await query(
+    `SELECT employee_id, amount
+     FROM payroll_incentives
+     WHERE tenant_id = $1
+       AND payroll_cycle_id = $2`,
+    [tenantId, cycleId]
+  );
+  const incentiveMap = new Map<string, number>();
+  incentivesResult.rows.forEach((row) => {
+    incentiveMap.set(row.employee_id, Number(row.amount || 0));
+  });
+
+  // Calculate salary for each employee (same logic as preview endpoint)
+  for (const employee of employees) {
+    // Get the latest compensation structure effective for the payroll month
+    const compResult = await query(
+      `SELECT * FROM compensation_structures
+       WHERE employee_id = $1 
+         AND tenant_id = $2
+         AND effective_from <= $3
+       ORDER BY effective_from DESC
+       LIMIT 1`,
+      [employee.employee_id, tenantId, payrollMonthEnd.toISOString()]
+    );
+
+    if (compResult.rows.length === 0) {
+      continue;
+    }
+
+    const compensation = compResult.rows[0];
+    
+    // All amounts are monthly
+    const monthlyBasic = Number(compensation.basic_salary) || 0;
+    const monthlyHRA = Number(compensation.hra) || 0;
+    const monthlySpecialAllowance = Number(compensation.special_allowance) || 0;
+    const monthlyDA = Number(compensation.da) || 0;
+    const monthlyLTA = Number(compensation.lta) || 0;
+    const monthlyBonus = Number(compensation.bonus) || 0;
+
+    // Gross salary = sum of all monthly earnings
+    const grossSalary = monthlyBasic + monthlyHRA + monthlySpecialAllowance + monthlyDA + monthlyLTA + monthlyBonus;
+
+    // Calculate LOP days and paid days for this month
+    const { lopDays, paidDays, totalWorkingDays } = await calculateLopAndPaidDays(
+      tenantId,
+      employee.employee_id,
+      payrollMonth,
+      payrollYear
+    );
+
+    // Adjust gross salary based on paid days (proportional deduction for LOP)
+    const dailyRate = grossSalary / totalWorkingDays;
+    const adjustedGrossSalary = dailyRate * paidDays;
+
+    // Recalculate components proportionally
+    const adjustmentRatio = paidDays / totalWorkingDays;
+    const adjustedBasic = monthlyBasic * adjustmentRatio;
+    const adjustedHRA = monthlyHRA * adjustmentRatio;
+    const adjustedSpecialAllowance = monthlySpecialAllowance * adjustmentRatio;
+    const adjustedDA = monthlyDA * adjustmentRatio;
+    const adjustedLTA = monthlyLTA * adjustmentRatio;
+    const adjustedBonus = monthlyBonus * adjustmentRatio;
+
+    // Calculate deductions based on adjusted gross
+    const pfWageCeiling = 15000;
+    const pfBasis = adjustedBasic <= pfWageCeiling ? adjustedBasic : pfWageCeiling;
+    const pfDeduction = (pfBasis * Number(settings.pf_rate)) / 100;
+    const esiDeduction = adjustedGrossSalary <= 21000 ? (adjustedGrossSalary * 0.75) / 100 : 0;
+    const ptDeduction = Number(settings.pt_rate) || 200;
+    
+    const incentiveAmount = incentiveMap.get(employee.employee_id) || 0;
+    const grossWithIncentive = adjustedGrossSalary + incentiveAmount;
+    const annualIncome = grossWithIncentive * 12;
+    let tdsDeduction = 0;
+    if (annualIncome > Number(settings.tds_threshold)) {
+      const excessAmount = annualIncome - Number(settings.tds_threshold);
+      tdsDeduction = (excessAmount * 5) / 100 / 12;
+    }
+
+    const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
+    const netSalary = grossWithIncentive - totalDeductions;
+
+    if (netSalary <= 0) continue;
+
+    // Get bank details from onboarding_data (HR portal) - bank details are only in onboarding_data
+    const employeeDetailsResult = await query(
+      `SELECT 
+        e.id,
+        e.employee_id,
+        COALESCE(od.bank_account_number, 'N/A') as bank_account_number,
+        COALESCE(od.ifsc_code, 'N/A') as bank_ifsc_code,
+        COALESCE(od.bank_name, 'N/A') as bank_name,
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, 'N/A') as employee_name
+      FROM employees e
+      JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN onboarding_data od ON od.employee_id = e.id
+      WHERE e.id = $1 AND e.tenant_id = $2`,
+      [employee.employee_id, tenantId]
+    );
+
+    const empDetails = employeeDetailsResult.rows[0];
+    if (!empDetails) continue;
+
+    calculatedItems.push({
+      employee_code: employee.employee_code || empDetails.employee_id || 'N/A',
+      employee_name: empDetails.employee_name || employee.full_name || 'N/A',
+      bank_account_number: empDetails.bank_account_number || 'N/A',
+      bank_ifsc_code: empDetails.bank_ifsc_code || 'N/A',
+      bank_name: empDetails.bank_name || 'N/A',
+      net_salary: netSalary,
+    });
+  }
+
+  return calculatedItems;
+}
+
+// Get bank transfer preview data (JSON) for payroll cycle
+appRouter.get("/payroll-cycles/:cycleId/export/bank-transfer/preview", requireAuth, async (req, res) => {
+  try {
+    const tenantId = (req as any).tenantId as string;
+    const { cycleId } = req.params;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Get payroll cycle to verify it belongs to tenant
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Get payroll items (from payroll_items or calculated)
+    const payrollItems = await getPayrollItemsForBankTransfer(cycleId, tenantId, cycle);
+
+    // Format payment date
+    const paymentDate = cycle.payday 
+      ? new Date(cycle.payday).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : new Date(cycle.year, cycle.month, 0).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    const previewData = payrollItems.map((row: any) => ({
+      employee_code: row.employee_code || 'N/A',
+      employee_name: row.employee_name || 'N/A',
+      bank_account_number: row.bank_account_number || 'N/A',
+      bank_ifsc_code: row.bank_ifsc_code || 'N/A',
+      bank_name: row.bank_name || 'N/A',
+      net_salary: parseFloat(row.net_salary) || 0,
+      payment_date: paymentDate,
+    }));
+
+    return res.json({
+      cycle: {
+        id: cycle.id,
+        month: cycle.month,
+        year: cycle.year,
+        status: cycle.status,
+        payday: cycle.payday,
+      },
+      payment_date: paymentDate,
+      items: previewData,
+      total_employees: previewData.length,
+      total_amount: previewData.reduce((sum, item) => sum + item.net_salary, 0),
+    });
+  } catch (e: any) {
+    console.error("Error fetching bank transfer preview:", e);
+    console.error("Stack trace:", e.stack);
+    res.status(500).json({ 
+      error: e.message || "Failed to fetch bank transfer preview",
+      details: process.env.NODE_ENV === 'development' ? e.stack : undefined
+    });
+  }
+});
+
+// Export bank transfer file for payroll cycle
+appRouter.get("/payroll-cycles/:cycleId/export/bank-transfer", requireAuth, async (req, res) => {
+  try {
+    const tenantId = (req as any).tenantId as string;
+    const { cycleId } = req.params;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Get payroll cycle to verify it belongs to tenant
+    const cycleResult = await query(
+      "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
+      [cycleId, tenantId]
+    );
+
+    if (cycleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payroll cycle not found" });
+    }
+
+    const cycle = cycleResult.rows[0];
+
+    // Get payroll items (from payroll_items or calculated from preview)
+    const payrollItems = await getPayrollItemsForBankTransfer(cycleId, tenantId, cycle);
+
+    if (payrollItems.length === 0) {
+      return res.status(404).json({ error: "No payroll items found for this cycle" });
+    }
+
+    // Debug: Log first item to verify bank details are present
+    if (payrollItems.length > 0) {
+      console.log('[BANK EXPORT] Sample item:', {
+        employee_code: payrollItems[0].employee_code,
+        bank_account_number: payrollItems[0].bank_account_number,
+        bank_ifsc_code: payrollItems[0].bank_ifsc_code,
+        bank_name: payrollItems[0].bank_name,
+      });
+    }
+
+    // Create Excel workbook
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Bank Transfer');
+
+    // Set column headers
+    worksheet.columns = [
+      { header: 'Employee Code', key: 'employee_code', width: 15 },
+      { header: 'Employee Name', key: 'employee_name', width: 30 },
+      { header: 'Bank Account Number', key: 'bank_account_number', width: 20 },
+      { header: 'IFSC Code', key: 'bank_ifsc_code', width: 15 },
+      { header: 'Bank Name', key: 'bank_name', width: 20 },
+      { header: 'Net Salary', key: 'net_salary', width: 15 },
+      { header: 'Payment Date', key: 'payment_date', width: 15 },
+    ];
+
+    // Style header row
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0E0E0' }
+    };
+
+    // Format payment date
+    const paymentDate = cycle.payday 
+      ? new Date(cycle.payday).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : new Date(cycle.year, cycle.month, 0).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    // Add data rows
+    payrollItems.forEach((row: any) => {
+      // Convert net_salary from main currency unit (already in main unit, not cents)
+      const netSalary = parseFloat(row.net_salary) || 0;
+      
+      // Ensure all bank details are properly extracted
+      const bankAccountNumber = row.bank_account_number || 'N/A';
+      const bankIfscCode = row.bank_ifsc_code || 'N/A';
+      const bankName = row.bank_name || 'N/A';
+      
+      worksheet.addRow({
+        employee_code: row.employee_code || 'N/A',
+        employee_name: row.employee_name || 'N/A',
+        bank_account_number: bankAccountNumber,
+        bank_ifsc_code: bankIfscCode,
+        bank_name: bankName,
+        net_salary: netSalary,
+        payment_date: paymentDate,
+      });
+    });
+
+    // Format Net Salary column as currency
+    worksheet.getColumn('net_salary').numFmt = '#,##0.00';
+    worksheet.getColumn('net_salary').alignment = { horizontal: 'right' };
+
+    // Generate filename
+    const monthName = new Date(cycle.year, cycle.month - 1).toLocaleString('default', { month: 'short' });
+    const filename = `Salary_Payout_${monthName}_${cycle.year}_${cycleId.substring(0, 8)}.xlsx`;
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Write workbook to response
+    await workbook.xlsx.write(res);
+    res.end();
+
+  } catch (e: any) {
+    console.error("Error exporting bank transfer file:", e);
+    res.status(500).json({ error: e.message || "Failed to export bank transfer file" });
+  }
+});
+
 // Preview payroll - calculate salaries for all eligible employees (before processing)
 appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) => {
   const tenantId = (req as any).tenantId as string;
@@ -2828,33 +3507,75 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
     const payrollYear = cycle.year;
     const payrollMonthEnd = new Date(payrollYear, payrollMonth, 0);
 
-    const existingItemsResult = await query(
-      `SELECT 
-         pi.employee_id,
-         pi.gross_salary,
-         pi.deductions,
-         pi.net_salary,
-         pi.basic_salary,
-         pi.hra,
-         pi.special_allowance,
-         pi.incentive_amount,
-         pi.pf_deduction,
-         pi.esi_deduction,
-         pi.pt_deduction,
-         pi.tds_deduction,
-         pi.lop_days,
-         pi.paid_days,
-         pi.total_working_days,
-         e.employee_code,
-         e.full_name,
-         e.email
-       FROM payroll_items pi
-       JOIN payroll_employee_view e ON e.employee_id = pi.employee_id AND (e.org_id = $2 OR e.org_id IS NULL)
-       WHERE pi.payroll_cycle_id = $1
-         AND pi.tenant_id = $2
-       ORDER BY e.full_name`,
-      [cycleId, tenantId]
-    );
+    // Try to get existing payroll items (if cycle is already processed)
+    let existingItemsResult: any;
+    try {
+      existingItemsResult = await query(
+        `SELECT 
+           pi.employee_id,
+           pi.gross_salary,
+           pi.deductions,
+           pi.net_salary,
+           pi.basic_salary,
+           pi.hra,
+           pi.special_allowance,
+           pi.incentive_amount,
+           pi.pf_deduction,
+           pi.esi_deduction,
+           pi.pt_deduction,
+           pi.tds_deduction,
+           pi.metadata,
+           pi.lop_days,
+           pi.paid_days,
+           pi.total_working_days,
+           e.employee_code,
+           e.full_name,
+           e.email
+         FROM payroll_items pi
+         JOIN payroll_employee_view e ON e.employee_id = pi.employee_id AND (e.org_id = $2 OR e.org_id IS NULL)
+         WHERE pi.payroll_cycle_id = $1
+           AND pi.tenant_id = $2
+         ORDER BY e.full_name`,
+        [cycleId, tenantId]
+      );
+    } catch (viewError: any) {
+      // Fallback if payroll_employee_view doesn't exist
+      console.warn('[PAYROLL PREVIEW] payroll_employee_view not available for existing items, using employees table:', viewError.message);
+      try {
+        existingItemsResult = await query(
+          `SELECT 
+             pi.employee_id,
+             pi.gross_salary,
+             pi.deductions,
+             pi.net_salary,
+             pi.basic_salary,
+             pi.hra,
+             pi.special_allowance,
+             pi.incentive_amount,
+             pi.pf_deduction,
+             pi.esi_deduction,
+             pi.pt_deduction,
+             pi.tds_deduction,
+             pi.metadata,
+             pi.lop_days,
+             pi.paid_days,
+             pi.total_working_days,
+             COALESCE(e.employee_id::text, 'N/A') as employee_code,
+             COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as full_name,
+             COALESCE(p.email, e.email, '') as email
+           FROM payroll_items pi
+           JOIN employees e ON e.id = pi.employee_id
+           LEFT JOIN profiles p ON p.id = e.user_id
+           WHERE pi.payroll_cycle_id = $1
+             AND pi.tenant_id = $2
+           ORDER BY full_name`,
+          [cycleId, tenantId]
+        );
+      } catch (fallbackError: any) {
+        console.error('[PAYROLL PREVIEW] Error fetching existing items:', fallbackError.message);
+        existingItemsResult = { rows: [] };
+      }
+    }
 
     if (existingItemsResult.rows.length > 0) {
       const incentiveRows = await query(
@@ -2865,36 +3586,50 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
         [tenantId, cycleId]
       );
       const incentiveMap = new Map<string, number>();
-      incentiveRows.rows.forEach((row) => {
+      incentiveRows.rows.forEach((row: any) => {
         incentiveMap.set(row.employee_id, Number(row.amount || 0));
       });
 
-      const items = existingItemsResult.rows.map((row) => ({
-        employee_id: row.employee_id,
-        employee_code: row.employee_id,
-        employee_name: row.full_name,
-        employee_email: row.email,
-        basic_salary: Number(row.basic_salary || 0),
-        hra: Number(row.hra || 0),
-        special_allowance: Number(row.special_allowance || 0),
-        incentive_amount:
-          row.incentive_amount !== null && row.incentive_amount !== undefined
-            ? Number(row.incentive_amount)
-            : incentiveMap.get(row.employee_id) || 0,
-        da: 0,
-        lta: 0,
-        bonus: 0,
-        gross_salary: Number(row.gross_salary || 0),
-        pf_deduction: Number(row.pf_deduction || 0),
-        esi_deduction: Number(row.esi_deduction || 0),
-        pt_deduction: Number(row.pt_deduction || 0),
-        tds_deduction: Number(row.tds_deduction || 0),
-        deductions: Number(row.deductions || 0),
-        net_salary: Number(row.net_salary || 0),
-        lop_days: Number(row.lop_days || 0),
-        paid_days: Number(row.paid_days || 0),
-        total_working_days: Number(row.total_working_days || 0),
-      }));
+      const items = existingItemsResult.rows.map((row: any) => {
+        // Extract advance deduction from metadata if exists
+        let advanceDeduction = 0;
+        try {
+          if (row.metadata) {
+            const metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+            advanceDeduction = Number(metadata.advance_deduction || 0);
+          }
+        } catch (e) {
+          // Ignore metadata parsing errors
+        }
+
+        return {
+          employee_id: row.employee_id,
+          employee_code: row.employee_id,
+          employee_name: row.full_name,
+          employee_email: row.email,
+          basic_salary: Number(row.basic_salary || 0),
+          hra: Number(row.hra || 0),
+          special_allowance: Number(row.special_allowance || 0),
+          incentive_amount:
+            row.incentive_amount !== null && row.incentive_amount !== undefined
+              ? Number(row.incentive_amount)
+              : incentiveMap.get(row.employee_id) || 0,
+          da: 0,
+          lta: 0,
+          bonus: 0,
+          gross_salary: Number(row.gross_salary || 0),
+          pf_deduction: Number(row.pf_deduction || 0),
+          esi_deduction: Number(row.esi_deduction || 0),
+          pt_deduction: Number(row.pt_deduction || 0),
+          tds_deduction: Number(row.tds_deduction || 0),
+          advance_deduction: advanceDeduction,
+          deductions: Number(row.deductions || 0),
+          net_salary: Number(row.net_salary || 0),
+          lop_days: Number(row.lop_days || 0),
+          paid_days: Number(row.paid_days || 0),
+          total_working_days: Number(row.total_working_days || 0),
+        };
+      });
 
       return res.json({ payrollItems: items });
     }
@@ -2913,17 +3648,43 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
     };
 
     // Get all active employees who were employed by the payroll month
-    const employeesResult = await query(
-      `SELECT employee_id, full_name, email, employee_code
-       FROM payroll_employee_view
-       WHERE org_id = $1
-         AND employment_status = 'active'
-         AND (date_of_joining IS NULL OR date_of_joining <= $2)
-       ORDER BY date_of_joining ASC`,
-      [tenantId, payrollMonthEnd.toISOString()]
-    );
-
-    const employees = employeesResult.rows;
+    // Try payroll_employee_view first, fallback to employees table if view doesn't exist
+    let employees: any[] = [];
+    try {
+      const employeesResult = await query(
+        `SELECT employee_id, full_name, email, employee_code
+         FROM payroll_employee_view
+         WHERE org_id = $1
+           AND employment_status = 'active'
+           AND (date_of_joining IS NULL OR date_of_joining <= $2)
+         ORDER BY date_of_joining ASC`,
+        [tenantId, payrollMonthEnd.toISOString()]
+      );
+      employees = employeesResult.rows;
+    } catch (viewError: any) {
+      // Fallback to employees table with profiles join
+      console.warn('[PAYROLL PREVIEW] payroll_employee_view not available, using employees table:', viewError.message);
+      try {
+        const fallbackResult = await query(
+          `SELECT 
+            e.id as employee_id,
+            COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as full_name,
+            COALESCE(p.email, e.email, '') as email,
+            COALESCE(e.employee_id::text, 'N/A') as employee_code
+           FROM employees e
+           LEFT JOIN profiles p ON p.id = e.user_id
+           WHERE e.tenant_id = $1
+             AND e.status = 'active'
+             AND (e.join_date IS NULL OR e.join_date <= $2)
+           ORDER BY e.join_date ASC`,
+          [tenantId, payrollMonthEnd.toISOString()]
+        );
+        employees = fallbackResult.rows;
+      } catch (fallbackError: any) {
+        console.error('[PAYROLL PREVIEW] Error fetching employees:', fallbackError.message);
+        employees = [];
+      }
+    }
     const payrollItems: any[] = [];
 
     const incentivesResult = await query(
@@ -2952,6 +3713,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
       );
 
       if (compResult.rows.length === 0) {
+        console.warn(`[PAYROLL PREVIEW] No compensation structure found for employee ${employee.employee_id}, skipping`);
         continue;
       }
 
@@ -3007,7 +3769,38 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
         tdsDeduction = (excessAmount * 5) / 100 / 12;
       }
 
-      const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
+      // Check for active advance salary EMI deductions
+      let advanceEmiDeduction = 0;
+      const advanceResult = await query(
+        `SELECT id, monthly_emi, paid_amount, total_amount, start_month
+         FROM salary_advances
+         WHERE employee_id = $1 
+           AND tenant_id = $2 
+           AND status = 'active'
+           AND start_month <= $3`,
+        [employee.employee_id, tenantId, new Date(payrollYear, payrollMonth, 1).toISOString()]
+      );
+
+      if (advanceResult.rows.length > 0) {
+        const advance = advanceResult.rows[0];
+        const remainingAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+        
+        if (remainingAmount > 0) {
+          // Calculate EMI for this month
+          let emiAmount = Number(advance.monthly_emi);
+          
+          // Boundary check: ensure paid_amount + emiAmount doesn't exceed total_amount
+          if (Number(advance.paid_amount) + emiAmount > Number(advance.total_amount)) {
+            emiAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+          }
+          
+          if (emiAmount > 0) {
+            advanceEmiDeduction = emiAmount;
+          }
+        }
+      }
+
+      const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction + advanceEmiDeduction;
       const netSalary = grossWithIncentive - totalDeductions;
       const finalGrossSalary = grossWithIncentive;
 
@@ -3028,6 +3821,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
         esi_deduction: esiDeduction,
         pt_deduction: ptDeduction,
         tds_deduction: tdsDeduction,
+        advance_deduction: advanceEmiDeduction,
         deductions: totalDeductions,
         net_salary: netSalary,
         lop_days: lopDays,
@@ -3559,14 +4353,24 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
       totalDeductions += calculatedDeductions;
     }
 
+    // Calculate total net salary from stored payroll_items
+    const totalNetSalaryResult = await query(
+      `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary
+       FROM payroll_items
+       WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+      [cycleId, tenantId]
+    );
+    const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+
     // Update payroll cycle totals but keep status unchanged
+    // Store NET salary in total_amount to match Review Dialog and Bank Export
     await query(
       `UPDATE payroll_cycles
        SET total_employees = $1,
            total_amount = $2,
            updated_at = NOW()
        WHERE id = $3 AND tenant_id = $4`,
-      [savedCount, totalGrossSalary, cycleId, tenantId]
+      [savedCount, totalNetSalary, cycleId, tenantId]
     );
 
     return res.status(200).json({
@@ -3605,10 +4409,10 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
 
     const cycle = cycleResult.rows[0];
 
-    // Only allow processing of approved cycles
-    if (cycle.status !== 'approved') {
+    // Only allow processing of approved or pending_approval cycles
+    if (!['approved', 'pending_approval'].includes(cycle.status)) {
       return res.status(400).json({ 
-        error: `Cannot process payroll. Current status is '${cycle.status}'. Only 'approved' payroll can be processed. Please approve the payroll first.` 
+        error: `Cannot process payroll. Current status is '${cycle.status}'. Only 'pending_approval' or 'approved' payroll can be processed.` 
       });
     }
     const payrollMonth = cycle.month;
@@ -3629,11 +4433,12 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
     };
 
     // Get all active employees who were employed by the payroll month
+    // Include employees with NULL status (similar to preview endpoint)
     const employeesResult = await query(
-      `SELECT e.id, e.full_name, e.email
+      `SELECT e.id, e.full_name, e.email, e.employee_id
        FROM employees e
        WHERE e.tenant_id = $1 
-         AND e.status = 'active'
+         AND (e.status = 'active' OR e.status IS NULL)
          AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
        ORDER BY e.date_of_joining ASC`,
       [tenantId, payrollMonthEnd.toISOString()]
@@ -3666,23 +4471,19 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           
           // If items exist and are approved, don't allow edits - just process as-is
           if (existingItemsResult.rows.length > 0) {
-            // Calculate totals from existing items
-            let processedCount = 0;
-            let totalGrossSalary = 0;
-            let totalDeductions = 0;
-            
-            for (const existingItem of existingItemsResult.rows) {
-              processedCount++;
-              totalGrossSalary += Number(existingItem.gross_salary || 0);
-              // Get deductions from existing item
-              const itemDeductions = await query(
-                "SELECT deductions FROM payroll_items WHERE payroll_cycle_id = $1 AND employee_id = $2 AND tenant_id = $3",
-                [cycleId, existingItem.employee_id, tenantId]
-              );
-              totalDeductions += Number(itemDeductions.rows[0]?.deductions || 0);
-            }
+            // Calculate totals from existing items - use NET salary for total_amount
+            const totalNetSalaryResult = await query(
+              `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary,
+                      COUNT(*) as employee_count
+               FROM payroll_items
+               WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+              [cycleId, tenantId]
+            );
+            const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+            const processedCount = Number(totalNetSalaryResult.rows[0]?.employee_count || 0);
 
             // Update cycle status to processing
+            // Store NET salary in total_amount to match Review Dialog and Bank Export
             await query(
               `UPDATE payroll_cycles
                SET status = 'processing',
@@ -3690,7 +4491,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
                    total_amount = $2,
                    updated_at = NOW()
                WHERE id = $3 AND tenant_id = $4`,
-              [processedCount, totalGrossSalary, cycleId, tenantId]
+              [processedCount, totalNetSalary, cycleId, tenantId]
             );
 
             return res.status(200).json({
@@ -3787,7 +4588,38 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           editedTdsDeduction = (excessAmount * 5) / 100 / 12;
         }
 
-        const calculatedDeductions = editedPfDeduction + editedEsiDeduction + editedPtDeduction + editedTdsDeduction;
+        // Check for active advance salary EMI deductions
+        let advanceEmiDeduction = 0;
+        const advanceResult = await query(
+          `SELECT id, monthly_emi, paid_amount, total_amount, start_month
+           FROM salary_advances
+           WHERE employee_id = $1 
+             AND tenant_id = $2 
+             AND status = 'active'
+             AND start_month <= $3`,
+          [employee_id, tenantId, new Date(payrollYear, payrollMonth, 1).toISOString()]
+        );
+
+        if (advanceResult.rows.length > 0) {
+          const advance = advanceResult.rows[0];
+          const remainingAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+          
+          if (remainingAmount > 0) {
+            // Calculate EMI for this month
+            let emiAmount = Number(advance.monthly_emi);
+            
+            // Boundary check: ensure paid_amount + emiAmount doesn't exceed total_amount
+            if (Number(advance.paid_amount) + emiAmount > Number(advance.total_amount)) {
+              emiAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+            }
+            
+            if (emiAmount > 0) {
+              advanceEmiDeduction = emiAmount;
+            }
+          }
+        }
+
+        const calculatedDeductions = editedPfDeduction + editedEsiDeduction + editedPtDeduction + editedTdsDeduction + advanceEmiDeduction;
         const netSalary = editedGrossSalary - calculatedDeductions;
 
         // Insert or update payroll item with edited values
@@ -3806,6 +4638,13 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           }
         }
 
+        // Store advance deduction in metadata for payslip display
+        const metadata: any = {};
+        if (advanceEmiDeduction > 0) {
+          metadata.advance_deduction = advanceEmiDeduction;
+          metadata.advance_id = advanceResult.rows[0]?.id;
+        }
+
         await query(
           `INSERT INTO payroll_items (
             tenant_id, payroll_cycle_id, employee_id,
@@ -3813,8 +4652,9 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             basic_salary, hra, special_allowance,
             incentive_amount,
             pf_deduction, esi_deduction, tds_deduction, pt_deduction,
-            lop_days, paid_days, total_working_days
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            lop_days, paid_days, total_working_days,
+            metadata
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
           ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
             gross_salary = EXCLUDED.gross_salary,
             deductions = EXCLUDED.deductions,
@@ -3830,6 +4670,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             lop_days = EXCLUDED.lop_days,
             paid_days = EXCLUDED.paid_days,
             total_working_days = EXCLUDED.total_working_days,
+            metadata = EXCLUDED.metadata,
             updated_at = NOW()`,
           [
             tenantId,
@@ -3849,8 +4690,12 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             finalLopDays,
             finalPaidDays,
             finalTotalWorkingDays,
+            Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null,
           ]
         );
+
+        // Update advance paid_amount if EMI was deducted (only when payroll is completed)
+        // This will be handled after payroll cycle is marked as completed
 
         if (incentiveAmount > 0) {
           await query(
@@ -3876,7 +4721,17 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         totalDeductions += calculatedDeductions;
       }
 
+      // Calculate total net salary from stored payroll_items
+      const totalNetSalaryResult = await query(
+        `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary
+         FROM payroll_items
+         WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+        [cycleId, tenantId]
+      );
+      const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+
       // Update payroll cycle with processed data
+      // Store NET salary in total_amount to match Review Dialog and Bank Export
       await query(
         `UPDATE payroll_cycles
          SET status = 'processing',
@@ -3884,8 +4739,55 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
              total_amount = $2,
              updated_at = NOW()
          WHERE id = $3 AND tenant_id = $4`,
-        [processedCount, totalGrossSalary, cycleId, tenantId]
+        [processedCount, totalNetSalary, cycleId, tenantId]
       );
+
+      // Update advance salary paid_amount for all employees with EMI deductions
+      // This happens after payroll items are created
+      const advanceUpdatesResult = await query(
+        `SELECT 
+          pi.employee_id,
+          pi.metadata,
+          sa.id as advance_id,
+          sa.monthly_emi,
+          sa.paid_amount,
+          sa.total_amount
+        FROM payroll_items pi
+        JOIN salary_advances sa ON sa.employee_id = pi.employee_id 
+          AND sa.tenant_id = pi.tenant_id
+          AND sa.status = 'active'
+        WHERE pi.payroll_cycle_id = $1 
+          AND pi.tenant_id = $2
+          AND pi.metadata IS NOT NULL
+          AND pi.metadata::text LIKE '%advance_deduction%'`,
+        [cycleId, tenantId]
+      );
+
+      for (const advanceUpdate of advanceUpdatesResult.rows) {
+        try {
+          const metadata = JSON.parse(advanceUpdate.metadata || '{}');
+          const emiDeduction = Number(metadata.advance_deduction || 0);
+          
+          if (emiDeduction > 0) {
+            const newPaidAmount = Number(advanceUpdate.paid_amount) + emiDeduction;
+            const finalPaidAmount = Math.min(newPaidAmount, Number(advanceUpdate.total_amount));
+            
+            // Update paid_amount and status if fully repaid
+            const newStatus = finalPaidAmount >= Number(advanceUpdate.total_amount) ? 'completed' : 'active';
+            
+            await query(
+              `UPDATE salary_advances 
+               SET paid_amount = $1, 
+                   status = $2,
+                   updated_at = NOW()
+               WHERE id = $3 AND tenant_id = $4`,
+              [finalPaidAmount, newStatus, advanceUpdate.advance_id, tenantId]
+            );
+          }
+        } catch (err) {
+          console.error(`Error updating advance for employee ${advanceUpdate.employee_id}:`, err);
+        }
+      }
 
       return res.status(200).json({
         message: `Payroll processed successfully for ${processedCount} employees`,
@@ -3897,8 +4799,8 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
     }
 
     // Original logic: calculate fresh (for backward compatibility)
-    // For approved cycles, items should already exist - skip processing
-    if (cycle.status === 'approved') {
+    // For approved or pending_approval cycles, if items already exist, use them
+    if (['approved', 'pending_approval'].includes(cycle.status)) {
       const existingItemsResult = await query(
         "SELECT COUNT(*)::text as count, SUM(gross_salary)::text as total_gross, SUM(deductions)::text as total_deductions FROM payroll_items WHERE payroll_cycle_id = $1 AND tenant_id = $2",
         [cycleId, tenantId]
@@ -3920,7 +4822,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         );
 
         return res.status(200).json({
-          message: `Payroll processed successfully for ${processedCount} employees (approved payroll - using existing items)`,
+          message: `Payroll processed successfully for ${processedCount} employees (using existing items)`,
           processedCount,
           totalGrossSalary,
           totalDeductions,
@@ -4753,6 +5655,598 @@ appRouter.get("/reports/statutory/tds-summary", requireAuth, async (req, res) =>
   } catch (error: any) {
     console.error("Error proxying TDS Summary request:", error);
     res.status(500).json({ error: error.message || "Failed to fetch TDS Summary" });
+  }
+});
+
+// ========== ADVANCE SALARY & EMI MODULE ==========
+
+// Ensure salary_advances table exists
+async function ensureSalaryAdvancesTable() {
+  try {
+    // Create enum type for advance status
+    await query(`
+      DO $$
+      BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'advance_status_enum') THEN
+              CREATE TYPE advance_status_enum AS ENUM ('active', 'completed', 'cancelled');
+          END IF;
+      END$$;
+    `);
+
+    // Create salary_advances table
+    await query(`
+      CREATE TABLE IF NOT EXISTS salary_advances (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          employee_id UUID REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
+          tenant_id UUID NOT NULL,
+          total_amount NUMERIC(12,2) NOT NULL,
+          tenure_months INTEGER NOT NULL CHECK (tenure_months > 0),
+          monthly_emi NUMERIC(12,2) NOT NULL,
+          paid_amount NUMERIC(12,2) DEFAULT 0 CHECK (paid_amount >= 0),
+          remaining_amount NUMERIC(12,2) GENERATED ALWAYS AS (total_amount - paid_amount) STORED,
+          status advance_status_enum NOT NULL DEFAULT 'active',
+          start_month DATE NOT NULL,
+          disbursement_date DATE NOT NULL,
+          notes TEXT,
+          created_by UUID,
+          created_at TIMESTAMPTZ DEFAULT now(),
+          updated_at TIMESTAMPTZ DEFAULT now(),
+          CONSTRAINT check_paid_not_exceed_total CHECK (paid_amount <= total_amount)
+      );
+    `);
+
+    // Create indexes for performance
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_employee ON salary_advances(employee_id);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_status ON salary_advances(status);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_tenant ON salary_advances(tenant_id);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_start_month ON salary_advances(start_month);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_salary_advances_active_employee ON salary_advances(employee_id, status) WHERE status = 'active';`);
+  } catch (error: any) {
+    console.error("Error ensuring salary_advances table:", error);
+    // Don't throw - let the endpoint handle the error
+  }
+}
+
+// Get all active advances for a tenant
+appRouter.get("/advance-salary", requireAuth, async (req, res) => {
+  try {
+    // Ensure table exists
+    await ensureSalaryAdvancesTable();
+    
+    const tenantId = (req as any).tenantId as string;
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    const { status } = req.query;
+    
+    // Try using payroll_employee_view first (unified database)
+    // Note: In payroll_employee_view, employee_id is the UUID (id from employees table)
+    let queryStr = `
+      SELECT 
+        sa.*,
+        COALESCE(ev.employee_code, 'N/A') as employee_code,
+        COALESCE(ev.full_name, ev.first_name || ' ' || ev.last_name, 'N/A') as employee_name,
+        COALESCE(ev.email, 'N/A') as email
+      FROM salary_advances sa
+      LEFT JOIN payroll_employee_view ev ON ev.employee_id = sa.employee_id AND ev.org_id = sa.tenant_id
+      WHERE sa.tenant_id = $1
+    `;
+    const params: any[] = [tenantId];
+
+    if (status) {
+      queryStr += ` AND sa.status = $2`;
+      params.push(status);
+    }
+
+    queryStr += ` ORDER BY sa.created_at DESC`;
+
+    let result;
+    try {
+      result = await query(queryStr, params);
+    } catch (viewError: any) {
+      // Fallback to employees table with profiles join
+      console.warn('payroll_employee_view not available, using employees table:', viewError.message);
+      const fallbackParams: any[] = [tenantId];
+      let fallbackQuery = `
+        SELECT 
+          sa.*,
+          COALESCE(e.employee_id::text, e.employee_code, 'N/A') as employee_code,
+          COALESCE(
+            NULLIF(TRIM(CONCAT(COALESCE(p.first_name, ''), ' ', COALESCE(p.last_name, ''))), ''),
+            p.email,
+            e.full_name,
+            'N/A'
+          ) as employee_name,
+          COALESCE(p.email, e.email, 'N/A') as email
+        FROM salary_advances sa
+        JOIN employees e ON e.id = sa.employee_id
+        LEFT JOIN profiles p ON p.id = e.user_id
+        WHERE sa.tenant_id = $1
+      `;
+      
+      if (status) {
+        fallbackQuery += ` AND sa.status = $2`;
+        fallbackParams.push(status);
+      }
+      
+      fallbackQuery += ` ORDER BY sa.created_at DESC`;
+      result = await query(fallbackQuery, fallbackParams);
+    }
+    
+    if (!result || !result.rows) {
+      return res.json([]);
+    }
+    
+    res.json(result.rows);
+  } catch (error: any) {
+    console.error("Error fetching advances:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch advances" });
+  }
+});
+
+// Create a new advance salary
+appRouter.post("/advance-salary", requireAuth, async (req, res) => {
+  try {
+    // Ensure table exists
+    await ensureSalaryAdvancesTable();
+    
+    const tenantId = (req as any).tenantId as string;
+    const userId = (req as any).userId as string;
+    const hrUserId = (req as any).hrUserId as string | null;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    const { employee_id, amount_mode, value, tenure_months, start_month, disbursement_date, notes } = req.body;
+    
+    // Get the profile ID (hr_user_id) for created_by field
+    // The salary_advances.created_by references profiles(id), not users(id)
+    let createdByProfileId: string | null = hrUserId || null;
+    
+    if (!createdByProfileId && userId) {
+      try {
+        // Try to get profile ID from users table's hr_user_id field
+        const userResult = await query(
+          `SELECT hr_user_id FROM users WHERE id = $1 LIMIT 1`,
+          [userId]
+        );
+        if (userResult.rows[0]?.hr_user_id) {
+          createdByProfileId = userResult.rows[0].hr_user_id;
+        } else {
+          // Try to find profile by email
+          const email = (req as any).userEmail as string;
+          if (email) {
+            const profileResult = await query(
+              `SELECT id FROM profiles WHERE email = $1 LIMIT 1`,
+              [email]
+            );
+            if (profileResult.rows[0]?.id) {
+              createdByProfileId = profileResult.rows[0].id;
+            }
+          }
+        }
+      } catch (fetchError: any) {
+        console.warn('[CREATE ADVANCE SALARY] Could not fetch profile ID:', fetchError.message);
+        // created_by can be null, so we'll continue
+        createdByProfileId = null;
+      }
+    }
+    
+    if (!createdByProfileId) {
+      console.warn('[CREATE ADVANCE SALARY] No profile ID found for user:', userId, '- setting created_by to null');
+    }
+
+    // Validation
+    if (!employee_id || !amount_mode || value === undefined || !tenure_months || !start_month || !disbursement_date) {
+      return res.status(400).json({ 
+        error: "Missing required fields: employee_id, amount_mode, value, tenure_months, start_month, disbursement_date" 
+      });
+    }
+
+    if (!['fixed', 'months'].includes(amount_mode)) {
+      return res.status(400).json({ error: "amount_mode must be 'fixed' or 'months'" });
+    }
+
+    if (tenure_months <= 0) {
+      return res.status(400).json({ error: "tenure_months must be greater than 0" });
+    }
+
+    // Check if employee has an active advance
+    const activeAdvanceCheck = await query(
+      `SELECT id FROM salary_advances 
+       WHERE employee_id = $1 AND tenant_id = $2 AND status = 'active'`,
+      [employee_id, tenantId]
+    );
+
+    if (activeAdvanceCheck.rows.length > 0) {
+      return res.status(400).json({ 
+        error: "Employee already has an active advance. Please complete or cancel the existing advance first." 
+      });
+    }
+
+    // Verify employee exists
+    const employeeCheck = await query(
+      `SELECT id FROM employees WHERE id = $1 AND tenant_id = $2`,
+      [employee_id, tenantId]
+    );
+
+    if (employeeCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Employee not found" });
+    }
+
+    let totalAmount: number;
+
+    if (amount_mode === 'fixed') {
+      totalAmount = Number(value);
+      if (totalAmount <= 0) {
+        return res.status(400).json({ error: "Advance amount must be greater than 0" });
+      }
+    } else {
+      // amount_mode === 'months'
+      const numMonths = Number(value);
+      if (numMonths <= 0) {
+        return res.status(400).json({ error: "Number of months must be greater than 0" });
+      }
+
+      // Get employee's current net salary from latest payroll or compensation structure
+      const latestPayrollResult = await query(
+        `SELECT net_salary 
+         FROM payroll_items 
+         WHERE employee_id = $1 AND tenant_id = $2 
+         ORDER BY created_at DESC 
+         LIMIT 1`,
+        [employee_id, tenantId]
+      );
+
+      let netSalary = 0;
+      if (latestPayrollResult.rows.length > 0) {
+        netSalary = Number(latestPayrollResult.rows[0].net_salary) || 0;
+      } else {
+        // Fallback: calculate from compensation structure
+        const compResult = await query(
+          `SELECT 
+            basic_salary, hra, special_allowance, da, lta, bonus, gross_pay
+           FROM compensation_structures
+           WHERE employee_id = $1 AND tenant_id = $2
+           ORDER BY effective_from DESC
+           LIMIT 1`,
+          [employee_id, tenantId]
+        );
+
+        if (compResult.rows.length > 0) {
+          const comp = compResult.rows[0];
+          const gross = Number(comp.gross_pay || comp.basic_salary || 0) + 
+                       Number(comp.hra || 0) + 
+                       Number(comp.special_allowance || 0) +
+                       Number(comp.da || 0) +
+                       Number(comp.lta || 0) +
+                       Number(comp.bonus || 0);
+          
+          // Estimate net (gross - 20% for deductions)
+          netSalary = gross * 0.8;
+        }
+      }
+
+      if (netSalary <= 0) {
+        return res.status(400).json({ 
+          error: "Unable to determine employee's net salary. Please use fixed amount mode or ensure employee has salary data." 
+        });
+      }
+
+      totalAmount = netSalary * numMonths;
+    }
+
+    // Calculate monthly EMI (0% interest) - round to 2 decimal places
+    const monthlyEmi = Math.round((totalAmount / tenure_months) * 100) / 100;
+
+    // Parse dates - ensure they're valid Date objects
+    const startMonthDate = new Date(start_month);
+    const disbursementDate = new Date(disbursement_date);
+
+    if (isNaN(startMonthDate.getTime()) || isNaN(disbursementDate.getTime())) {
+      return res.status(400).json({ error: "Invalid date format for start_month or disbursement_date" });
+    }
+
+    // Format dates as YYYY-MM-DD for PostgreSQL DATE type
+    const formatDateForDB = (date: Date): string => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Round totalAmount to 2 decimal places
+    const roundedTotalAmount = Math.round(totalAmount * 100) / 100;
+
+    // Insert advance
+    const result = await query(
+      `INSERT INTO salary_advances (
+        employee_id, tenant_id, total_amount, tenure_months, monthly_emi,
+        start_month, disbursement_date, notes, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6::date, $7::date, $8, $9)
+      RETURNING *`,
+      [
+        employee_id, 
+        tenantId, 
+        roundedTotalAmount, 
+        tenure_months, 
+        monthlyEmi, 
+        formatDateForDB(startMonthDate), 
+        formatDateForDB(disbursementDate), 
+        notes || null, 
+        createdByProfileId
+      ]
+    );
+
+    res.status(201).json({
+      message: "Advance salary created successfully",
+      advance: result.rows[0],
+    });
+  } catch (error: any) {
+    console.error("Error creating advance:", error);
+    res.status(500).json({ error: error.message || "Failed to create advance salary" });
+  }
+});
+
+// Generate advance salary slip PDF
+appRouter.get("/advance-salary/:id/slip", requireAuth, async (req, res) => {
+  try {
+    // Ensure table exists
+    await ensureSalaryAdvancesTable();
+    
+    const tenantId = (req as any).tenantId as string;
+    const { id } = req.params;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    // Get advance details with employee info
+    const advanceResult = await query(
+      `SELECT 
+        sa.*,
+        COALESCE(e.employee_id, e.employee_code, 'N/A') as employee_code,
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'N/A') as employee_name,
+        COALESCE(p.email, e.email, 'N/A') as email,
+        COALESCE(e.position, e.designation, 'N/A') as designation,
+        COALESCE(e.department, 'N/A') as department,
+        o.name as company_name
+      FROM salary_advances sa
+      JOIN employees e ON e.id = sa.employee_id
+      LEFT JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN organizations o ON o.id = sa.tenant_id
+      WHERE sa.id = $1 AND sa.tenant_id = $2`,
+      [id, tenantId]
+    );
+
+    if (advanceResult.rows.length === 0) {
+      return res.status(404).json({ error: "Advance not found" });
+    }
+
+    const advance = advanceResult.rows[0];
+
+    // Create PDF
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    
+    // Set response headers
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="advance-salary-${advance.employee_code}-${advance.id.substring(0, 8)}.pdf"`
+    );
+
+    // Pipe PDF to response
+    doc.pipe(res);
+
+    // Helper function to format currency
+    const formatCurrency = (amount: number) => {
+      return `₹${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
+    };
+
+    // Helper to format date
+    const formatDate = (date: string | Date) => {
+      if (!date) return 'N/A';
+      const d = new Date(date);
+      return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    };
+
+    // Header
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#000000');
+    doc.text('ADVANCE SALARY RECEIPT', { align: 'center' });
+    doc.moveDown(1);
+
+    // Company Name
+    doc.fontSize(14).font('Helvetica');
+    doc.text(advance.company_name || 'Company Name', { align: 'center' });
+    doc.moveDown(1.5);
+
+    // Receipt Details
+    doc.fontSize(10).fillColor('#666666');
+    doc.text(`Receipt No: ADV-${advance.id.substring(0, 8).toUpperCase()}`, { align: 'right' });
+    doc.text(`Date: ${formatDate(advance.disbursement_date)}`, { align: 'right' });
+    doc.moveDown(1);
+
+    // Employee Details Section
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#000000');
+    doc.text('Employee Details', { underline: true });
+    doc.moveDown(0.5);
+
+    doc.fontSize(10).font('Helvetica').fillColor('#000000');
+    const employeeDetails = [
+      ['Employee Code:', advance.employee_code || 'N/A'],
+      ['Employee Name:', advance.employee_name || 'N/A'],
+      ['Email:', advance.email || 'N/A'],
+      ['Designation:', advance.designation || 'N/A'],
+      ['Department:', advance.department || 'N/A'],
+    ];
+
+    let yPos = doc.y;
+    employeeDetails.forEach(([label, value]) => {
+      doc.text(label, 50, yPos, { width: 150 });
+      doc.text(value, 200, yPos, { width: 300 });
+      yPos += 20;
+    });
+
+    doc.y = yPos + 10;
+    doc.moveDown(1);
+
+    // Advance Details Section
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#000000');
+    doc.text('Advance Details', { underline: true });
+    doc.moveDown(0.5);
+
+    doc.fontSize(10).font('Helvetica').fillColor('#000000');
+    const advanceDetails = [
+      ['Total Advance Amount:', formatCurrency(Number(advance.total_amount))],
+      ['Disbursement Date:', formatDate(advance.disbursement_date)],
+      ['Repayment Tenure:', `${advance.tenure_months} months`],
+      ['Monthly EMI:', formatCurrency(Number(advance.monthly_emi))],
+      ['EMI Start Month:', formatDate(advance.start_month)],
+      ['Amount Repaid:', formatCurrency(Number(advance.paid_amount))],
+      ['Remaining Amount:', formatCurrency(Number(advance.remaining_amount))],
+      ['Status:', advance.status.toUpperCase()],
+    ];
+
+    yPos = doc.y;
+    advanceDetails.forEach(([label, value]) => {
+      doc.text(label, 50, yPos, { width: 150 });
+      doc.text(value, 200, yPos, { width: 300 });
+      yPos += 20;
+    });
+
+    doc.y = yPos + 10;
+    doc.moveDown(1);
+
+    // Repayment Schedule
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#000000');
+    doc.text('Repayment Schedule', { underline: true });
+    doc.moveDown(0.5);
+
+    doc.fontSize(9).font('Helvetica');
+    const tableTop = doc.y;
+    const tableLeft = 50;
+    const colWidth = 120;
+    const rowHeight = 20;
+
+    // Table headers
+    doc.font('Helvetica-Bold');
+    doc.rect(tableLeft, tableTop, colWidth, rowHeight).stroke();
+    doc.text('Month', tableLeft + 5, tableTop + 6, { width: colWidth - 10 });
+    
+    doc.rect(tableLeft + colWidth, tableTop, colWidth, rowHeight).stroke();
+    doc.text('EMI Amount', tableLeft + colWidth + 5, tableTop + 6, { width: colWidth - 10 });
+    
+    doc.rect(tableLeft + colWidth * 2, tableTop, colWidth, rowHeight).stroke();
+    doc.text('Cumulative Paid', tableLeft + colWidth * 2 + 5, tableTop + 6, { width: colWidth - 10 });
+
+    // Table rows
+    doc.font('Helvetica');
+    let currentY = tableTop + rowHeight;
+    const startDate = new Date(advance.start_month);
+    const monthlyEmi = Number(advance.monthly_emi);
+    let cumulativePaid = Number(advance.paid_amount);
+
+    for (let i = 0; i < advance.tenure_months; i++) {
+      const monthDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+      const monthName = monthDate.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+      
+      const emiForThisMonth = i === advance.tenure_months - 1 
+        ? Number(advance.total_amount) - cumulativePaid  // Last month: adjust for rounding
+        : monthlyEmi;
+      
+      cumulativePaid += emiForThisMonth;
+      if (cumulativePaid > Number(advance.total_amount)) {
+        cumulativePaid = Number(advance.total_amount);
+      }
+
+      doc.rect(tableLeft, currentY, colWidth, rowHeight).stroke();
+      doc.text(monthName, tableLeft + 5, currentY + 6, { width: colWidth - 10 });
+      
+      doc.rect(tableLeft + colWidth, currentY, colWidth, rowHeight).stroke();
+      doc.text(formatCurrency(emiForThisMonth), tableLeft + colWidth + 5, currentY + 6, { width: colWidth - 10 });
+      
+      doc.rect(tableLeft + colWidth * 2, currentY, colWidth, rowHeight).stroke();
+      doc.text(formatCurrency(cumulativePaid), tableLeft + colWidth * 2 + 5, currentY + 6, { width: colWidth - 10 });
+
+      currentY += rowHeight;
+    }
+
+    doc.y = currentY + 20;
+
+    // Notes
+    if (advance.notes) {
+      doc.moveDown(1);
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000000');
+      doc.text('Notes:', { underline: true });
+      doc.moveDown(0.3);
+      doc.fontSize(9).font('Helvetica').fillColor('#000000');
+      doc.text(advance.notes, { width: 500 });
+    }
+
+    // Footer
+    doc.moveDown(2);
+    doc.fontSize(8).font('Helvetica').fillColor('#666666');
+    doc.text(
+      'This is a computer generated receipt. The advance will be deducted from future payrolls as per the repayment schedule.',
+      { align: 'center' }
+    );
+    doc.fillColor('#000000');
+
+    // Finalize PDF
+    doc.end();
+  } catch (error: any) {
+    console.error("Error generating advance slip PDF:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message || "Failed to generate advance slip PDF" });
+    }
+  }
+});
+
+// Cancel an advance (optional - for business logic)
+appRouter.post("/advance-salary/:id/cancel", requireAuth, async (req, res) => {
+  try {
+    // Ensure table exists
+    await ensureSalaryAdvancesTable();
+    
+    const tenantId = (req as any).tenantId as string;
+    const { id } = req.params;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "User tenant not found" });
+    }
+
+    const advanceResult = await query(
+      `SELECT status, paid_amount FROM salary_advances WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+
+    if (advanceResult.rows.length === 0) {
+      return res.status(404).json({ error: "Advance not found" });
+    }
+
+    const advance = advanceResult.rows[0];
+
+    if (advance.status === 'completed') {
+      return res.status(400).json({ error: "Cannot cancel a completed advance" });
+    }
+
+    if (Number(advance.paid_amount) > 0) {
+      return res.status(400).json({ 
+        error: "Cannot cancel advance with existing repayments. Please contact administrator." 
+      });
+    }
+
+    await query(
+      `UPDATE salary_advances SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+
+    res.json({ message: "Advance cancelled successfully" });
+  } catch (error: any) {
+    console.error("Error cancelling advance:", error);
+    res.status(500).json({ error: error.message || "Failed to cancel advance" });
   }
 });
 

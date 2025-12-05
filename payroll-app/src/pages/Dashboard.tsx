@@ -4,7 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, Users, IndianRupee, FileText, LogOut, PlusCircle, Calendar, CheckCircle2, Clock, Key, Receipt } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Building2, Users, IndianRupee, FileText, PlusCircle, Calendar, CheckCircle2, Clock, Receipt, Wallet, Bell } from "lucide-react";
+import { PayrollLayout } from "@/components/layout/PayrollLayout";
 import { toast } from "sonner";
 
 // Define a type for the profile state
@@ -53,6 +55,7 @@ const Dashboard = () => {
   });
   const [recentCycles, setRecentCycles] = useState<any[]>([]);
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const [pendingReimbursementCount, setPendingReimbursementCount] = useState<number>(0);
 
   useEffect(() => {
     // Use API call to check authentication instead of reading cookies
@@ -82,11 +85,16 @@ const Dashboard = () => {
           
           // Load dashboard data (tenant, stats, cycles) - profile already fetched above
           try {
-            const [tenantRes, statsRes, cyclesRes] = await Promise.all([
+            const [tenantRes, statsRes, cyclesRes, reimbursementCountRes] = await Promise.all([
               api.dashboard.tenant(),
               api.dashboard.stats(),
               api.dashboard.cycles(),
+              api.reimbursements.pendingCount().catch(() => ({ count: 0 })),
             ]);
+            
+            if (reimbursementCountRes?.count !== undefined) {
+              setPendingReimbursementCount(reimbursementCountRes.count);
+            }
 
             // Use tenant data from backend (which should have HR data if backend fetched it)
             // Backend handles HR API calls to avoid CORS issues
@@ -238,11 +246,6 @@ const Dashboard = () => {
     }
   };
 
-  const handleSignOut = async () => {
-    await api.auth.logout();
-    navigate("/pin-auth");
-    toast.success("Signed out successfully");
-  };
 
   if (loading) {
     return (
@@ -275,63 +278,19 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
-      {/* Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            {companyLogo ? (
-              <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 shadow-sm bg-slate-800 flex items-center justify-center">
-                <img 
-                  src={companyLogo}
-                  alt={companyName}
-                  className="w-full h-full object-contain"
-                  onError={(e) => {
-                    // Fallback to icon if image fails to load
-                    e.currentTarget.style.display = 'none';
-                    const parent = e.currentTarget.parentElement;
-                    if (parent) {
-                      parent.innerHTML = '<div class="w-10 h-10 rounded-lg bg-primary flex items-center justify-center"><svg class="w-6 h-6 text-primary-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg></div>';
-                    }
-                  }}
-                />
-              </div>
-            ) : (
-              <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
-                <Building2 className="w-6 h-6 text-primary-foreground" />
-              </div>
-            )}
-            <div>
-              <h1 className="text-xl font-bold text-foreground">{companyName}</h1>
-              {/* Use the email from the fetched profile */}
-              <p className="text-xs text-muted-foreground">{profile?.email || user?.id}</p>
-            </div>
-          </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => navigate("/change-pin")}>
-                    <Key className="mr-2 h-4 w-4" />
-                    Change PIN
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleSignOut}>
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Sign Out
-                  </Button>
-                </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
+    <PayrollLayout>
+      <div className="container mx-auto px-4 py-8">
+        {/* Header Section */}
         <div className="mb-8">
-          <h2 className="text-3xl font-bold text-foreground mb-2">
+          <h1 className="text-4xl font-bold text-foreground mb-2">
             {payrollRole === 'payroll_admin' && hrRole === 'hr' ? 'HR Dashboard' : 
              payrollRole === 'payroll_admin' ? 'Admin Dashboard' : 'Employee Dashboard'}
-          </h2>
-          <p className="text-muted-foreground">
+          </h1>
+          <p className="text-lg text-muted-foreground">
             {payrollRole === 'payroll_admin' 
               ? 'Manage your payroll operations efficiently' 
               : employee 
-                ? `Welcome, ${employee.full_name || employee.first_name || profile?.full_name || profile?.email}` 
+                ? `Welcome back, ${employee.full_name || employee.first_name || profile?.full_name || profile?.email}` 
                 : 'Your payroll information'}
           </p>
         </div>
@@ -440,7 +399,7 @@ const Dashboard = () => {
           <Card className="shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Net Payable</CardTitle>
-              <IndianRupee className="h-4 w-4 text-green-500" />
+              <IndianRupee className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">₹{stats.totalNetPayable.toLocaleString('en-IN')}</div>
@@ -471,9 +430,112 @@ const Dashboard = () => {
           </Card>
         </div>
 
-        {/* Recent Payroll Cycles */}
-        {recentCycles.length > 0 && (
-          <Card className="mb-8 shadow-md">
+        {/* Quick Actions */}
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <Card className="shadow-md hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate("/employees")}>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Users className="mr-2 h-5 w-5 text-primary" />
+                Manage Employees
+              </CardTitle>
+              <CardDescription>Add, edit, or remove employee records</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" onClick={(e) => { e.stopPropagation(); navigate("/employees?new=true"); }}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Add Employee
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-md hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate("/payroll")}>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <IndianRupee className="mr-2 h-5 w-5 text-primary" />
+                Payroll Cycles
+              </CardTitle>
+              <CardDescription>Create and manage payroll runs</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" onClick={(e) => { e.stopPropagation(); navigate("/payroll?new=true"); }}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                New Payroll Cycle
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-md hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate("/reports")}>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <FileText className="mr-2 h-5 w-5 text-blue-500" />
+                Reports
+              </CardTitle>
+              <CardDescription>View payroll and compliance reports</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" onClick={(e) => { e.stopPropagation(); navigate("/reports"); }}>
+                View Reports
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card
+            className="shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+            onClick={() => navigate("/advance-salary")}
+          >
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Wallet className="mr-2 h-5 w-5 text-orange-500" />
+                Advance Salary
+              </CardTitle>
+              <CardDescription>Manage employee salary advances and EMI deductions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" onClick={(e) => { e.stopPropagation(); navigate("/advance-salary"); }}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Manage Advances
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card
+            className="shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+            onClick={() => navigate("/approve-reimbursements")}
+          >
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Receipt className="mr-2 h-5 w-5 text-purple-500" />
+                  Reimbursements
+                </div>
+                {pendingReimbursementCount > 0 && (
+                  <Badge variant="destructive" className="flex items-center gap-1">
+                    <Bell className="h-3 w-3" />
+                    {pendingReimbursementCount}
+                  </Badge>
+                )}
+              </CardTitle>
+              <CardDescription>Review and approve expense claims</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                className="w-full"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate("/approve-reimbursements");
+                }}
+              >
+                {pendingReimbursementCount > 0
+                  ? `View ${pendingReimbursementCount} Pending Claim${pendingReimbursementCount > 1 ? "s" : ""}`
+                  : "Pending Claims"}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Recent Payroll Cycles - Moved to bottom */}
+        {payrollRole === 'payroll_admin' && recentCycles.length > 0 && (
+          <Card className="mt-8 shadow-md">
             <CardHeader>
               <CardTitle className="flex items-center">
                 <Calendar className="mr-2 h-5 w-5 text-primary" />
@@ -520,7 +582,6 @@ const Dashboard = () => {
                 })}
               </div>
               <Button 
-                variant="outline" 
                 className="w-full mt-4" 
                 onClick={() => navigate("/payroll")}
               >
@@ -530,108 +591,6 @@ const Dashboard = () => {
           </Card>
         )}
 
-        {/* Quick Actions */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="shadow-md hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate("/employees")}>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Users className="mr-2 h-5 w-5 text-primary" />
-                Manage Employees
-              </CardTitle>
-              <CardDescription>Add, edit, or remove employee records</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" onClick={(e) => { e.stopPropagation(); navigate("/employees?new=true"); }}>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                Add Employee
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-md hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate("/payroll")}>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <IndianRupee className="mr-2 h-5 w-5 text-green-500" />
-                Payroll Cycles
-              </CardTitle>
-              <CardDescription>Create and manage payroll runs</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate("/payroll?new=true"); }}>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                New Payroll Cycle
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-md hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate("/reports")}>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <FileText className="mr-2 h-5 w-5 text-blue-500" />
-                Reports
-              </CardTitle>
-              <CardDescription>View payroll and compliance reports</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" variant="outline">
-                View Reports
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card
-            className="shadow-md hover:shadow-lg transition-shadow cursor-pointer"
-            onClick={() => navigate("/approve-reimbursements")}
-          >
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Receipt className="mr-2 h-5 w-5 text-purple-500" />
-                Reimbursements
-              </CardTitle>
-              <CardDescription>Review and approve expense claims</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button
-                className="w-full"
-                variant="secondary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate("/approve-reimbursements");
-                }}
-              >
-                Pending Claims
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Getting Started (only for admin) */}
-        <Card className="mt-8 bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
-          <CardHeader>
-            <CardTitle>Getting Started</CardTitle>
-            <CardDescription>Complete these steps to set up your payroll system</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">
-                1
-              </div>
-              <p className="text-sm">Add your first employee</p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-6 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-sm font-bold">
-                2
-              </div>
-              <p className="text-sm text-muted-foreground">Configure salary structures</p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-6 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-sm font-bold">
-                3
-              </div>
-              <p className="text-sm text-muted-foreground">Run your first payroll cycle</p>
-            </div>
-          </CardContent>
-        </Card>
         </>
         )}
 
@@ -651,7 +610,7 @@ const Dashboard = () => {
             <Card className="shadow-md hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate("/employee-portal")}>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <IndianRupee className="mr-2 h-5 w-5 text-green-500" />
+                  <IndianRupee className="mr-2 h-5 w-5 text-primary" />
                   Salary Structure
                 </CardTitle>
                 <CardDescription>View your salary breakdown</CardDescription>
@@ -669,8 +628,8 @@ const Dashboard = () => {
             </Card>
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </PayrollLayout>
   );
 };
 

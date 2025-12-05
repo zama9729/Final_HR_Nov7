@@ -164,6 +164,9 @@ router.post('/v1/orgs/:orgId/employees/import', authenticateToken, requireRole('
     }) || null;
   };
 
+const departmentCache = new Map();
+const teamCache = new Map();
+
   // Auto-map if not provided
   if (!mapping || Object.keys(mapping).length === 0) {
     const headers = Object.keys(rows[0] || {});
@@ -209,21 +212,21 @@ router.post('/v1/orgs/:orgId/employees/import', authenticateToken, requireRole('
         const rowNum = i + j + 2; // account for header
         
         try {
-          const rec = {
-            firstName: row[mapping.first_name],
-            lastName: row[mapping.last_name],
-            email: row[mapping.email],
-            employeeId: row[mapping.employee_id],
-            department: row[mapping.department] || null,
-            role: row[mapping.role] || 'employee',
-            workLocation: row[mapping.work_location] || null,
-            joinDate: row[mapping.join_date] || null,
-          managerEmail: row[mapping.manager_email] || null,
-          branchName: row[mapping.branch_name] || null,
-          branchCode: row[mapping.branch_code] || null,
-          departmentCode: row[mapping.department_code] || null,
-          teamName: row[mapping.team_name] || null
-          };
+        const rec = {
+          firstName: row[mapping.first_name],
+          lastName: row[mapping.last_name],
+          email: row[mapping.email],
+          employeeId: row[mapping.employee_id],
+          department: row[mapping.department] ? String(row[mapping.department]).trim() : null,
+          role: row[mapping.role] || 'employee',
+          workLocation: row[mapping.work_location] || null,
+          joinDate: row[mapping.join_date] || null,
+        managerEmail: row[mapping.manager_email] || null,
+        branchName: row[mapping.branch_name] || null,
+        branchCode: row[mapping.branch_code] || null,
+        departmentCode: row[mapping.department_code] ? String(row[mapping.department_code]).trim() : null,
+        teamName: row[mapping.team_name] ? String(row[mapping.team_name]).trim() : null
+        };
           
           console.log(`Processing row ${rowNum}:`, { firstName: rec.firstName, lastName: rec.lastName, email: rec.email, employeeId: rec.employeeId });
         // Validate required fields (role is optional, defaults to 'employee')
@@ -361,8 +364,87 @@ router.post('/v1/orgs/:orgId/employees/import', authenticateToken, requireRole('
           const employeeDbId = employeeInsert.rows[0]?.id;
           await query('INSERT INTO user_roles (user_id, role, tenant_id) VALUES ($1,$2,$3)', [userId, rec.role, tenantId]);
           const branchMatch = findBranch(rec);
-          const departmentMatch = findDepartment(rec, branchMatch?.id || null);
-          const teamMatch = findTeam(rec, branchMatch?.id || null, departmentMatch?.id || null);
+          let departmentMatch = findDepartment(rec, branchMatch?.id || null);
+          if (!departmentMatch && rec.department) {
+            const normalizedDept = rec.department.trim();
+            const deptCode = rec.departmentCode || null;
+            const cacheKey = `${branchMatch?.id || 'none'}::${normalizedDept.toLowerCase()}`;
+            if (!departmentCache.has(cacheKey)) {
+              try {
+                const inserted = await query(
+                  `INSERT INTO departments (org_id, branch_id, name, code)
+                   VALUES ($1,$2,$3,$4)
+                   RETURNING id, name, code, branch_id`,
+                  [tenantId, branchMatch?.id || null, normalizedDept, deptCode]
+                );
+                departmentMatch = inserted.rows[0];
+                departmentLookup.rows.push(departmentMatch);
+                departmentCache.set(cacheKey, departmentMatch);
+                console.log(`Row ${rowNum}: Created department "${normalizedDept}" under branch ${branchMatch?.id || 'none'}`);
+              } catch (deptErr) {
+                if (deptErr.code === '23505') {
+                  departmentMatch = findDepartment(rec, branchMatch?.id || null);
+                  if (!departmentMatch) {
+                    const fetched = await query(
+                      `SELECT id, name, code, branch_id FROM departments
+                       WHERE org_id=$1 AND LOWER(name)=LOWER($2) AND ((branch_id IS NULL AND $3 IS NULL) OR branch_id=$3)
+                       LIMIT 1`,
+                      [tenantId, normalizedDept, branchMatch?.id || null]
+                    );
+                    departmentMatch = fetched.rows[0] || null;
+                    if (departmentMatch) {
+                      departmentLookup.rows.push(departmentMatch);
+                    }
+                  }
+                } else {
+                  throw deptErr;
+                }
+              }
+            } else {
+              departmentMatch = departmentCache.get(cacheKey);
+            }
+          }
+
+          let teamMatch = findTeam(rec, branchMatch?.id || null, departmentMatch?.id || null);
+          if (!teamMatch && rec.teamName) {
+            const normalizedTeam = rec.teamName.trim();
+            const cacheKey = `${branchMatch?.id || 'none'}::${normalizedTeam.toLowerCase()}`;
+            if (!teamCache.has(cacheKey)) {
+              try {
+                const insertedTeam = await query(
+                  `INSERT INTO teams (org_id, branch_id, department_id, name, host_branch_id, metadata)
+                   VALUES ($1,$2,$3,$4,$5,'{}'::jsonb)
+                   RETURNING id, name, branch_id, department_id`,
+                  [tenantId, branchMatch?.id || null, departmentMatch?.id || null, normalizedTeam, branchMatch?.id || null]
+                );
+                teamMatch = insertedTeam.rows[0];
+                teamLookup.rows.push(teamMatch);
+                teamCache.set(cacheKey, teamMatch);
+                console.log(`Row ${rowNum}: Created team "${normalizedTeam}" under branch ${branchMatch?.id || 'none'}`);
+              } catch (teamErr) {
+                if (teamErr.code === '23505') {
+                  teamMatch = findTeam(rec, branchMatch?.id || null, departmentMatch?.id || null);
+                  if (!teamMatch) {
+                    const fetchedTeam = await query(
+                      `SELECT id, name, branch_id, department_id FROM teams
+                       WHERE org_id=$1 AND LOWER(name)=LOWER($2)
+                         AND ((branch_id IS NULL AND $3 IS NULL) OR branch_id=$3)
+                       LIMIT 1`,
+                      [tenantId, normalizedTeam, branchMatch?.id || null]
+                    );
+                    teamMatch = fetchedTeam.rows[0] || null;
+                    if (teamMatch) {
+                      teamLookup.rows.push(teamMatch);
+                    }
+                  }
+                } else {
+                  throw teamErr;
+                }
+              }
+            } else {
+              teamMatch = teamCache.get(cacheKey);
+            }
+          }
           if (employeeDbId && (branchMatch || departmentMatch || teamMatch)) {
             await query(
               `INSERT INTO employee_assignments (

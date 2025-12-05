@@ -312,7 +312,7 @@ export default function OffboardingPolicies() {
             ) : (
               <div className="space-y-4">
                 {policies.map((policy) => (
-                  <div key={policy.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <div key={policy.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 hover-lift transition-colors">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <h3 className="font-semibold">{policy.name}</h3>

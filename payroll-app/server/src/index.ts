@@ -114,12 +114,34 @@ async function ensureRequiredTables() {
           da DECIMAL(12,2) DEFAULT 0,
           lta DECIMAL(12,2) DEFAULT 0,
           bonus DECIMAL(12,2) DEFAULT 0,
+          cca DECIMAL(12,2) DEFAULT 0,
+          conveyance DECIMAL(12,2) DEFAULT 0,
+          medical_allowance DECIMAL(12,2) DEFAULT 0,
           pf_contribution DECIMAL(12,2) DEFAULT 0,
           esi_contribution DECIMAL(12,2) DEFAULT 0,
           created_by UUID,
           created_at TIMESTAMPTZ DEFAULT now(),
           updated_at TIMESTAMPTZ DEFAULT now()
         );
+      `);
+      
+      // Add new columns if they don't exist (for existing tables)
+      await query(`
+        DO $$ 
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                         WHERE table_name = 'compensation_structures' AND column_name = 'cca') THEN
+            ALTER TABLE public.compensation_structures ADD COLUMN cca DECIMAL(12,2) DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                         WHERE table_name = 'compensation_structures' AND column_name = 'conveyance') THEN
+            ALTER TABLE public.compensation_structures ADD COLUMN conveyance DECIMAL(12,2) DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                         WHERE table_name = 'compensation_structures' AND column_name = 'medical_allowance') THEN
+            ALTER TABLE public.compensation_structures ADD COLUMN medical_allowance DECIMAL(12,2) DEFAULT 0;
+          END IF;
+        END $$;
       `);
       
       console.log('✅ Compensation structures table created');

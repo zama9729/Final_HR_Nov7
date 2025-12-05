@@ -4,10 +4,12 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get past projects (CEO/HR can view any employee in same tenant, employee can view own)
+// Get employee projects - returns active project allocations (for Dashboard) or past projects (for Profile)
+// Query param ?type=past returns past projects, otherwise returns active allocations
 router.get('/employees/:id/projects', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
+    const { type } = req.query; // 'past' for past projects, otherwise active allocations
     const empRes = await query('SELECT tenant_id, user_id FROM employees WHERE id = $1', [id]);
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
@@ -26,27 +28,57 @@ router.get('/employees/:id/projects', authenticateToken, async (req, res) => {
     
     const roleRes = await query('SELECT role FROM user_roles WHERE user_id = $1', [req.user.id]);
     const userRole = roleRes.rows[0]?.role;
-    const isHROrCEO = ['hr', 'ceo', 'director'].includes(userRole);
+    const isHROrCEO = ['hr', 'ceo', 'director', 'admin'].includes(userRole?.toLowerCase());
     const isOwnProfile = empUserId === req.user.id;
     
     if (!isHROrCEO && !isOwnProfile) {
-      return res.status(403).json({ error: 'Unauthorized: only CEO/HR or employee can view past projects' });
+      return res.status(403).json({ error: 'Unauthorized: only CEO/HR or employee can view projects' });
     }
     
-    const result = await withClient(async (client) => {
-      return client.query(
-        `SELECT ep.*
-         FROM employee_projects ep
-         JOIN employees e ON e.id = ep.employee_id
-         WHERE ep.employee_id = $1 AND e.tenant_id = $2
-         ORDER BY ep.start_date DESC NULLS LAST`,
-        [id, empTenant]
-      );
-    }, empTenant);
-    res.json(result.rows || []);
+    if (type === 'past') {
+      // Return past projects from employee_projects
+      const result = await withClient(async (client) => {
+        return client.query(
+          `SELECT ep.*
+           FROM employee_projects ep
+           JOIN employees e ON e.id = ep.employee_id
+           WHERE ep.employee_id = $1 AND e.tenant_id = $2
+           ORDER BY ep.start_date DESC NULLS LAST`,
+          [id, empTenant]
+        );
+      }, empTenant);
+      return res.json(result.rows || []);
+    } else {
+      // Return active project allocations from project_allocations
+      const result = await withClient(async (client) => {
+        return client.query(
+          `SELECT 
+            pa.project_id as id,
+            pa.project_id,
+            p.name as project_name,
+            p.name,
+            p.code as project_code,
+            pa.role_on_project as role,
+            pa.percent_allocation as allocation_percent,
+            pa.start_date,
+            pa.end_date,
+            pa.allocation_type
+           FROM project_allocations pa
+           JOIN projects p ON p.id = pa.project_id
+           JOIN employees e ON e.id = pa.employee_id
+           WHERE pa.employee_id = $1 
+             AND pa.org_id = $2
+             AND (pa.end_date IS NULL OR pa.end_date >= CURRENT_DATE)
+             AND (pa.start_date IS NULL OR pa.start_date <= CURRENT_DATE)
+           ORDER BY pa.start_date DESC`,
+          [id, empTenant]
+        );
+      }, empTenant);
+      return res.json(result.rows || []);
+    }
   } catch (error) {
-    console.error('Error fetching past projects:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch past projects' });
+    console.error('Error fetching employee projects:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch employee projects' });
   }
 });
 

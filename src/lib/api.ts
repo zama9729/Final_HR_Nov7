@@ -269,6 +269,11 @@ class ApiClient {
     return this.request('/api/branches');
   }
 
+  async getBranches() {
+    const data = await this.getBranchHierarchy();
+    return data?.departments || [];
+  }
+
   async upsertBranch(payload: Record<string, any>) {
     return this.request('/api/branches/upsert', {
       method: 'POST',
@@ -332,6 +337,12 @@ class ApiClient {
   async markNotificationRead(id: string) {
     return this.request(`/api/notifications/${id}/read`, {
       method: 'PATCH',
+    });
+  }
+
+  async clearAllNotifications() {
+    return this.request('/api/notifications/clear', {
+      method: 'POST',
     });
   }
 
@@ -446,6 +457,30 @@ class ApiClient {
     return this.request(`/api/analytics/attendance/distribution?${query.toString()}`);
   }
 
+  async getPendingTimesheetApprovals(params: { from?: string; to?: string; manager_id?: string; department_id?: string }) {
+    const query = new URLSearchParams();
+    if (params.from) query.append('from', params.from);
+    if (params.to) query.append('to', params.to);
+    if (params.manager_id) query.append('manager_id', params.manager_id);
+    if (params.department_id) query.append('department_id', params.department_id);
+    const qs = query.toString();
+    const url = qs ? `/api/analytics/approvals/pending?${qs}` : `/api/analytics/approvals/pending`;
+    return this.request(url);
+  }
+
+  async getAnnouncements(limit = 5) {
+    const query = new URLSearchParams();
+    query.append('limit', String(limit));
+    return this.request(`/api/announcements?${query.toString()}`);
+  }
+
+  async createAnnouncement(data: { title: string; body: string; priority?: 'normal' | 'urgent'; pinned?: boolean }) {
+    return this.request('/api/announcements', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Background check methods
   async getBackgroundChecks() {
     return this.request('/api/background-checks');
@@ -453,6 +488,13 @@ class ApiClient {
 
   async getBackgroundChecksForEmployee(employeeId: string) {
     return this.request(`/api/background-checks/employee/${employeeId}`);
+  }
+
+  async getBackgroundCheckReport(checkId: string, options?: { legacy?: boolean }) {
+    if (options?.legacy) {
+      return this.request(`/api/background-checks/${checkId}/report`);
+    }
+    return this.request(`/api/onboarding/${checkId}/background-check`);
   }
 
   async createBackgroundCheck(payload: {
@@ -627,6 +669,18 @@ class ApiClient {
     });
   }
 
+  async updateBankDetails(employeeId: string, data: {
+    bankAccountNumber: string;
+    bankName: string;
+    bankBranch: string;
+    ifscCode: string;
+  }) {
+    return this.request('/api/onboarding/bank-details/update', {
+      method: 'POST',
+      body: JSON.stringify({ employeeId, ...data }),
+    });
+  }
+
   async uploadOnboardingDocument(
     candidateId: string,
     payload: { file: File; docType: string; consent: boolean; notes?: string; source?: string }
@@ -647,6 +701,30 @@ class ApiClient {
       },
       true,
     );
+  }
+
+  async getOnboardingProgress() {
+    return this.request('/api/onboarding/me/progress');
+  }
+
+  async getMyAbout() {
+    return this.request('/api/onboarding/me/about');
+  }
+
+  async updateMyAbout(payload: { about_me?: string | null; job_love?: string | null; hobbies?: string | null }) {
+    return this.request('/api/onboarding/me/about', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getBackgroundCheck(candidateId: string) {
+    return this.request(`/api/onboarding/${candidateId}/background-check`);
+  }
+
+  // Public request method for custom endpoints (wrapper around private request)
+  async customRequest(endpoint: string, options: RequestInit = {}) {
+    return this.request(endpoint, options);
   }
 
   async getOnboardingDocuments(candidateId: string, params?: { status?: string; docType?: string }) {
@@ -745,6 +823,35 @@ class ApiClient {
     return this.request(`/api/probation/validate?${params.toString()}`);
   }
 
+  // Probation Policies
+  async listProbationPolicies() {
+    return this.request('/api/probation-policies');
+  }
+
+  async getActiveProbationPolicy() {
+    return this.request('/api/probation-policies/active');
+  }
+
+  async createProbationPolicy(data: any) {
+    return this.request('/api/probation-policies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProbationPolicy(id: string, data: any) {
+    return this.request(`/api/probation-policies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProbationPolicy(id: string) {
+    return this.request(`/api/probation-policies/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Timesheet methods
   async getEmployeeId() {
     return this.request('/api/timesheets/employee-id');
@@ -763,6 +870,12 @@ class ApiClient {
 
   async getPendingTimesheets() {
     return this.request('/api/timesheets/pending');
+  }
+
+  async submitTimesheet(timesheetId: string) {
+    return this.request(`/api/timesheets/${timesheetId}/submit`, {
+      method: 'POST',
+    });
   }
 
   async approveTimesheet(timesheetId: string, action: 'approve' | 'reject' | 'return', rejectionReason?: string) {
@@ -819,6 +932,10 @@ class ApiClient {
     });
   }
 
+  async getEmployeePerformanceReviews(employeeId: string) {
+    return this.request(`/api/performance-reviews/employee/${employeeId}`);
+  }
+
   async getPerformanceReviews(cycleId?: string) {
     const url = cycleId
       ? `/api/performance-reviews?cycle=${cycleId}`
@@ -846,11 +963,12 @@ class ApiClient {
     return this.request('/api/employees?team=mine');
   }
 
-  // Employee project assignments
+  // Employee project assignments (past / profile projects)
   async getEmployeeProjects(employeeId: string, date?: string) {
+    // Endpoint is served from /api/v1/employees/:id/projects
     const url = date
-      ? `/api/timesheets/employee/${employeeId}/projects?date=${date}`
-      : `/api/timesheets/employee/${employeeId}/projects`;
+      ? `/api/v1/employees/${employeeId}/projects?date=${encodeURIComponent(date)}`
+      : `/api/v1/employees/${employeeId}/projects`;
     return this.request(url);
   }
 
@@ -863,9 +981,14 @@ class ApiClient {
 
   async createProject(data: {
     name: string;
+    code?: string;
+    description?: string;
     start_date?: string;
     end_date?: string;
-    required_skills?: string[];
+    project_manager_id?: string;
+    team_id?: string;
+    status?: 'PLANNED' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED';
+    required_skills?: Array<{ name: string; min_level: number }>;
     required_certifications?: string[];
     priority?: number;
     expected_allocation_percent?: number;
@@ -879,9 +1002,14 @@ class ApiClient {
 
   async updateProject(id: string, data: {
     name?: string;
+    code?: string;
+    description?: string;
     start_date?: string;
     end_date?: string;
-    required_skills?: string[];
+    project_manager_id?: string | null;
+    team_id?: string | null;
+    status?: 'PLANNED' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED';
+    required_skills?: Array<{ name: string; min_level: number }>;
     required_certifications?: string[];
     priority?: number;
     expected_allocation_percent?: number;
@@ -960,6 +1088,34 @@ class ApiClient {
   // Leave request methods
   async getLeaveRequests() {
     return this.request('/api/leave-requests');
+  }
+
+  // Team schedule events (ad-hoc meetings, milestones)
+  async getTeamScheduleEvents(params: { team_id?: string; start_date?: string; end_date?: string }) {
+    const search = new URLSearchParams();
+    if (params.team_id) search.append('team_id', params.team_id);
+    if (params.start_date) search.append('start_date', params.start_date);
+    if (params.end_date) search.append('end_date', params.end_date);
+    const qs = search.toString();
+    const suffix = qs ? `?${qs}` : '';
+    return this.request(`/api/team-schedule/events${suffix}`);
+  }
+
+  async createTeamScheduleEvent(data: {
+    team_id?: string | null;
+    employee_id?: string | null;
+    title: string;
+    event_type?: string;
+    start_date: string;
+    end_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
+    notes?: string | null;
+  }) {
+    return this.request('/api/team-schedule/events', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 
   async createLeaveRequest(data: {
@@ -1059,1269 +1215,1282 @@ class ApiClient {
     });
   }
 
-  async uploadAttendance(file: File, mapping?: any) {
+  async uploadAttendance(file: File, etlConfig?: any) {
     const formData = new FormData();
     formData.append('file', file);
     // Support both old format (just mapping) and new format (full ETL config)
-    const etlConfig = mapping; // Assuming mapping argument holds the config in new usage, or we need to adjust signature. 
-    // Wait, the signature is (file, mapping). 
-    // The stashed code uses 'etlConfig' but the argument is 'mapping'.
-    // I should probably check if 'mapping' is the config.
+    if (etlConfig) {
+      if (etlConfig.mapping) {
+        formData.append('mapping', JSON.stringify(etlConfig.mapping));
+      } else if (typeof etlConfig === 'object' && !etlConfig.transformations) {
+        // Old format - just mapping object
+        formData.append('mapping', JSON.stringify(etlConfig));
+      }
+      if (etlConfig.transformations && Array.isArray(etlConfig.transformations)) {
+        formData.append('transformations', JSON.stringify(etlConfig.transformations));
+      }
+      if (etlConfig.validations && Array.isArray(etlConfig.validations)) {
+        formData.append('validations', JSON.stringify(etlConfig.validations));
+      }
 
-    if (mapping) {
-      if (mapping.mapping || mapping.transformations) {
-        // It's an ETL config
-        const config = mapping;
-        if (config.mapping) formData.append('mapping', JSON.stringify(config.mapping));
-        if (config.transformations) formData.append('transformations', JSON.stringify(config.transformations));
-        if (config.validations) formData.append('validations', JSON.stringify(config.validations));
-        if (typeof config.matrixDetected === 'boolean') formData.append('matrixDetected', JSON.stringify(config.matrixDetected));
-      } else {
-        // Old format
-        formData.append('mapping', JSON.stringify(mapping));
+      if (typeof etlConfig.matrixDetected === 'boolean') {
+        formData.append('matrixDetected', JSON.stringify(etlConfig.matrixDetected));
       }
     }
+  }
 
     return this.request('/api/v1/attendance/upload', {
-      method: 'POST',
-      body: formData,
-      headers: {} as HeadersInit, // Let browser set Content-Type with boundary
-    }, true);
+    method: 'POST',
+    body: formData,
+    headers: {} as HeadersInit, // Let browser set Content-Type with boundary
+  }, true);
   }
 
   async getUploadStatus(uploadId: string) {
-    return this.request(`/api/v1/attendance/upload/${uploadId}/status`);
-  }
+  return this.request(`/api/v1/attendance/upload/${uploadId}/status`);
+}
 
-  async retryUpload(uploadId: string, force?: boolean) {
-    return this.request(`/api/v1/attendance/upload/${uploadId}/retry`, {
-      method: 'POST',
-      body: JSON.stringify({ force }),
-    });
-  }
+  async getAttendanceMappingTemplates() {
+  return this.request('/api/v1/attendance/mapping-templates');
+}
+
+  async saveAttendanceMappingTemplate(template: any) {
+  return this.request('/api/v1/attendance/mapping-templates', {
+    method: 'POST',
+    body: JSON.stringify(template),
+  });
+}
+
+  async deleteAttendanceMappingTemplate(templateId: string) {
+  return this.request(`/api/v1/attendance/mapping-templates/${templateId}`, {
+    method: 'DELETE',
+  });
+}
+
+  async retryUpload(uploadId: string, force ?: boolean) {
+  return this.request(`/api/v1/attendance/upload/${uploadId}/retry`, {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  });
+}
 
   async getEmployeeAttendanceTimesheet(employeeId: string, from: string, to: string) {
-    return this.request(`/api/v1/attendance/employee/${employeeId}/timesheet?from=${from}&to=${to}`);
-  }
+  return this.request(`/api/v1/attendance/employee/${employeeId}/timesheet?from=${from}&to=${to}`);
+}
 
   async getAttendanceUploads() {
-    return this.request('/api/v1/attendance/uploads');
-  }
+  return this.request('/api/v1/attendance/uploads');
+}
 
   async cancelUpload(uploadId: string) {
-    return this.request(`/api/v1/attendance/upload/${uploadId}/cancel`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/v1/attendance/upload/${uploadId}/cancel`, {
+    method: 'POST',
+  });
+}
 
   // Termination methods
   async getTerminations() {
-    return this.request('/api/terminations');
-  }
+  return this.request('/api/terminations');
+}
 
   async getTermination(id: string) {
-    return this.request(`/api/terminations/${id}`);
-  }
+  return this.request(`/api/terminations/${id}`);
+}
 
   async previewTermination(id: string) {
-    return this.request(`/api/terminations/${id}/preview_settlement`);
-  }
+  return this.request(`/api/terminations/${id}/preview_settlement`);
+}
 
   async createTermination(data: {
-    employee_id: string;
-    type: 'resignation' | 'cause' | 'retrenchment' | 'redundancy' | 'mutual';
-    proposed_lwd?: string;
-    reason_text?: string;
-    attachments?: any[];
-    evidence_refs?: any[];
-  }) {
-    return this.request('/api/terminations', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  employee_id: string;
+  type: 'resignation' | 'cause' | 'retrenchment' | 'redundancy' | 'mutual';
+  proposed_lwd?: string;
+  reason_text?: string;
+  attachments?: any[];
+  evidence_refs?: any[];
+}) {
+  return this.request('/api/terminations', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
-  async approveTermination(id: string, data?: { action?: 'approve' | 'reject'; note?: string }) {
-    return this.request(`/api/terminations/${id}/approve`, {
-      method: 'POST',
-      body: JSON.stringify(data || { action: 'approve' }),
-    });
-  }
+  async approveTermination(id: string, data ?: { action?: 'approve' | 'reject'; note?: string }) {
+  return this.request(`/api/terminations/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(data || { action: 'approve' }),
+  });
+}
 
   // Rehire methods (new workflow)
   async getRehireRequests() {
-    return this.request('/api/rehire');
-  }
+  return this.request('/api/rehire');
+}
 
   async getRehireRequest(id: string) {
-    return this.request(`/api/rehire/${id}`);
-  }
+  return this.request(`/api/rehire/${id}`);
+}
 
   async createRehireRequest(data: {
-    ex_employee_id: string;
-    requested_start_date?: string;
-    prior_termination_id?: string;
-    notes?: string;
-  }) {
-    return this.request('/api/rehire', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  ex_employee_id: string;
+  requested_start_date?: string;
+  prior_termination_id?: string;
+  notes?: string;
+}) {
+  return this.request('/api/rehire', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async decideRehire(id: string, payload: { action: 'approve' | 'reject'; note?: string }) {
-    return this.request(`/api/rehire/${id}/decision`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  }
+  return this.request(`/api/rehire/${id}/decision`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
 
   // Offboarding methods
   async getOffboardingPolicies() {
-    return this.request('/api/offboarding/policies');
-  }
+  return this.request('/api/offboarding/policies');
+}
 
   async createOffboardingPolicy(data: {
-    name: string;
-    description?: string;
-    notice_period_days: number;
-    auto_approve_days?: number;
-    use_ceo_approval?: boolean;
-    applies_to_department?: string;
-    applies_to_location?: string;
-    is_default?: boolean;
-  }) {
-    return this.request('/api/offboarding/policies', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  name: string;
+  description?: string;
+  notice_period_days: number;
+  auto_approve_days?: number;
+  use_ceo_approval?: boolean;
+  applies_to_department?: string;
+  applies_to_location?: string;
+  is_default?: boolean;
+}) {
+  return this.request('/api/offboarding/policies', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updateOffboardingPolicy(id: string, data: any) {
-    return this.request(`/api/offboarding/policies/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  return this.request(`/api/offboarding/policies/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
 
   async deleteOffboardingPolicy(id: string) {
-    return this.request(`/api/offboarding/policies/${id}`, {
-      method: 'DELETE',
-    });
-  }
+  return this.request(`/api/offboarding/policies/${id}`, {
+    method: 'DELETE',
+  });
+}
 
   async getMaskedVerification() {
-    return this.request('/api/offboarding/verify/masked');
-  }
+  return this.request('/api/offboarding/verify/masked');
+}
 
   async sendVerificationOTP(type: 'email' | 'phone') {
-    return this.request('/api/offboarding/verify/send', {
-      method: 'POST',
-      body: JSON.stringify({ type }),
-    });
-  }
+  return this.request('/api/offboarding/verify/send', {
+    method: 'POST',
+    body: JSON.stringify({ type }),
+  });
+}
 
   async confirmVerification(type: 'email' | 'phone', otp: string) {
-    return this.request('/api/offboarding/verify/confirm', {
-      method: 'POST',
-      body: JSON.stringify({ type, otp }),
-    });
-  }
+  return this.request('/api/offboarding/verify/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ type, otp }),
+  });
+}
 
   async confirmAddress(data: {
-    confirmed: boolean;
-    address_line1?: string;
-    address_line2?: string;
-    city?: string;
-    state?: string;
-    postal_code?: string;
-    country?: string;
-  }) {
-    return this.request('/api/offboarding/verify/address', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  confirmed: boolean;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  country?: string;
+}) {
+  return this.request('/api/offboarding/verify/address', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async submitOffboardingSurvey(data: {
-    survey_json: any;
-    reason: string;
-  }) {
-    return this.request('/api/offboarding/survey', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  survey_json: any;
+  reason: string;
+}) {
+  return this.request('/api/offboarding/survey', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async getOffboardingRequests() {
-    return this.request('/api/offboarding');
-  }
+  return this.request('/api/offboarding');
+}
 
   async getOffboardingRequest(id: string) {
-    return this.request(`/api/offboarding/${id}`);
-  }
+  return this.request(`/api/offboarding/${id}`);
+}
 
-  async approveOffboarding(id: string, comment?: string) {
-    return this.request(`/api/offboarding/${id}/approve`, {
-      method: 'POST',
-      body: JSON.stringify({ comment }),
-    });
-  }
+  async approveOffboarding(id: string, comment ?: string) {
+  return this.request(`/api/offboarding/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ comment }),
+  });
+}
 
   async denyOffboarding(id: string, comment: string) {
-    return this.request(`/api/offboarding/${id}/deny`, {
-      method: 'POST',
-      body: JSON.stringify({ comment }),
-    });
-  }
+  return this.request(`/api/offboarding/${id}/deny`, {
+    method: 'POST',
+    body: JSON.stringify({ comment }),
+  });
+}
 
   async updateChecklist(id: string, data: {
-    leaves_remaining?: number;
-    financials_due?: number;
-    assets_pending?: number;
-    compliance_clear?: boolean;
-    finance_clear?: boolean;
-    it_clear?: boolean;
-    notes?: string;
-  }) {
-    return this.request(`/api/offboarding/${id}/checklist`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  leaves_remaining?: number;
+  financials_due?: number;
+  assets_pending?: number;
+  compliance_clear?: boolean;
+  finance_clear?: boolean;
+  it_clear?: boolean;
+  notes?: string;
+}) {
+  return this.request(`/api/offboarding/${id}/checklist`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async generateLetter(id: string) {
-    return this.request(`/api/offboarding/${id}/generate-letter`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/offboarding/${id}/generate-letter`, {
+    method: 'POST',
+  });
+}
 
   async finalizeOffboarding(id: string) {
-    return this.request(`/api/offboarding/${id}/finalize`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/offboarding/${id}/finalize`, {
+    method: 'POST',
+  });
+}
 
   // Policy methods
   async getPolicyCatalog() {
-    return this.request('/api/policies/catalog');
-  }
+  return this.request('/api/policies/catalog');
+}
 
-  async getOrgPolicies(date?: string) {
-    const url = date
-      ? `/api/policies/org?date=${date}`
-      : '/api/policies/org';
-    return this.request(url);
-  }
+  async getOrgPolicies(date ?: string) {
+  const url = date
+    ? `/api/policies/org?date=${date}`
+    : '/api/policies/org';
+  return this.request(url);
+}
 
   async createOrgPolicy(data: {
-    policy_key: string;
-    value: any;
-    effective_from?: string;
-    effective_to?: string;
-  }) {
-    return this.request('/api/policies/org', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  policy_key: string;
+  value: any;
+  effective_from?: string;
+  effective_to?: string;
+}) {
+  return this.request('/api/policies/org', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async deleteOrgPolicy(id: string) {
-    return this.request(`/api/policies/org/${id}`, {
-      method: 'DELETE',
-    });
-  }
+  return this.request(`/api/policies/org/${id}`, {
+    method: 'DELETE',
+  });
+}
 
-  async getEmployeePolicies(userId: string, date?: string) {
-    const url = date
-      ? `/api/policies/employee/${userId}?date=${date}`
-      : `/api/policies/employee/${userId}`;
-    return this.request(url);
-  }
+  async getEmployeePolicies(userId: string, date ?: string) {
+  const url = date
+    ? `/api/policies/employee/${userId}?date=${date}`
+    : `/api/policies/employee/${userId}`;
+  return this.request(url);
+}
 
   async createEmployeePolicy(userId: string, data: {
-    policy_key: string;
-    value: any;
-    effective_from?: string;
-    effective_to?: string;
-  }) {
-    return this.request(`/api/policies/employee/${userId}`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  policy_key: string;
+  value: any;
+  effective_from?: string;
+  effective_to?: string;
+}) {
+  return this.request(`/api/policies/employee/${userId}`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   // Rich policy-management (document-style) methods
-  async getManagedPolicies(params?: { status?: string; type?: string }) {
-    const search = new URLSearchParams();
-    if (params?.status) search.append('status', params.status);
-    if (params?.type) search.append('type', params.type);
-    const suffix = search.toString() ? `?${search.toString()}` : '';
-    const res = await this.request(`/api/policy-management/policies${suffix}`);
-    return res?.policies ?? [];
-  }
+  async getManagedPolicies(params ?: { status?: string; type?: string }) {
+  const search = new URLSearchParams();
+  if (params?.status) search.append('status', params.status);
+  if (params?.type) search.append('type', params.type);
+  const suffix = search.toString() ? `?${search.toString()}` : '';
+  const res = await this.request(`/api/policy-management/policies${suffix}`);
+  return res?.policies ?? [];
+}
 
 
-  async publishManagedPolicy(id: string, change_note?: string) {
-    return this.request(`/api/policy-management/policies/${id}/publish`, {
-      method: 'POST',
-      body: JSON.stringify({ change_note }),
-    });
-  }
+  async publishManagedPolicy(id: string, change_note ?: string) {
+  return this.request(`/api/policy-management/policies/${id}/publish`, {
+    method: 'POST',
+    body: JSON.stringify({ change_note }),
+  });
+}
 
   // Promotions API
-  async getPromotions(params?: { status?: string; employeeId?: string; year?: number }) {
-    const search = new URLSearchParams();
-    if (params?.status) search.append('status', params.status);
-    if (params?.employeeId) search.append('employeeId', params.employeeId);
-    if (params?.year) search.append('year', params.year.toString());
-    const suffix = search.toString() ? `?${search.toString()}` : '';
-    return this.request(`/api/promotion${suffix}`);
-  }
+  async getPromotions(params ?: { status?: string; employeeId?: string; year?: number }) {
+  const search = new URLSearchParams();
+  if (params?.status) search.append('status', params.status);
+  if (params?.employeeId) search.append('employeeId', params.employeeId);
+  if (params?.year) search.append('year', params.year.toString());
+  const suffix = search.toString() ? `?${search.toString()}` : '';
+  return this.request(`/api/promotions${suffix}`);
+}
 
   async getPromotion(id: string) {
-    return this.request(`/api/promotions/${id}`);
-  }
+  return this.request(`/api/promotions/${id}`);
+}
 
   async createPromotion(data: {
-    employee_id: string;
-    appraisal_id?: string;
-    old_designation?: string;
-    old_grade?: string;
-    old_department_id?: string;
-    old_ctc?: number;
-    new_designation: string;
-    new_grade?: string;
-    new_department_id?: string;
-    new_ctc?: number;
-    reason_text?: string;
-    effective_date: string;
-    status?: string;
-  }) {
-    return this.request('/api/promotion', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  employee_id: string;
+  appraisal_id?: string;
+  old_designation?: string;
+  old_grade?: string;
+  old_department_id?: string;
+  old_ctc?: number;
+  new_designation: string;
+  new_grade?: string;
+  new_department_id?: string;
+  new_ctc?: number;
+  reason_text?: string;
+  effective_date: string;
+  status?: string;
+}) {
+  return this.request('/api/promotions', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updatePromotion(id: string, data: Partial<{
-    new_designation: string;
-    new_grade: string;
-    new_department_id: string;
-    new_ctc: number;
-    reason_text: string;
-    effective_date: string;
-    appraisal_id: string;
-  }>) {
-    return this.request(`/api/promotion/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  new_designation: string;
+  new_grade: string;
+  new_department_id: string;
+  new_ctc: number;
+  reason_text: string;
+  effective_date: string;
+  appraisal_id: string;
+}>) {
+  return this.request(`/api/promotions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
 
   async submitPromotion(id: string) {
-    return this.request(`/api/promotion/${id}/submit`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/promotions/${id}/submit`, {
+    method: 'POST',
+  });
+}
 
   async approvePromotion(id: string) {
-    return this.request(`/api/promotion/${id}/approve`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/promotions/${id}/approve`, {
+    method: 'POST',
+  });
+}
 
-  async rejectPromotion(id: string, rejection_reason?: string) {
-    return this.request(`/api/promotion/${id}/reject`, {
-      method: 'POST',
-      body: JSON.stringify({ rejection_reason }),
-    });
-  }
+  async rejectPromotion(id: string, rejection_reason ?: string) {
+  return this.request(`/api/promotions/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ rejection_reason }),
+  });
+}
 
   // Employee History API
-  async getMyHistory(params?: { year?: number; types?: string[] }) {
-    const search = new URLSearchParams();
-    if (params?.year) search.append('year', params.year.toString());
-    if (params?.types) search.append('types', params.types.join(','));
-    const suffix = search.toString() ? `?${search.toString()}` : '';
-    return this.request(`/api/me/history${suffix}`);
-  }
+  async getMyHistory(params ?: { year?: number; types?: string[] }) {
+  const search = new URLSearchParams();
+  if (params?.year) search.append('year', params.year.toString());
+  if (params?.types) search.append('types', params.types.join(','));
+  const suffix = search.toString() ? `?${search.toString()}` : '';
+  return this.request(`/api/me/history${suffix}`);
+}
 
-  async getEmployeeHistory(employeeId: string, params?: { year?: number; types?: string[] }) {
-    const search = new URLSearchParams();
-    if (params?.year) search.append('year', params.year.toString());
-    if (params?.types) search.append('types', params.types.join(','));
-    const suffix = search.toString() ? `?${search.toString()}` : '';
-    return this.request(`/api/employees/${employeeId}/history${suffix}`);
-  }
+  async getEmployeeHistory(employeeId: string, params ?: { year?: number; types?: string[] }) {
+  const search = new URLSearchParams();
+  if (params?.year) search.append('year', params.year.toString());
+  if (params?.types) search.append('types', params.types.join(','));
+  const suffix = search.toString() ? `?${search.toString()}` : '';
+  return this.request(`/api/employees/${employeeId}/history${suffix}`);
+}
 
   async getHistoryEvent(eventId: string) {
-    return this.request(`/api/history/events/${eventId}`);
+  return this.request(`/api/history/events/${eventId}`);
+}
+
+  async downloadOrgPolicyPDF(policyId: string): Promise < Blob > {
+  const url = `/api/policies/org/${policyId}/download`;
+  const headers: HeadersInit = {};
+  if(this._token) {
+  headers['Authorization'] = `Bearer ${this._token}`;
+}
+const response = await fetch(`${this.baseURL}${url}`, {
+  method: 'GET',
+  headers,
+});
+
+if (!response.ok) {
+  const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+  throw new Error(error.error || 'Failed to download PDF');
+}
+
+return await response.blob();
   }
 
-  async downloadOrgPolicyPDF(policyId: string): Promise<Blob> {
-    const url = `/api/policies/org/${policyId}/download`;
+  async downloadPolicyPDF(policyId: string, version ?: string): Promise < Blob > {
+  const url = version
+    ? `/api/policy-management/policies/${policyId}/download?version=${version}`
+    : `/api/policy-management/policies/${policyId}/download`;
 
-    const headers: HeadersInit = {};
-    if (this._token) {
-      headers['Authorization'] = `Bearer ${this._token}`;
-    }
+  const headers: HeadersInit = {};
+  if(this._token) {
+  headers['Authorization'] = `Bearer ${this._token}`;
+}
+const response = await fetch(`${this.baseURL}${url}`, {
+  method: 'GET',
+  headers,
+});
 
-    const response = await fetch(`${this.baseURL}${url}`, {
-      method: 'GET',
-      headers,
-    });
+if (!response.ok) {
+  const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+  throw new Error(error.error || 'Failed to download PDF');
+}
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
-      throw new Error(error.error || 'Failed to download PDF');
-    }
-
-    return await response.blob();
+return await response.blob();
   }
 
-  async downloadPolicyPDF(policyId: string, version?: string): Promise<Blob> {
-    const url = version
-      ? `/api/policy-management/policies/${policyId}/download?version=${version}`
-      : `/api/policy-management/policies/${policyId}/download`;
+<<<<<<< HEAD
 
-    const headers: HeadersInit = {};
-    if (this._token) {
-      headers['Authorization'] = `Bearer ${this._token}`;
-    }
-
-    const response = await fetch(`${this.baseURL}${url}`, {
-      method: 'GET',
-      headers,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
-      throw new Error(error.error || 'Failed to download PDF');
-    }
-
-    return await response.blob();
-  }
-
-
+=======
+>>>>>>> main
   // Promotion methods
   async getPromotionHealth() {
-    return this.request('/api/promotion/health');
-  }
+  return this.request('/api/promotion/health');
+}
 
   async createPromotionCycle(data: {
-    name: string;
-    period: 'QUARTERLY' | 'H1' | 'ANNUAL' | 'CUSTOM';
-    start_date: string;
-    end_date: string;
-    criteria?: any;
-  }) {
-    return this.request('/api/promotion/cycles', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  name: string;
+  period: 'QUARTERLY' | 'H1' | 'ANNUAL' | 'CUSTOM';
+  start_date: string;
+  end_date: string;
+  criteria?: any;
+}) {
+  return this.request('/api/promotion/cycles', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async getCurrentPromotionCycles() {
-    return this.request('/api/promotion/cycles/current');
-  }
+  return this.request('/api/promotion/cycles/current');
+}
 
   async submitPromotionEvaluation(data: {
-    cycle_id: string;
-    employee_id: string;
-    rating: number;
-    remarks?: string;
-    recommendation?: 'NONE' | 'PROMOTE' | 'HOLD';
-    attachments?: any;
-  }) {
-    return this.request('/api/promotion/evaluations', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  cycle_id: string;
+  employee_id: string;
+  rating: number;
+  remarks?: string;
+  recommendation?: 'NONE' | 'PROMOTE' | 'HOLD';
+  attachments?: any;
+}) {
+  return this.request('/api/promotion/evaluations', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async reviewPromotionEvaluation(id: string) {
-    return this.request(`/api/promotion/review/${id}`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/promotion/review/${id}`, {
+    method: 'POST',
+  });
+}
 
 
 
   // User invite methods
   async inviteUsers(data: {
-    emails: string[];
-    role: string;
-  }) {
-    return this.request('/api/users/invite', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  emails: string[];
+  role: string;
+}) {
+  return this.request('/api/users/invite', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   // First login
   async firstLogin(data: {
-    token: string;
-    newPassword: string;
-  }) {
-    return this.request('/api/auth/first-login', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  token: string;
+  newPassword: string;
+}) {
+  return this.request('/api/auth/first-login', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   // Payroll SSO
   async getPayrollSso() {
-    return this.request('/api/payroll/sso');
-  }
+  return this.request('/api/payroll/sso');
+}
 
-  async getPayrollRuns(params?: { status?: string; limit?: number; offset?: number }) {
-    const searchParams = new URLSearchParams();
-    if (params?.status) searchParams.append('status', params.status);
-    if (params?.limit) searchParams.append('limit', params.limit.toString());
-    if (params?.offset) searchParams.append('offset', params.offset.toString());
-    const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
-    return this.request(`/api/payroll/runs${query}`);
-  }
+  async getPayrollRuns(params ?: { status?: string; limit?: number; offset?: number }) {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.append('status', params.status);
+  if (params?.limit) searchParams.append('limit', params.limit.toString());
+  if (params?.offset) searchParams.append('offset', params.offset.toString());
+  const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
+  return this.request(`/api/payroll/runs${query}`);
+}
 
   async getPayrollRunAdjustments(runId: string) {
-    return this.request(`/api/payroll/runs/${runId}/adjustments`);
-  }
+  return this.request(`/api/payroll/runs/${runId}/adjustments`);
+}
 
   async createPayrollRunAdjustment(runId: string, data: {
-    employee_id: string;
-    component_name: string;
-    amount: number;
-    is_taxable?: boolean;
-    notes?: string;
-  }) {
-    return this.request(`/api/payroll/runs/${runId}/adjustments`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  employee_id: string;
+  component_name: string;
+  amount: number;
+  is_taxable?: boolean;
+  notes?: string;
+}) {
+  return this.request(`/api/payroll/runs/${runId}/adjustments`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updatePayrollRunAdjustment(adjustmentId: string, data: {
-    component_name?: string;
-    amount?: number;
-    is_taxable?: boolean;
-    notes?: string;
-  }) {
-    return this.request(`/api/payroll/adjustments/${adjustmentId}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
+  component_name?: string;
+  amount?: number;
+  is_taxable?: boolean;
+  notes?: string;
+}) {
+  return this.request(`/api/payroll/adjustments/${adjustmentId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
 
   async deletePayrollRunAdjustment(adjustmentId: string) {
-    return this.request(`/api/payroll/adjustments/${adjustmentId}`, {
-      method: 'DELETE',
-    });
-  }
+  return this.request(`/api/payroll/adjustments/${adjustmentId}`, {
+    method: 'DELETE',
+  });
+}
 
   async getTaxDefinitions(financialYear: string) {
-    return this.request(`/api/tax/declarations/definitions?financial_year=${encodeURIComponent(financialYear)}`);
-  }
+  return this.request(`/api/tax/declarations/definitions?financial_year=${encodeURIComponent(financialYear)}`);
+}
 
   async getMyTaxDeclaration(financialYear: string) {
-    return this.request(`/api/tax/declarations/me?financial_year=${encodeURIComponent(financialYear)}`);
-  }
+  return this.request(`/api/tax/declarations/me?financial_year=${encodeURIComponent(financialYear)}`);
+}
 
   async saveTaxDeclaration(data: {
-    financial_year: string;
-    chosen_regime: 'old' | 'new';
-    status: 'draft' | 'submitted';
-    items: Array<{
-      component_id: string;
-      declared_amount: number;
-      proof_url?: string;
-      notes?: string;
-    }>;
-  }) {
-    return this.request('/api/tax/declarations', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  financial_year: string;
+  chosen_regime: 'old' | 'new';
+  status: 'draft' | 'submitted';
+  items: Array<{
+    component_id: string;
+    declared_amount: number;
+    proof_url?: string;
+    notes?: string;
+  }>;
+}) {
+  return this.request('/api/tax/declarations', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async uploadTaxProof(params: { componentId: string; financialYear: string; file: File }) {
-    const formData = new FormData();
-    formData.append('component_id', params.componentId);
-    formData.append('financial_year', params.financialYear);
-    formData.append('file', params.file);
+  const formData = new FormData();
+  formData.append('component_id', params.componentId);
+  formData.append('financial_year', params.financialYear);
+  formData.append('file', params.file);
 
-    return this.request(
-      '/api/tax/declarations/proofs',
-      {
-        method: 'POST',
-        body: formData,
-        headers: {} as HeadersInit,
-      },
-      true,
-    );
-  }
+  return this.request(
+    '/api/tax/declarations/proofs',
+    {
+      method: 'POST',
+      body: formData,
+      headers: {} as HeadersInit,
+    },
+    true,
+  );
+}
 
-  async getTaxDeclarations(params?: { financial_year?: string; status?: string }) {
-    const searchParams = new URLSearchParams();
-    if (params?.financial_year) searchParams.append('financial_year', params.financial_year);
-    if (params?.status) searchParams.append('status', params.status);
-    const queryString = searchParams.toString() ? `?${searchParams.toString()}` : '';
-    return this.request(`/api/tax/declarations${queryString}`);
-  }
+  async getTaxDeclarations(params ?: { financial_year?: string; status?: string }) {
+  const searchParams = new URLSearchParams();
+  if (params?.financial_year) searchParams.append('financial_year', params.financial_year);
+  if (params?.status) searchParams.append('status', params.status);
+  const queryString = searchParams.toString() ? `?${searchParams.toString()}` : '';
+  return this.request(`/api/tax/declarations${queryString}`);
+}
 
   async reviewTaxDeclaration(
-    declarationId: string,
-    data: {
-      status: 'approved' | 'rejected';
-      items?: Array<{ id: string; approved_amount?: number; notes?: string }>;
-      remarks?: string;
-    }
-  ) {
-    return this.request(`/api/tax/declarations/${declarationId}/review`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  declarationId: string,
+  data: {
+  status: 'approved' | 'rejected';
+  items?: Array<{ id: string; approved_amount?: number; notes?: string }>;
+  remarks?: string;
+}
+) {
+  return this.request(`/api/tax/declarations/${declarationId}/review`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
-  async downloadForm16(financialYear: string, employeeId?: string) {
-    const params = new URLSearchParams();
-    params.append('financial_year', financialYear);
-    if (employeeId) {
-      params.append('employee_id', employeeId);
-    }
-    const url = `${this.baseURL}/api/reports/form16?${params.toString()}`;
-    const headers: HeadersInit = {};
-    if (this._token) {
-      headers['Authorization'] = `Bearer ${this._token}`;
-    }
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      throw new Error('Failed to download Form 16');
-    }
-    return response.blob();
+  async downloadForm16(financialYear: string, employeeId ?: string) {
+  const params = new URLSearchParams();
+  params.append('financial_year', financialYear);
+  if (employeeId) {
+    params.append('employee_id', employeeId);
   }
+  const url = `${this.baseURL}/api/reports/form16?${params.toString()}`;
+  const headers: HeadersInit = {};
+  if (this._token) {
+    headers['Authorization'] = `Bearer ${this._token}`;
+  }
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    throw new Error('Failed to download Form 16');
+  }
+  return response.blob();
+}
   // Workflows
   async listWorkflows() {
-    return this.request('/api/workflows');
-  }
+  return this.request('/api/workflows');
+}
 
   async getWorkflow(id: string) {
-    return this.request(`/api/workflows/${id}`);
-  }
+  return this.request(`/api/workflows/${id}`);
+}
 
   async createWorkflow(data: any) {
-    return this.request('/api/workflows', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  return this.request('/api/workflows', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updateWorkflow(id: string, data: any) {
-    return this.request(`/api/workflows/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
+  return this.request(`/api/workflows/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
 
   async deleteWorkflow(id: string) {
-    return this.request(`/api/workflows/${id}`, {
-      method: 'DELETE',
-    });
-  }
+  return this.request(`/api/workflows/${id}`, {
+    method: 'DELETE',
+  });
+}
 
   // Roster scheduling endpoints
   async getRosterTemplates() {
-    return this.request('/api/roster/templates');
-  }
+  return this.request('/api/roster/templates');
+}
 
   async createRosterTemplate(data: {
-    name: string;
-    timezone?: string;
-    description?: string;
-    coveragePlan: Array<Record<string, any>>;
-    restRules?: Record<string, any>;
-    constraintRules?: Record<string, any>;
-    preferenceRules?: Record<string, any>;
-    metadata?: Record<string, any>;
-  }) {
-    return this.request('/api/roster/templates', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  name: string;
+  timezone?: string;
+  description?: string;
+  coveragePlan: Array<Record<string, any>>;
+  restRules?: Record<string, any>;
+  constraintRules?: Record<string, any>;
+  preferenceRules?: Record<string, any>;
+  metadata?: Record<string, any>;
+}) {
+  return this.request('/api/roster/templates', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updateRosterTemplate(
-    id: string,
-    data: Partial<{
-      name: string;
-      timezone: string;
-      description: string;
-      coveragePlan: Array<Record<string, any>>;
-      restRules: Record<string, any>;
-      constraintRules: Record<string, any>;
-      preferenceRules: Record<string, any>;
-      metadata: Record<string, any>;
-    }>
-  ) {
-    return this.request(`/api/roster/templates/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
+  id: string,
+  data: Partial<{
+    name: string;
+    timezone: string;
+    description: string;
+    coveragePlan: Array<Record<string, any>>;
+    restRules: Record<string, any>;
+    constraintRules: Record<string, any>;
+    preferenceRules: Record<string, any>;
+    metadata: Record<string, any>;
+  }>
+) {
+  return this.request(`/api/roster/templates/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
 
   async deleteRosterTemplate(id: string) {
-    return this.request(`/api/roster/templates/${id}`, {
-      method: 'DELETE',
-    });
-  }
+  return this.request(`/api/roster/templates/${id}`, {
+    method: 'DELETE',
+  });
+}
 
   async getRosterRuns() {
-    const query = new URLSearchParams();
-    if (params?.status) query.append('status', params.status);
-    if (params?.start_date) query.append('start_date', params.start_date);
-    if (params?.end_date) query.append('end_date', params.end_date);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return this.request(`/api/roster/schedules${suffix}`);
-  }
+  const query = new URLSearchParams();
+  if (params?.status) query.append('status', params.status);
+  if (params?.start_date) query.append('start_date', params.start_date);
+  if (params?.end_date) query.append('end_date', params.end_date);
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return this.request(`/api/roster/schedules${suffix}`);
+}
 
   async getRosterSchedule(scheduleId: string) {
-    return this.request(`/api/roster/schedules/${scheduleId}`);
-  }
+  return this.request(`/api/roster/schedules/${scheduleId}`);
+}
 
   async updateRosterSlot(
-    scheduleId: string,
-    slotId: string,
-    data: {
-      assigned_employee_id?: string | null;
-      manual_lock?: boolean;
-    }
-  ) {
-    return this.request(`/api/roster/schedules/${scheduleId}/slots/${slotId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  scheduleId: string,
+  slotId: string,
+  data: {
+  assigned_employee_id?: string | null;
+  manual_lock?: boolean;
+}
+) {
+  return this.request(`/api/roster/schedules/${scheduleId}/slots/${slotId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
 
   async publishRosterSchedule(scheduleId: string) {
-    return this.request(`/api/roster/schedules/${scheduleId}/publish`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/roster/schedules/${scheduleId}/publish`, {
+    method: 'POST',
+  });
+}
 
   // Legacy scheduling endpoints (back-compat)
-  async getShiftTemplates(params?: { team_id?: string; branch_id?: string }) {
-    const query = new URLSearchParams();
-    if (params?.team_id) query.append('team_id', params.team_id);
-    if (params?.branch_id) query.append('branch_id', params.branch_id);
-    return this.request(`/api/scheduling/templates?${query.toString()}`);
-  }
+  async getShiftTemplates(params ?: { team_id?: string; branch_id?: string }) {
+  const query = new URLSearchParams();
+  if (params?.team_id) query.append('team_id', params.team_id);
+  if (params?.branch_id) query.append('branch_id', params.branch_id);
+  return this.request(`/api/scheduling/templates?${query.toString()}`);
+}
 
   async createShiftTemplate(data: {
+  name: string;
+  start_time: string;
+  end_time: string;
+  shift_type: 'day' | 'evening' | 'night' | 'custom';
+  duration_hours?: number;
+  crosses_midnight?: boolean;
+  is_default?: boolean;
+  team_id?: string;
+  branch_id?: string;
+}) {
+  return this.request('/api/scheduling/templates', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+  async updateShiftTemplate(
+  id: string,
+  data: Partial<{
     name: string;
     start_time: string;
     end_time: string;
-    shift_type: 'day' | 'evening' | 'night' | 'custom';
-    duration_hours?: number;
-    crosses_midnight?: boolean;
-    is_default?: boolean;
-    team_id?: string;
-    branch_id?: string;
-  }) {
-    return this.request('/api/scheduling/templates', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateShiftTemplate(
-    id: string,
-    data: Partial<{
-      name: string;
-      start_time: string;
-      end_time: string;
-      shift_type: string;
-      duration_hours: number;
-      crosses_midnight: boolean;
-      is_default: boolean;
-      team_id: string;
-      branch_id: string;
-    }>
-  ) {
-    return this.request(`/api/scheduling/templates/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
+    shift_type: string;
+    duration_hours: number;
+    crosses_midnight: boolean;
+    is_default: boolean;
+    team_id: string;
+    branch_id: string;
+  }>
+) {
+  return this.request(`/api/scheduling/templates/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
 
   async deleteShiftTemplate(id: string) {
-    return this.request(`/api/scheduling/templates/${id}`, {
-      method: 'DELETE',
-    });
-  }
+  return this.request(`/api/scheduling/templates/${id}`, {
+    method: 'DELETE',
+  });
+}
 
   async getRuleSets() {
-    return this.request('/api/scheduling/rule-sets');
-  }
+  return this.request('/api/scheduling/rule-sets');
+}
 
   async createRuleSet(data: {
+  name: string;
+  description?: string;
+  is_default?: boolean;
+  rules: Array<{
+    id: string;
     name: string;
-    description?: string;
-    is_default?: boolean;
-    rules: Array<{
-      id: string;
-      name: string;
-      type: 'hard' | 'soft';
-      weight?: number;
-      params?: Record<string, any>;
-    }>;
-  }) {
-    return this.request('/api/scheduling/rule-sets', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+    type: 'hard' | 'soft';
+    weight?: number;
+    params?: Record<string, any>;
+  }>;
+}) {
+  return this.request('/api/scheduling/rule-sets', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updateRuleSet(id: string, data: { name: string; description?: string; is_default?: boolean; rules: Array<any> }) {
-    return this.request(`/api/scheduling/rule-sets/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
+  return this.request(`/api/scheduling/rule-sets/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
 
-  async getAvailability(params?: { employee_id?: string; date_from?: string; date_to?: string }) {
-    const query = new URLSearchParams();
-    if (params?.employee_id) query.append('employee_id', params.employee_id);
-    if (params?.date_from) query.append('date_from', params.date_from);
-    if (params?.date_to) query.append('date_to', params.date_to);
-    return this.request(`/api/scheduling/availability?${query.toString()}`);
-  }
+  async getAvailability(params ?: { employee_id?: string; date_from?: string; date_to?: string }) {
+  const query = new URLSearchParams();
+  if (params?.employee_id) query.append('employee_id', params.employee_id);
+  if (params?.date_from) query.append('date_from', params.date_from);
+  if (params?.date_to) query.append('date_to', params.date_to);
+  return this.request(`/api/scheduling/availability?${query.toString()}`);
+}
 
   async createAvailability(data: {
-    employee_id: string;
-    date: string;
-    start_time?: string;
-    end_time?: string;
-    availability_type: 'available' | 'unavailable' | 'preferred' | 'blackout';
-    shift_template_id?: string;
-    is_pinned?: boolean;
-    is_forbidden?: boolean;
-    notes?: string;
-  }) {
-    return this.request('/api/scheduling/availability', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  employee_id: string;
+  date: string;
+  start_time?: string;
+  end_time?: string;
+  availability_type: 'available' | 'unavailable' | 'preferred' | 'blackout';
+  shift_template_id?: string;
+  is_pinned?: boolean;
+  is_forbidden?: boolean;
+  notes?: string;
+}) {
+  return this.request('/api/scheduling/availability', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async runScheduler(data: {
-    week_start_date: string;
-    week_end_date: string;
-    rule_set_id: string;
-    algorithm?: 'greedy' | 'ilp' | 'simulated_annealing';
-    template_ids?: string[];
-    employee_ids?: string[];
-    branch_id?: string;
-    team_id?: string;
-    seed?: number;
-    replace_schedule_id?: string;
-    decayRate?: number;
-    shiftWeights?: { morning: number; evening: number; night: number };
-    overwriteLocked?: boolean;
-  }) {
-    return this.request('/api/scheduling/schedules/run', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  week_start_date: string;
+  week_end_date: string;
+  rule_set_id: string;
+  algorithm?: 'greedy' | 'ilp' | 'simulated_annealing';
+  template_ids?: string[];
+  employee_ids?: string[];
+  branch_id?: string;
+  team_id?: string;
+  seed?: number;
+  replace_schedule_id?: string;
+  decayRate?: number;
+  shiftWeights?: { morning: number; evening: number; night: number };
+  overwriteLocked?: boolean;
+}) {
+  return this.request('/api/scheduling/schedules/run', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
-  async getSchedules(params?: { week_start?: string; week_end?: string; status?: string }) {
-    const query = new URLSearchParams();
-    if (params?.week_start) query.append('week_start', params.week_start);
-    if (params?.week_end) query.append('week_end', params.week_end);
-    if (params?.status) query.append('status', params.status);
-    return this.request(`/api/scheduling/schedules?${query.toString()}`);
-  }
+  async getSchedules(params ?: { week_start?: string; week_end?: string; status?: string }) {
+  const query = new URLSearchParams();
+  if (params?.week_start) query.append('week_start', params.week_start);
+  if (params?.week_end) query.append('week_end', params.week_end);
+  if (params?.status) query.append('status', params.status);
+  return this.request(`/api/scheduling/schedules?${query.toString()}`);
+}
 
   async getSchedule(id: string) {
-    return this.request(`/api/scheduling/schedules/${id}`);
-  }
+  return this.request(`/api/scheduling/schedules/${id}`);
+}
 
   async approveSchedule(id: string) {
-    return this.request(`/api/scheduling/schedules/${id}/approve`, {
-      method: 'PATCH',
-    });
-  }
+  return this.request(`/api/scheduling/schedules/${id}/approve`, {
+    method: 'PATCH',
+  });
+}
 
   async deleteSchedule(id: string) {
-    return this.request(`/api/scheduling/schedules/${id}`, {
-      method: 'DELETE',
-    });
-  }
+  return this.request(`/api/scheduling/schedules/${id}`, {
+    method: 'DELETE',
+  });
+}
 
   async manualEditSchedule(id: string, data: { assignments: any[]; reason?: string }) {
-    return this.request(`/api/scheduling/schedules/${id}/manual-edit`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  return this.request(`/api/scheduling/schedules/${id}/manual-edit`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
 
-  async exportScheduleCSV(id: string): Promise<Blob> {
-    const response = await fetch(`${this.baseURL}/api/scheduling/schedules/${id}/export/csv`, {
-      headers: {
-        'Authorization': `Bearer ${this._token}`,
-      },
-    });
+  async exportScheduleCSV(id: string): Promise < Blob > {
+  const response = await fetch(`${this.baseURL}/api/scheduling/schedules/${id}/export/csv`, {
+    headers: {
+      'Authorization': `Bearer ${this._token}`,
+    },
+  });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to download CSV' }));
-      throw new Error(error.error || 'Failed to download CSV');
-    }
+  if(!response.ok) {
+  const error = await response.json().catch(() => ({ error: 'Failed to download CSV' }));
+  throw new Error(error.error || 'Failed to download CSV');
+}
 
-    return await response.blob();
+return await response.blob();
   }
 
   async getCalendar(params: {
-    start_date: string;
-    end_date: string;
-    employee_id?: string;
-    project_id?: string;
-    view_type?: 'employee' | 'organization';
-  }) {
-    const query = new URLSearchParams();
-    query.append('start_date', params.start_date);
-    query.append('end_date', params.end_date);
-    if (params.employee_id) query.append('employee_id', params.employee_id);
-    if (params.project_id) query.append('project_id', params.project_id);
-    if (params.view_type) query.append('view_type', params.view_type);
-    return this.request(`/api/calendar?${query.toString()}`);
-  }
-
-
+  start_date: string;
+  end_date: string;
+  employee_id?: string;
+  project_id?: string;
+  view_type?: 'employee' | 'organization';
+}) {
+  const query = new URLSearchParams();
+  query.append('start_date', params.start_date);
+  query.append('end_date', params.end_date);
+  if (params.employee_id) query.append('employee_id', params.employee_id);
+  if (params.project_id) query.append('project_id', params.project_id);
+  if (params.view_type) query.append('view_type', params.view_type);
+  return this.request(`/api/calendar?${query.toString()}`);
+}
   // Profile picture upload
   async getProfilePicturePresignedUrl(contentType: string) {
-    return this.request('/api/employees/profile-picture/presign', {
-      method: 'POST',
-      body: JSON.stringify({ contentType }),
-    });
-  }
+  return this.request('/api/employees/profile-picture/presign', {
+    method: 'POST',
+    body: JSON.stringify({ contentType }),
+  });
+}
 
   // Unified Policy Management APIs
-  async getUnifiedPolicies(params?: { category?: string; status?: string; search?: string }) {
-    const query = new URLSearchParams();
-    if (params?.category) query.append('category', params.category);
-    if (params?.status) query.append('status', params.status);
-    if (params?.search) query.append('search', params.search);
-    return this.request(`/api/unified-policies?${query.toString()}`);
-  }
+  async getUnifiedPolicies(params ?: { category?: string; status?: string; search?: string }) {
+  const query = new URLSearchParams();
+  if (params?.category) query.append('category', params.category);
+  if (params?.status) query.append('status', params.status);
+  if (params?.search) query.append('search', params.search);
+  return this.request(`/api/unified-policies?${query.toString()}`);
+}
 
   async getUnifiedPolicy(id: string) {
-    return this.request(`/api/unified-policies/${id}`);
-  }
+  return this.request(`/api/unified-policies/${id}`);
+}
 
   async createUnifiedPolicy(data: {
-    category: 'LEAVE' | 'OFFBOARDING' | 'GENERAL';
-    title: string;
-    short_description?: string;
-    content_html: string;
-    content_markdown?: string;
-    effective_from?: string;
-    effective_to?: string;
-  }) {
-    return this.request('/api/unified-policies', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  category: 'LEAVE' | 'OFFBOARDING' | 'GENERAL';
+  title: string;
+  short_description?: string;
+  content_html: string;
+  content_markdown?: string;
+  effective_from?: string;
+  effective_to?: string;
+}) {
+  return this.request('/api/unified-policies', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updateUnifiedPolicy(id: string, data: {
-    title?: string;
-    short_description?: string;
-    content_html?: string;
-    content_markdown?: string;
-    effective_from?: string;
-    effective_to?: string;
-    status?: 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'ARCHIVED';
-  }) {
-    return this.request(`/api/unified-policies/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  title?: string;
+  short_description?: string;
+  content_html?: string;
+  content_markdown?: string;
+  effective_from?: string;
+  effective_to?: string;
+  status?: 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'ARCHIVED';
+}) {
+  return this.request(`/api/unified-policies/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
 
-  async publishUnifiedPolicy(id: string, changelog_text?: string) {
-    return this.request(`/api/unified-policies/${id}/publish`, {
-      method: 'POST',
-      body: JSON.stringify({ changelog_text }),
-    });
-  }
+  async publishUnifiedPolicy(id: string, changelog_text ?: string) {
+  return this.request(`/api/unified-policies/${id}/publish`, {
+    method: 'POST',
+    body: JSON.stringify({ changelog_text }),
+  });
+}
 
   async archiveUnifiedPolicy(id: string) {
-    return this.request(`/api/unified-policies/${id}/archive`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/unified-policies/${id}/archive`, {
+    method: 'POST',
+  });
+}
 
   async getUnifiedPolicyVersions(id: string) {
-    return this.request(`/api/unified-policies/${id}/versions`);
-  }
+  return this.request(`/api/unified-policies/${id}/versions`);
+}
 
   async getUnifiedPolicyVersion(id: string, version: number) {
-    return this.request(`/api/unified-policies/${id}/versions/${version}`);
-  }
+  return this.request(`/api/unified-policies/${id}/versions/${version}`);
+}
 
   async downloadUnifiedPolicyPDF(id: string, version: number) {
-    const response = await fetch(`${this.baseURL}/api/unified-policies/${id}/versions/${version}/download`, {
-      headers: {
-        'Authorization': `Bearer ${this._token}`,
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
-      throw new Error(error.error || 'Failed to download PDF');
-    }
-
-    // Check if response is JSON (presigned URL) or PDF blob
-    const contentType = response.headers.get('content-type');
-
-    if (contentType?.includes('application/json')) {
-      // It's a presigned URL
-      const data = await response.json();
-      if (data.downloadUrl) {
-        // Open presigned URL in new tab
-        window.open(data.downloadUrl, '_blank');
-        return;
-      }
-    }
-
-    // It's a PDF blob
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `policy-${id}-v${version}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+  const response = await fetch(`${this.baseURL}/api/unified-policies/${id}/versions/${version}/download`, {
+    headers: {
+      'Authorization': `Bearer ${this._token}`,
+    },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Failed to download PDF' }));
+    throw new Error(error.error || 'Failed to download PDF');
   }
+
+  // Check if response is JSON (presigned URL) or PDF blob
+  const contentType = response.headers.get('content-type');
+  if (contentType?.includes('application/json')) {
+    // It's a presigned URL
+    const data = await response.json();
+    if (data.downloadUrl) {
+      // Open presigned URL in new tab
+      window.open(data.downloadUrl, '_blank');
+      return;
+    }
+  }
+  // It's a PDF blob
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `policy-${id}-v${version}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
 
   // Employee policy APIs
-  async getMyPolicies(params?: { category?: string; search?: string }) {
-    const query = new URLSearchParams();
-    if (params?.category) query.append('category', params.category);
-    if (params?.search) query.append('search', params.search);
-    return this.request(`/api/unified-policies/me/policies?${query.toString()}`);
-  }
+  async getMyPolicies(params ?: { category?: string; search?: string }) {
+  const query = new URLSearchParams();
+  if (params?.category) query.append('category', params.category);
+  if (params?.search) query.append('search', params.search);
+  return this.request(`/api/unified-policies/me/policies?${query.toString()}`);
+}
 
   async getMyPolicy(id: string) {
-    return this.request(`/api/unified-policies/me/policies/${id}`);
-  }
+  return this.request(`/api/unified-policies/me/policies/${id}`);
+}
 
   // RAG ingestion
   async reindexPoliciesForRAG() {
-    return this.request('/api/unified-policies/rag/reindex', {
-      method: 'POST',
-    });
-  }
+  return this.request('/api/unified-policies/rag/reindex', {
+    method: 'POST',
+  });
+}
 
   async ingestPolicyForRAG(id: string) {
-    return this.request(`/api/unified-policies/${id}/rag/ingest`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/unified-policies/${id}/rag/ingest`, {
+    method: 'POST',
+  });
+}
 
   async uploadProfilePicture(url: string, key: string) {
-    return this.request('/api/employees/profile-picture/upload', {
-      method: 'POST',
-      body: JSON.stringify({ url, key }),
-    });
-  }
+  return this.request('/api/employees/profile-picture/upload', {
+    method: 'POST',
+    body: JSON.stringify({ url, key }),
+  });
+}
 
   async getProfilePictureUrl(userId: string) {
-    return this.request(`/api/employees/profile-picture/${userId}`, {
-      method: 'GET',
-    });
-  }
+  return this.request(`/api/employees/profile-picture/${userId}`, {
+    method: 'GET',
+  });
+}
 
   // Check for missing onboarding data
   async getMissingOnboardingData() {
-    return this.request('/api/onboarding/me/missing-data');
-  }
+  return this.request('/api/onboarding/me/missing-data');
+}
 
   // Teams Management APIs
-  async getTeams(params?: { type?: 'FUNCTIONAL' | 'PROJECT'; search?: string; active?: boolean }) {
-    const query = new URLSearchParams();
-    if (params?.type) query.append('type', params.type);
-    if (params?.search) query.append('search', params.search);
-    if (params?.active !== undefined) query.append('active', String(params.active));
-    const response = await this.request(`/api/teams?${query.toString()}`);
-    return response.teams || [];
-  }
+  async getTeams(params ?: { type?: 'FUNCTIONAL' | 'PROJECT'; search?: string; active?: boolean }) {
+  const query = new URLSearchParams();
+  if (params?.type) query.append('type', params.type);
+  if (params?.search) query.append('search', params.search);
+  if (params?.active !== undefined) query.append('active', String(params.active));
+  const response = await this.request(`/api/teams?${query.toString()}`);
+  return response.teams || [];
+}
 
   async getTeam(id: string) {
-    return this.request(`/api/teams/${id}`);
-  }
+  return this.request(`/api/teams/${id}`);
+}
 
   async createTeam(data: {
-    name: string;
-    code?: string;
-    description?: string;
-    team_type?: 'FUNCTIONAL' | 'PROJECT';
-    parent_team_id?: string;
-    owner_manager_id?: string;
-  }) {
-    return this.request('/api/teams', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  name: string;
+  code?: string;
+  description?: string;
+  team_type?: 'FUNCTIONAL' | 'PROJECT';
+  parent_team_id?: string;
+  owner_manager_id?: string;
+}) {
+  return this.request('/api/teams', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updateTeam(id: string, data: {
-    name?: string;
-    code?: string;
-    description?: string;
-    parent_team_id?: string;
-    owner_manager_id?: string;
-    is_active?: boolean;
-  }) {
-    return this.request(`/api/teams/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  name?: string;
+  code?: string;
+  description?: string;
+  parent_team_id?: string;
+  owner_manager_id?: string;
+  is_active?: boolean;
+}) {
+  return this.request(`/api/teams/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
 
   async activateTeam(id: string) {
-    return this.request(`/api/teams/${id}/activate`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/teams/${id}/activate`, {
+    method: 'POST',
+  });
+}
 
   async deactivateTeam(id: string) {
-    return this.request(`/api/teams/${id}/deactivate`, {
-      method: 'POST',
-    });
-  }
+  return this.request(`/api/teams/${id}/deactivate`, {
+    method: 'POST',
+  });
+}
 
   async getTeamMembers(teamId: string) {
-    const response = await this.request(`/api/teams/${teamId}/members`);
-    return response.members || [];
-  }
+  const response = await this.request(`/api/teams/${teamId}/members`);
+  return response.members || [];
+}
 
   async getAvailableEmployeesForTeam(teamId: string) {
-    const response = await this.request(`/api/teams/${teamId}/available-employees`);
-    return response.employees || [];
-  }
+  const response = await this.request(`/api/teams/${teamId}/available-employees`);
+  return response.employees || [];
+}
 
   async addTeamMember(teamId: string, data: {
-    employee_id: string;
-    role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
-    is_primary?: boolean;
-    start_date?: string;
-    manual_override?: boolean;
-  }) {
-    return this.request(`/api/teams/${teamId}/members`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  employee_id: string;
+  role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
+  is_primary?: boolean;
+  start_date?: string;
+  manual_override?: boolean;
+}) {
+  return this.request(`/api/teams/${teamId}/members`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updateTeamMembership(teamId: string, memberId: string, data: {
-    role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
-    is_primary?: boolean;
-    end_date?: string;
-  }) {
-    return this.request(`/api/teams/${teamId}/members/${memberId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  role?: 'MEMBER' | 'MANAGER' | 'LEAD' | 'COORDINATOR';
+  is_primary?: boolean;
+  end_date?: string;
+}) {
+  return this.request(`/api/teams/${teamId}/members/${memberId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
 
   // Reporting Lines APIs
   async getEmployeeReportingLines(employeeId: string) {
-    const response = await this.request(`/api/reporting-lines/employee/${employeeId}`);
-    return response.reporting_lines || [];
-  }
+  const response = await this.request(`/api/reporting-lines/employee/${employeeId}`);
+  return response.reporting_lines || [];
+}
 
-  async getManagerDirectReports(managerId: string, relationshipType?: string) {
-    const query = relationshipType ? `?relationship_type=${relationshipType}` : '';
-    const response = await this.request(`/api/reporting-lines/manager/${managerId}${query}`);
-    return response.direct_reports || [];
-  }
+  async getManagerDirectReports(managerId: string, relationshipType ?: string) {
+  const query = relationshipType ? `?relationship_type=${relationshipType}` : '';
+  const response = await this.request(`/api/reporting-lines/manager/${managerId}${query}`);
+  return response.direct_reports || [];
+}
 
   async setPrimaryManager(data: {
-    employee_id: string;
-    manager_id: string;
-    start_date?: string;
-  }) {
-    return this.request('/api/reporting-lines/set-primary-manager', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  employee_id: string;
+  manager_id: string;
+  start_date?: string;
+}) {
+  return this.request('/api/reporting-lines/set-primary-manager', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async addSecondaryManager(data: {
-    employee_id: string;
-    manager_id: string;
-    team_id?: string;
-    start_date?: string;
-  }) {
-    return this.request('/api/reporting-lines/add-secondary-manager', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  employee_id: string;
+  manager_id: string;
+  team_id?: string;
+  start_date?: string;
+}) {
+  return this.request('/api/reporting-lines/add-secondary-manager', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async removeManager(data: {
-    reporting_line_id: string;
-    end_date?: string;
-  }) {
-    return this.request('/api/reporting-lines/remove-manager', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  reporting_line_id: string;
+  end_date?: string;
+}) {
+  return this.request('/api/reporting-lines/remove-manager', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   // Enhanced Projects APIs
-  async getProjects(params?: { status?: string; search?: string }) {
-    const query = new URLSearchParams();
-    if (params?.status) query.append('status', params.status);
-    if (params?.search) query.append('search', params.search);
-    const response = await this.request(`/api/v1/projects?${query.toString()}`);
-    return response.projects || [];
-  }
+  async getProjects(params ?: { status?: string; search?: string }) {
+  const query = new URLSearchParams();
+  if (params?.status) query.append('status', params.status);
+  if (params?.search) query.append('search', params.search);
+  const response = await this.request(`/api/v1/projects?${query.toString()}`);
+  return response.projects || [];
+}
 
 
   async getProjectMembers(projectId: string) {
-    const response = await this.request(`/api/v1/projects/${projectId}/members`);
-    return response.members || [];
-  }
+  const response = await this.request(`/api/v1/projects/${projectId}/members`);
+  return response.members || [];
+}
 
   async createProjectAllocation(projectId: string, data: {
-    employee_id: string;
-    allocation_type?: 'FULL_TIME' | 'PART_TIME' | 'AD_HOC';
-    percent_allocation?: number;
-    start_date?: string;
-    end_date?: string;
-    role_on_project?: string;
-  }) {
-    return this.request(`/api/v1/projects/${projectId}/allocations`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+  employee_id: string;
+  allocation_type?: 'FULL_TIME' | 'PART_TIME' | 'AD_HOC';
+  percent_allocation?: number;
+  start_date?: string;
+  end_date?: string;
+  role_on_project?: string;
+}) {
+  return this.request(`/api/v1/projects/${projectId}/allocations`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
 
   async updateProjectAllocation(projectId: string, allocId: string, data: {
-    allocation_type?: 'FULL_TIME' | 'PART_TIME' | 'AD_HOC';
-    percent_allocation?: number;
-    end_date?: string;
-    role_on_project?: string;
-  }) {
-    return this.request(`/api/v1/projects/${projectId}/allocations/${allocId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  allocation_type?: 'FULL_TIME' | 'PART_TIME' | 'AD_HOC';
+  percent_allocation?: number;
+  end_date?: string;
+  role_on_project?: string;
+}) {
+  return this.request(`/api/v1/projects/${projectId}/allocations/${allocId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
 
 }
 

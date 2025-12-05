@@ -8,7 +8,12 @@ import { selectEmployeeHolidays } from './holidays.js';
  * Process attendance upload file (CSV or Excel)
  * This function handles parsing, validation, normalization, and creating timesheet entries
  */
-export async function processAttendanceUpload(uploadId, fileBuffer, filename, tenantId, mappingConfig) {
+const DATE_COLUMN_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const MATRIX_WORKING_CODES = ['P', 'PR', 'PRESENT', 'WFH', 'OD', 'ON DUTY', 'ONDUTY', 'TRAVEL', 'FIELD'];
+const DEFAULT_MATRIX_TIME_IN = process.env.DEFAULT_MATRIX_TIME_IN || '09:00';
+const DEFAULT_MATRIX_TIME_OUT = process.env.DEFAULT_MATRIX_TIME_OUT || '18:00';
+
+export async function processAttendanceUpload(uploadId, fileBuffer, filename, tenantId, etlConfig) {
   try {
     // Update status to processing
     await query(
@@ -44,6 +49,20 @@ export async function processAttendanceUpload(uploadId, fileBuffer, filename, te
       'UPDATE attendance_uploads SET total_rows = $1 WHERE id = $2',
       [rows.length, uploadId]
     );
+
+    let mappingConfig = etlConfig?.mapping || null;
+
+    // Detect and convert matrix-style datasets (one row per employee, date columns)
+    const matrixResult = convertMatrixDataset(rows, tenantTimezone);
+    if (matrixResult) {
+      rows = matrixResult.rows;
+      mappingConfig = mappingConfig || matrixResult.mapping;
+
+      await query(
+        'UPDATE attendance_uploads SET total_rows = $1 WHERE id = $2',
+        [rows.length, uploadId]
+      );
+    }
 
     // Get or infer column mapping
     const mapping = mappingConfig || inferColumnMapping(rows[0]);
@@ -197,20 +216,35 @@ export async function processAttendanceUpload(uploadId, fileBuffer, filename, te
 
         successCount++;
       } catch (error) {
-        console.error(`Error processing row ${rowNumber}:`, error);
-        
-        await query(
-          `UPDATE attendance_upload_rows 
-           SET status = 'failed', error_message = $1
-           WHERE upload_id = $2 AND row_number = $3`,
-          [error.message.substring(0, 500), uploadId, rowNumber]
-        );
+        // Handle duplicate row_hash specially: treat as ignored, not failed
+        if (error.code === '23505' && error.constraint === 'idx_attendance_upload_rows_hash_unique') {
+          const msg = 'Duplicate attendance row detected (same hash as a previous upload) - row ignored';
+          console.warn(`Ignoring duplicate attendance row ${rowNumber} due to unique hash:`, error.detail || error.message);
 
-        errors.push({
-          row: rowNumber,
-          error: error.message
-        });
-        failedCount++;
+          await query(
+            `UPDATE attendance_upload_rows 
+             SET status = 'ignored', error_message = $1
+             WHERE upload_id = $2 AND row_number = $3`,
+            [msg, uploadId, rowNumber]
+          );
+
+          ignoredCount++;
+        } else {
+          console.error(`Error processing row ${rowNumber}:`, error);
+          
+          await query(
+            `UPDATE attendance_upload_rows 
+             SET status = 'failed', error_message = $1
+             WHERE upload_id = $2 AND row_number = $3`,
+            [error.message.substring(0, 500), uploadId, rowNumber]
+          );
+
+          errors.push({
+            row: rowNumber,
+            error: error.message
+          });
+          failedCount++;
+        }
       }
 
       processedCount++;
@@ -445,26 +479,24 @@ async function createTimesheetEntryFromAttendance(normalized, uploadId, rowNumbe
 
   let timesheetId;
   if (timesheetResult.rows.length === 0) {
-    // Create new timesheet with status 'pending' (not submitted)
+    // Create new timesheet with status 'draft' (not submitted)
     // Attendance uploads should not auto-submit timesheets - user must submit manually
-    // Try to set submitted_at to NULL first (if migration has been run)
-    // If constraint doesn't allow NULL, omit the column to use DEFAULT now()
-    // In that case, status='pending' still indicates it needs manual submission
+    // Timesheets should only go to 'pending_approval' when user explicitly submits them
     try {
       const newTimesheetResult = await query(
         `INSERT INTO timesheets (employee_id, week_start_date, week_end_date, total_hours, tenant_id, status, submitted_at)
-         VALUES ($1, $2, $3, $4, $5, 'pending', NULL)
+         VALUES ($1, $2, $3, $4, $5, 'draft', NULL)
          RETURNING id`,
         [normalized.employee_id, weekStart, weekEnd, 0, tenantId]
       );
       timesheetId = newTimesheetResult.rows[0].id;
     } catch (error) {
       // If NULL is not allowed (migration not run yet), omit submitted_at to use DEFAULT
-      // This will still set status='pending' which indicates it needs manual submission
+      // This will still set status='draft' which indicates it needs manual submission
       if (error.message && error.message.includes('submitted_at') && error.message.includes('null value')) {
         const newTimesheetResult = await query(
           `INSERT INTO timesheets (employee_id, week_start_date, week_end_date, total_hours, tenant_id, status)
-           VALUES ($1, $2, $3, $4, $5, 'pending')
+           VALUES ($1, $2, $3, $4, $5, 'draft')
            RETURNING id`,
           [normalized.employee_id, weekStart, weekEnd, 0, tenantId]
         );
@@ -508,6 +540,28 @@ async function createTimesheetEntryFromAttendance(normalized, uploadId, rowNumbe
     ]
   );
 
+  const timesheetEntryId = entryResult.rows[0].id;
+
+  // Also create synthetic attendance_events so analytics dashboards see uploaded data
+  // Use start_time_utc as IN event, end_time_utc (if present) as OUT event
+  if (normalized.start_time_utc) {
+    await query(
+      `INSERT INTO attendance_events (
+        tenant_id, employee_id, raw_timestamp, event_type, device_id, metadata, created_by, paired_timesheet_entry_id, work_type
+      ) VALUES ($1, $2, $3, 'IN', 'upload', NULL, NULL, $4, 'WFO')`,
+      [tenantId, normalized.employee_id, new Date(normalized.start_time_utc), timesheetEntryId]
+    );
+  }
+
+  if (normalized.end_time_utc) {
+    await query(
+      `INSERT INTO attendance_events (
+        tenant_id, employee_id, raw_timestamp, event_type, device_id, metadata, created_by, paired_timesheet_entry_id, work_type
+      ) VALUES ($1, $2, $3, 'OUT', 'upload', NULL, NULL, $4, 'WFO')`,
+      [tenantId, normalized.employee_id, new Date(normalized.end_time_utc), timesheetEntryId]
+    );
+  }
+
   // Update timesheet total hours
   await query(
     `UPDATE timesheets 
@@ -520,7 +574,7 @@ async function createTimesheetEntryFromAttendance(normalized, uploadId, rowNumbe
     [timesheetId]
   );
 
-  return entryResult.rows[0].id;
+  return timesheetEntryId;
 }
 
 /**
@@ -621,6 +675,93 @@ function parseDateTime(workDate, timeStr, timezone) {
   }
 
   return null;
+}
+
+function normalizeHeaderLabel(header) {
+  return (header || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function findHeader(headers, candidates) {
+  const normalized = headers.map((header) => ({
+    raw: header,
+    norm: normalizeHeaderLabel(header),
+  }));
+  const target = candidates.map(normalizeHeaderLabel);
+  const match = normalized.find((entry) => target.includes(entry.norm));
+  return match?.raw || null;
+}
+
+function normalizeStatusValue(value) {
+  return (value || '').replace(/[^a-z]/gi, '').toUpperCase();
+}
+
+function isWorkingMatrixStatus(value) {
+  const normalized = normalizeStatusValue(value);
+  return MATRIX_WORKING_CODES.some((code) =>
+    normalized.includes(code.replace(/\s/g, ''))
+  );
+}
+
+function convertMatrixDataset(rows, tenantTimezone) {
+  if (!rows.length) return null;
+  const headers = Object.keys(rows[0]);
+  const dateColumns = headers.filter((header) =>
+    DATE_COLUMN_REGEX.test((header || '').trim())
+  );
+  if (dateColumns.length === 0) {
+    return null;
+  }
+
+  const identifierHeader = findHeader(headers, [
+    'employee code',
+    'employee_id',
+    'employee id',
+    'emp id',
+    'emp code',
+    'code',
+  ]);
+  if (!identifierHeader) return null;
+
+  const emailHeader = findHeader(headers, ['employee email', 'email']);
+  const timezoneHeader = findHeader(headers, ['timezone', 'tz', 'time zone']);
+
+  const expandedRows = [];
+  rows.forEach((row) => {
+    const identifier = (row[identifierHeader] || '').toString().trim();
+    if (!identifier) return;
+
+    dateColumns.forEach((dateCol) => {
+      const statusValue = (row[dateCol] || '').toString().trim();
+      if (!statusValue || !isWorkingMatrixStatus(statusValue)) return;
+
+      expandedRows.push({
+        employee_identifier: identifier,
+        employee_email: emailHeader ? (row[emailHeader] || '').toString().trim() : '',
+        date: dateCol,
+        time_in: DEFAULT_MATRIX_TIME_IN,
+        time_out: DEFAULT_MATRIX_TIME_OUT,
+        timezone: timezoneHeader ? (row[timezoneHeader] || tenantTimezone) : tenantTimezone,
+        notes: `Status: ${statusValue}`,
+      });
+    });
+  });
+
+  if (!expandedRows.length) return null;
+
+  return {
+    rows: expandedRows,
+    mapping: {
+      employee_identifier: 'employee_identifier',
+      employee_email: 'employee_email',
+      date: 'date',
+      time_in: 'time_in',
+      time_out: 'time_out',
+      timezone: 'timezone',
+      notes: 'notes',
+    },
+  };
 }
 
 /**

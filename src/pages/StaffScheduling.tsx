@@ -44,7 +44,6 @@ import {
   Edit,
   Plus,
   Trash2,
-  FileText,
   Users,
   Sparkles,
   RefreshCw,

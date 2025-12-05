@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +45,7 @@ interface PayrollItem {
   esi_deduction: number;
   pt_deduction: number;
   tds_deduction: number;
+  advance_deduction?: number;
   deductions: number;
   net_salary: number;
   lop_days?: number;
@@ -82,6 +83,7 @@ export const PayrollReviewDialog = ({
   const [savingIncentive, setSavingIncentive] = useState(false);
   const [heldEmployeeIds, setHeldEmployeeIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const queryClient = useQueryClient();
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["payroll-preview", cycleId],
@@ -218,6 +220,12 @@ export const PayrollReviewDialog = ({
       const itemsToSave = prepareItems();
       const result = await api.payroll.saveChanges(cycleId, itemsToSave);
       toast.success(result.message || "Changes saved successfully");
+      
+      // Invalidate queries to ensure UI reflects updated data
+      await queryClient.invalidateQueries({ queryKey: ["payroll-preview", cycleId] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-cycles"] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); // Also invalidate payroll-runs for consistency
+      
       onProcessed();
       onOpenChange(false);
     } catch (error: any) {
@@ -234,6 +242,12 @@ export const PayrollReviewDialog = ({
       const itemsToProcess = prepareItems();
       const result = await api.payroll.processCycle(cycleId, itemsToProcess);
       toast.success(result.message || "Payroll processed successfully");
+      
+      // Invalidate queries to ensure UI reflects updated data
+      await queryClient.invalidateQueries({ queryKey: ["payroll-preview", cycleId] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-cycles"] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); // Also invalidate payroll-runs for consistency
+      
       onProcessed();
       onOpenChange(false);
     } catch (error: any) {
@@ -264,6 +278,13 @@ export const PayrollReviewDialog = ({
     try {
       await api.payroll.setIncentive(cycleId, target.employee_id, parsedAmount);
       toast.success("Incentive saved.");
+      
+      // Invalidate queries to ensure UI reflects updated data
+      // This ensures the Review Dialog, Bank Export, and Payment History all show matching amounts
+      await queryClient.invalidateQueries({ queryKey: ["payroll-preview", cycleId] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-cycles"] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); // Also invalidate payroll-runs for consistency
+      
       await refetch();
     } catch (error: any) {
       toast.error(error.message || "Failed to save incentive");
@@ -467,7 +488,14 @@ export const PayrollReviewDialog = ({
                             {formatCurrency(item.gross_salary)}
                           </TableCell>
                           <TableCell className="text-right">
-                            {formatCurrency(item.deductions)}
+                            <div className="flex flex-col items-end gap-1">
+                              <span>{formatCurrency(item.deductions)}</span>
+                              {item.advance_deduction && item.advance_deduction > 0 && (
+                                <span className="text-xs text-muted-foreground">
+                                  (EMI: {formatCurrency(item.advance_deduction)})
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right font-semibold text-primary">
                             {formatCurrency(item.net_salary)}
@@ -557,7 +585,14 @@ export const PayrollReviewDialog = ({
                             {formatCurrency(item.gross_salary)}
                           </TableCell>
                           <TableCell className="text-right">
-                            {formatCurrency(item.deductions)}
+                            <div className="flex flex-col items-end gap-1">
+                              <span>{formatCurrency(item.deductions)}</span>
+                              {item.advance_deduction && item.advance_deduction > 0 && (
+                                <span className="text-xs text-muted-foreground">
+                                  (EMI: {formatCurrency(item.advance_deduction)})
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right font-semibold text-primary">
                             {formatCurrency(item.net_salary)}

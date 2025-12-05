@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Play, Receipt, Edit2, Trash2 } from "lucide-react";
+import { Loader2, Play, Receipt, Edit2, Trash2, Download } from "lucide-react";
 import { PayrollReviewDialog } from "./PayrollReviewDialog";
 import { PayrollCyclePayslipsDialog } from "./PayrollCyclePayslipsDialog";
+import { BankTransferPreviewDialog } from "./BankTransferPreviewDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,6 +29,7 @@ interface PayrollCycle {
   created_at: string;
   approved_at?: string;
   payday?: string;
+  run_type?: "regular" | "off_cycle";
 }
 
 interface PayrollCycleListProps {
@@ -38,6 +40,7 @@ interface PayrollCycleListProps {
 export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) => {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [payslipsDialogOpen, setPayslipsDialogOpen] = useState(false);
+  const [bankTransferPreviewOpen, setBankTransferPreviewOpen] = useState(false);
   const [selectedCycle, setSelectedCycle] = useState<PayrollCycle | null>(null);
   const [confirmProcessOpen, setConfirmProcessOpen] = useState(false);
   const [cycleToProcess, setCycleToProcess] = useState<PayrollCycle | null>(null);
@@ -110,6 +113,11 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
       setDeleting(false);
     }
   };
+
+  const handleExportBankFile = (cycle: PayrollCycle) => {
+    setSelectedCycle(cycle);
+    setBankTransferPreviewOpen(true);
+  };
   const getStatusColor = (status: string) => {
     switch (status) {
       case "draft": return "secondary";
@@ -180,7 +188,17 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
           cycles.map((cycle) => (
             <TableRow key={cycle.id}>
               <TableCell className="font-medium">
-                {getMonthName(cycle.month)} {cycle.year}
+                <div className="flex flex-col gap-1">
+                  <span>{getMonthName(cycle.month)} {cycle.year}</span>
+                  {cycle.run_type && (
+                    <Badge 
+                      variant={cycle.run_type === "off_cycle" ? "outline" : "secondary"}
+                      className="text-xs w-fit"
+                    >
+                      {cycle.run_type === "off_cycle" ? "Off-Cycle" : "Regular"}
+                    </Badge>
+                  )}
+                </div>
               </TableCell>
               <TableCell>
                 <Badge variant={getStatusColor(cycle.status)}>
@@ -241,6 +259,16 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
                       View Payslips
                     </Button>
                   )}
+                  {cycle.status !== 'failed' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleExportBankFile(cycle)}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Export Bank File
+                    </Button>
+                  )}
                 </div>
               </TableCell>
             </TableRow>
@@ -264,6 +292,13 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
         <PayrollCyclePayslipsDialog
           open={payslipsDialogOpen}
           onOpenChange={setPayslipsDialogOpen}
+          cycleId={selectedCycle.id}
+          cycleMonth={selectedCycle.month}
+          cycleYear={selectedCycle.year}
+        />
+        <BankTransferPreviewDialog
+          open={bankTransferPreviewOpen}
+          onOpenChange={setBankTransferPreviewOpen}
           cycleId={selectedCycle.id}
           cycleMonth={selectedCycle.month}
           cycleYear={selectedCycle.year}

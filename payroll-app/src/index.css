@@ -115,3 +115,299 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Liquid Glass Styles - Matching HR Portal */
+@layer utilities {
+  /* Liquid glass navbar */
+  .liquid-glass-navbar {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px) saturate(180%);
+    -webkit-backdrop-filter: blur(10px) saturate(180%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 4px 24px 0 rgba(0, 0, 0, 0.06),
+                inset 0 1px 0 rgba(255, 255, 255, 0.4),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    will-change: backdrop-filter, background;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
+
+  /* Liquid glass nav item - simple zoom effect */
+  .liquid-glass-nav-item {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    position: relative;
+    outline: none !important;
+    --tw-ring-color: transparent !important;
+    --tw-ring-width: 0 !important;
+    --tw-ring-offset-width: 0 !important;
+    --tw-ring-offset-color: transparent !important;
+    will-change: transform;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    color: inherit !important;
+  }
+
+  .liquid-glass-nav-item:hover {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: scale(1.1) translateZ(0);
+    -webkit-transform: scale(1.1) translateZ(0);
+  }
+
+  .liquid-glass-nav-item:focus,
+  .liquid-glass-nav-item:focus-visible,
+  .liquid-glass-nav-item:active,
+  .liquid-glass-nav-item:focus-within {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    --tw-ring-color: transparent !important;
+    --tw-ring-width: 0 !important;
+    --tw-ring-offset-width: 0 !important;
+    --tw-ring-offset-color: transparent !important;
+    background: transparent !important;
+  }
+
+  /* Remove any green outlines from buttons - more aggressive */
+  button.liquid-glass-nav-item,
+  button.liquid-glass-nav-item:focus,
+  button.liquid-glass-nav-item:focus-visible,
+  button.liquid-glass-nav-item:active,
+  button.liquid-glass-nav-item:hover,
+  .liquid-glass-nav-item:focus,
+  .liquid-glass-nav-item:focus-visible,
+  .liquid-glass-nav-item:active {
+    outline: none !important;
+    outline-offset: 0 !important;
+    border: none !important;
+    --tw-ring-color: transparent !important;
+    --tw-ring-width: 0 !important;
+    --tw-ring-offset-width: 0 !important;
+    --tw-ring-offset-color: transparent !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
+  button.liquid-glass-nav-item:hover {
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
+  /* Remove green ring from all buttons - most aggressive */
+  button.liquid-glass-nav-item:focus-visible,
+  .liquid-glass-nav-item:focus-visible {
+    outline: none !important;
+    ring: none !important;
+    ring-offset: 0 !important;
+    --tw-ring-color: transparent !important;
+    --tw-ring-width: 0 !important;
+    --tw-ring-offset-width: 0 !important;
+    --tw-ring-offset-color: transparent !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
+  /* Override any default button focus styles */
+  button.liquid-glass-nav-item,
+  .liquid-glass-nav-item {
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
+
+  /* Remove any browser default focus styles */
+  button.liquid-glass-nav-item::-moz-focus-inner {
+    border: 0 !important;
+    outline: none !important;
+  }
+
+  /* Force remove all ring utilities for liquid-glass-nav-item */
+  .liquid-glass-nav-item[class*="ring"],
+  button.liquid-glass-nav-item[class*="ring"] {
+    --tw-ring-width: 0 !important;
+    --tw-ring-offset-width: 0 !important;
+    --tw-ring-color: transparent !important;
+    --tw-ring-offset-color: transparent !important;
+  }
+
+  /* Override Tailwind's ring utilities completely */
+  .liquid-glass-nav-item.ring-0,
+  .liquid-glass-nav-item.ring-2,
+  button.liquid-glass-nav-item.ring-0,
+  button.liquid-glass-nav-item.ring-2 {
+    --tw-ring-width: 0 !important;
+    box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.04),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  }
+
+  /* Global override - remove ALL focus rings from liquid-glass-nav-item buttons */
+  button.liquid-glass-nav-item *,
+  .liquid-glass-nav-item * {
+    --tw-ring-color: transparent !important;
+  }
+
+  /* Most aggressive - target all possible ring states */
+  button.liquid-glass-nav-item:is(:focus, :focus-visible, :focus-within, :active),
+  .liquid-glass-nav-item:is(:focus, :focus-visible, :focus-within, :active) {
+    box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.04),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  }
+
+  button.liquid-glass-nav-item:hover:is(:focus, :focus-visible, :focus-within),
+  .liquid-glass-nav-item:hover:is(:focus, :focus-visible, :focus-within) {
+    box-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  }
+
+  .liquid-glass-nav-item-active {
+    background: rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(14px) saturate(200%);
+    -webkit-backdrop-filter: blur(14px) saturate(200%);
+    border-color: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.3);
+  }
+
+  /* Liquid glass dropdown */
+  .liquid-glass-dropdown {
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.15);
+    will-change: backdrop-filter, background;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
+
+  /* Liquid glass dropdown item */
+  .liquid-glass-dropdown-item {
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    position: relative;
+    overflow: hidden;
+    border-radius: 0.375rem;
+    background: transparent !important;
+    color: inherit !important;
+  }
+
+  .liquid-glass-dropdown-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 3px;
+    height: 100%;
+    background: #E41E26;
+    transform: scaleY(0);
+    transform-origin: top;
+    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    border-radius: 0 0.125rem 0.125rem 0;
+    z-index: 1;
+  }
+
+  .liquid-glass-dropdown-item:has([data-radix-select-item-indicator])::before,
+  .liquid-glass-dropdown-item:has([data-radix-dropdown-menu-item-indicator])::before {
+    transform: scaleY(1);
+  }
+
+  .liquid-glass-dropdown-item:has([data-radix-select-item-indicator]),
+  .liquid-glass-dropdown-item:has([data-radix-dropdown-menu-item-indicator]) {
+    background: rgba(255, 255, 255, 0.3) !important;
+    backdrop-filter: blur(14px) saturate(200%);
+    -webkit-backdrop-filter: blur(14px) saturate(200%);
+    transform: translateX(2px);
+  }
+
+  .liquid-glass-dropdown-item:hover::before,
+  .liquid-glass-dropdown-item:focus::before,
+  .liquid-glass-dropdown-item:focus-visible::before,
+  .liquid-glass-dropdown-item[data-highlighted]::before,
+  .liquid-glass-dropdown-item[data-state="checked"]::before,
+  .liquid-glass-dropdown-item[data-state="open"]::before,
+  .liquid-glass-dropdown-item[aria-selected="true"]::before,
+  .liquid-glass-dropdown-item[aria-current="page"]::before {
+    transform: scaleY(1);
+  }
+
+  .liquid-glass-dropdown-item:hover,
+  .liquid-glass-dropdown-item:focus,
+  .liquid-glass-dropdown-item:focus-visible,
+  .liquid-glass-dropdown-item[data-highlighted],
+  .liquid-glass-dropdown-item[data-state="checked"],
+  .liquid-glass-dropdown-item[data-state="open"],
+  .liquid-glass-dropdown-item[aria-selected="true"],
+  .liquid-glass-dropdown-item[aria-current="page"] {
+    background: rgba(255, 255, 255, 0.3) !important;
+    backdrop-filter: blur(14px) saturate(200%);
+    -webkit-backdrop-filter: blur(14px) saturate(200%);
+    transform: translateX(2px);
+    color: inherit !important;
+  }
+
+  /* Red button - uniform app-level style with #E41E26 */
+  .red-glass-button {
+    background: #E41E26 !important;
+    border: none !important;
+    box-shadow: 0 2px 8px 0 rgba(228, 30, 38, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    color: #ffffff !important;
+    font-weight: 700;
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    position: relative;
+    overflow: visible;
+  }
+
+  /* Remove blue/green colors from buttons */
+  .red-glass-button.bg-blue-600,
+  .red-glass-button.bg-blue-700,
+  .red-glass-button.bg-green-600,
+  .red-glass-button.bg-green-700,
+  .red-glass-button.hover\:bg-blue-700,
+  .red-glass-button.hover\:bg-green-700 {
+    background: #E41E26 !important;
+  }
+
+  .red-glass-button.text-blue-600,
+  .red-glass-button.text-green-600 {
+    color: #ffffff !important;
+  }
+
+  .red-glass-button:hover {
+    background: #E41E26;
+    box-shadow: 0 2px 12px 0 rgba(228, 30, 38, 0.4),
+                0 0 20px 0 rgba(228, 30, 38, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+    color: #ffffff;
+  }
+
+  .red-glass-button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px 0 rgba(228, 30, 38, 0.3),
+                0 0 15px 0 rgba(228, 30, 38, 0.3);
+  }
+
+  .red-glass-button:focus {
+    outline: none;
+    box-shadow: 0 2px 12px 0 rgba(228, 30, 38, 0.4),
+                0 0 20px 0 rgba(228, 30, 38, 0.3);
+  }
+}

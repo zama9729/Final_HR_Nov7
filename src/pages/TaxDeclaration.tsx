@@ -261,10 +261,10 @@ export default function TaxDeclaration() {
                 </SelectContent>
               </Select>
             </div>
-            <Button variant="outline" onClick={() => setRefreshToken((token) => token + 1)}>
+            <Button variant="default" onClick={() => setRefreshToken((token) => token + 1)}>
               Refresh
             </Button>
-            <Button variant="outline" onClick={handleDownloadForm16} disabled={downloading}>
+            <Button variant="default" onClick={handleDownloadForm16} disabled={downloading}>
               <Download className="mr-2 h-4 w-4" />
               {downloading ? "Preparing…" : "Download Form 16"}
             </Button>

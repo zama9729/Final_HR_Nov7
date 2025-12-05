@@ -163,6 +163,28 @@ CREATE TABLE leave_policies (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
+-- Probation policies table (organization-level)
+CREATE TABLE IF NOT EXISTS probation_policies (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  probation_days INTEGER NOT NULL DEFAULT 90,
+  allowed_leave_days INTEGER DEFAULT 0,
+  requires_mid_probation_review BOOLEAN DEFAULT false,
+  auto_confirm_at_end BOOLEAN DEFAULT false,
+  probation_notice_days INTEGER DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+  published_at TIMESTAMP WITH TIME ZONE,
+  published_by UUID REFERENCES profiles(id),
+  created_by UUID REFERENCES profiles(id),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_probation_policies_tenant ON probation_policies(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_probation_policies_status ON probation_policies(tenant_id, status);
+
 -- Leave requests table
 CREATE TABLE leave_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -237,14 +259,19 @@ CREATE TABLE timesheets (
   week_start_date DATE NOT NULL,
   week_end_date DATE NOT NULL,
   total_hours DECIMAL(5,2) NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
-  submitted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','pending_approval','approved','rejected')),
+  submitted_at TIMESTAMP WITH TIME ZONE,
   reviewed_by UUID REFERENCES employees(id),
   reviewed_at TIMESTAMP WITH TIME ZONE,
   rejection_reason TEXT,
   tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  period_start DATE,
+  period_end DATE,
+  submitted_by UUID REFERENCES profiles(id),
+  approvals JSONB DEFAULT '[]'::jsonb,
+  audit_snapshot JSONB
 );
 
 -- Timesheet entries table
@@ -255,7 +282,15 @@ CREATE TABLE timesheet_entries (
   hours DECIMAL(4,2) NOT NULL,
   description TEXT,
   tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  clock_in TIMESTAMPTZ,
+  clock_out TIMESTAMPTZ,
+  manual_in TIMESTAMPTZ,
+  manual_out TIMESTAMPTZ,
+  notes TEXT,
+  hours_worked NUMERIC(6,2),
+  source TEXT DEFAULT 'punch' CHECK (source IN ('punch','manual_edit')),
+  audit_trail JSONB DEFAULT '[]'::jsonb
 );
 
 -- Holiday management tables
@@ -299,6 +334,21 @@ ALTER TABLE timesheet_entries ADD COLUMN IF NOT EXISTS is_holiday BOOLEAN DEFAUL
 ALTER TABLE timesheet_entries ADD COLUMN IF NOT EXISTS holiday_id UUID REFERENCES holidays(id);
 ALTER TABLE timesheet_entries ADD COLUMN IF NOT EXISTS readonly BOOLEAN DEFAULT false;
 ALTER TABLE timesheet_entries ADD COLUMN IF NOT EXISTS conflict BOOLEAN DEFAULT false;
+
+-- Announcements (for dashboard)
+CREATE TABLE IF NOT EXISTS announcements (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  org_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('normal','urgent')),
+  pinned BOOLEAN NOT NULL DEFAULT false,
+  created_by UUID REFERENCES profiles(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_announcements_org_created ON announcements(org_id, created_at DESC);
 
 -- Workflows table
 CREATE TABLE workflows (
@@ -1467,6 +1517,7 @@ CREATE TRIGGER update_user_auth_updated_at BEFORE UPDATE ON user_auth FOR EACH R
 CREATE TRIGGER update_onboarding_data_updated_at BEFORE UPDATE ON onboarding_data FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_leave_policies_updated_at BEFORE UPDATE ON leave_policies FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_leave_requests_updated_at BEFORE UPDATE ON leave_requests FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_probation_policies_updated_at BEFORE UPDATE ON probation_policies FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_timesheets_updated_at BEFORE UPDATE ON timesheets FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_workflows_updated_at BEFORE UPDATE ON workflows FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_appraisal_cycles_updated_at BEFORE UPDATE ON appraisal_cycles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

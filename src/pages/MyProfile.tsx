@@ -1,211 +1,138 @@
+import { useEffect, useState, useRef } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useToast } from '@/hooks/use-toast';
-import EmployeeSkillsEditor from '@/components/EmployeeSkillsEditor';
-import EmployeeCertificationsEditor from '@/components/EmployeeCertificationsEditor';
-import EmployeePastProjectsEditor from '@/components/EmployeePastProjectsEditor';
-import { useEffect, useMemo, useState } from 'react';
-import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { 
-  User, 
-  Award, 
-  Puzzle, 
-  Briefcase,
-  MapPin,
-  Mail,
-  Phone,
-  Calendar,
-  Building,
-  Users,
-  Edit,
-  Save,
-  X,
-  Info,
-  FileText,
-  CreditCard,
-  Home,
-  UserCheck,
-  Activity,
-  Clock,
-  CalendarDays
-} from 'lucide-react';
+import { ProfilePicture } from '@/components/ProfilePicture';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress as ProgressBar } from '@/components/ui/progress';
-import { format, parseISO, isToday, isTomorrow, addDays, differenceInCalendarDays } from 'date-fns';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import EmployeeSkillsEditor from '@/components/EmployeeSkillsEditor';
+import EmployeePastProjectsEditor from '@/components/EmployeePastProjectsEditor';
+import EmployeeHistoryTab from '@/components/EmployeeHistoryTab';
+import { CalendarDays, Clock, Camera, Upload } from 'lucide-react';
+import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
 
-interface EmployeeData {
+interface SimpleEmployee {
   id: string;
-  employee_id: string;
-  department: string;
-  position: string;
-  work_location: string;
-  join_date: string;
-  status: string;
-  onboarding_status?: string;
+  employee_id?: string;
+  department?: string;
+  position?: string;
+  /**
+   * Optional career grade / band for the employee.
+   * Populated from the employees.grade column when available.
+   */
+  grade?: string;
+  /**
+   * Optional explicit designation/title for the employee.
+   * Populated from the employees.designation column when available.
+   */
+  designation?: string;
+  work_location?: string;
+  join_date?: string;
+  status?: string;
   profiles?: {
     first_name?: string;
     last_name?: string;
     email?: string;
     phone?: string;
-  };
-  reporting_manager?: {
-    id?: string;
-    first_name?: string;
-    last_name?: string;
-    position?: string;
+    profile_picture_url?: string;
   };
   reporting_team?: Array<{
     id: string;
     employee_id: string;
-    position: string;
-    department: string;
+    position?: string;
+    department?: string;
     profiles?: {
       first_name?: string;
       last_name?: string;
-      email?: string;
     };
+    status?: 'In' | 'Leave' | 'WFH';
   }>;
-  onboarding_data?: {
-    pan_number?: string;
-    aadhar_number?: string;
-    bank_account_number?: string;
-    bank_name?: string;
-    bank_branch?: string;
-    ifsc_code?: string;
-    permanent_address?: string;
-    permanent_city?: string;
-    permanent_state?: string;
-    permanent_postal_code?: string;
-    current_address?: string;
-    current_city?: string;
-    current_state?: string;
-    current_postal_code?: string;
-    emergency_contact_name?: string;
-    emergency_contact_phone?: string;
-    emergency_contact_relation?: string;
-    completed_at?: string;
-  };
 }
-
-// Utility function to mask sensitive numbers (show only last 4 digits)
-const maskNumber = (value: string | undefined | null, showLastDigits: number = 4): string => {
-  if (!value) return 'N/A';
-  const str = String(value);
-  if (str.length <= showLastDigits) return str;
-  const masked = '*'.repeat(str.length - showLastDigits);
-  return masked + str.slice(-showLastDigits);
-};
-
-// Calculate onboarding progress
-const calculateOnboardingProgress = (onboardingData: any): number => {
-  if (!onboardingData) return 0;
-  
-  const fields = [
-    onboardingData.emergency_contact_name,
-    onboardingData.emergency_contact_phone,
-    onboardingData.permanent_address,
-    onboardingData.permanent_city,
-    onboardingData.permanent_state,
-    onboardingData.permanent_postal_code,
-    onboardingData.current_address,
-    onboardingData.current_city,
-    onboardingData.current_state,
-    onboardingData.current_postal_code,
-    onboardingData.bank_account_number,
-    onboardingData.bank_name,
-    onboardingData.bank_branch,
-    onboardingData.ifsc_code,
-    onboardingData.pan_number,
-    onboardingData.aadhar_number,
-  ];
-  
-  const filledFields = fields.filter(f => f && String(f).trim().length > 0).length;
-  return Math.round((filledFields / fields.length) * 100);
-};
 
 export default function MyProfile() {
   const { userRole } = useAuth();
   const { toast } = useToast();
-  const location = useLocation();
-  const [activeTab, setActiveTab] = useState('about');
-  const [employeeId, setEmployeeId] = useState<string>('');
-  const [employee, setEmployee] = useState<EmployeeData | null>(null);
+  const [employee, setEmployee] = useState<SimpleEmployee | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isEditing, setIsEditing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'personal' | 'skills' | 'projects' | 'certifications' | 'shifts' | 'history'>('personal');
+  const [about, setAbout] = useState('');
+  const [jobLove, setJobLove] = useState('');
+  const [hobbies, setHobbies] = useState('');
+  const [aboutLoading, setAboutLoading] = useState(false);
+  const [aboutEditing, setAboutEditing] = useState(false);
+  const [aboutSaving, setAboutSaving] = useState(false);
   const [upcomingShifts, setUpcomingShifts] = useState<any[]>([]);
   const [loadingShifts, setLoadingShifts] = useState(false);
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-  });
-
-  const tabParam = useMemo(() => {
-    return new URLSearchParams(location.search).get('tab');
-  }, [location.search]);
-
-  const employeeParam = useMemo(() => {
-    return new URLSearchParams(location.search).get('employee');
-  }, [location.search]);
+  const [uploadingProfilePic, setUploadingProfilePic] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setActiveTab(tabParam || 'about');
-  }, [tabParam]);
+    const load = async () => {
+      try {
+        setLoading(true);
+        let me: { id: string } | null = null;
+        try {
+          me = await api.getEmployeeId();
+        } catch {
+          me = null;
+        }
 
-  useEffect(() => {
-    if (employeeParam) {
-      fetchEmployeeProfile(employeeParam);
-    } else {
-      fetchMyProfile();
-    }
-  }, [employeeParam]);
-
-  const handleTabChange = (value: string) => {
-    setActiveTab(value);
-    const params = new URLSearchParams(location.search);
-    params.set('tab', value);
-    window.history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
-  };
-
-  useEffect(() => {
-    if (employeeId) {
-      fetchUpcomingShifts(employeeId);
-    } else {
-      setUpcomingShifts([]);
-    }
-  }, [employeeId]);
-
-  const fetchUpcomingShifts = async (targetEmployeeId: string) => {
-    if (!targetEmployeeId) return;
-    
-    try {
-      setLoadingShifts(true);
-      const today = new Date();
-      const nextMonth = addDays(today, 30);
-      
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/scheduling/employee/${targetEmployeeId}/shifts?start_date=${format(today, 'yyyy-MM-dd')}&end_date=${format(nextMonth, 'yyyy-MM-dd')}`,
-        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setUpcomingShifts(data.shifts || []);
+        if (me?.id) {
+          const emp = await api.getEmployee(me.id);
+          setEmployee(emp as SimpleEmployee);
+        } else {
+          const profile = await api.getProfile();
+          setEmployee({
+            id: profile.id,
+            employee_id: profile.employee_code || profile.employee_id,
+            department: profile.department,
+            position: profile.position || profile.job_title,
+            designation: profile.position || profile.job_title,
+            work_location: profile.work_location || profile.location,
+            join_date: profile.created_at,
+            status: profile.status || 'active',
+            profiles: {
+              first_name: profile.first_name,
+              last_name: profile.last_name,
+              email: profile.email,
+              phone: profile.phone,
+              profile_picture_url: profile.profile_picture_url,
+            },
+          });
+        }
+      } catch (error: any) {
+        console.error('Failed to load profile', error);
+        toast({
+          title: 'Unable to load profile',
+          description: error?.message || 'Please try again later',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error('Error fetching upcoming shifts:', error);
-    } finally {
-      setLoadingShifts(false);
-    }
-  };
+    };
+
+    load();
+  }, [toast]);
+
+  const fullName =
+    `${employee?.profiles?.first_name || ''} ${employee?.profiles?.last_name || ''}`.trim() ||
+    'Employee';
+
+  const initials = fullName
+    .split(' ')
+    .filter(Boolean)
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase() || 'U';
+
+  const reportingTeam = employee?.reporting_team || [];
+  const canEdit = ['employee', 'manager'].includes(userRole || '');
 
   const formatShiftTime = (time?: string | null) => {
     if (!time) return '--';
@@ -223,172 +150,131 @@ export default function MyProfile() {
     return format(date, 'EEE, MMM d, yyyy');
   };
 
-  const loadEmployeeProfile = async (id: string) => {
-    const emp = await api.getEmployee(id);
-    setEmployeeId(id);
-    setEmployee(emp);
-    setFormData({
-      firstName: emp?.profiles?.first_name || '',
-      lastName: emp?.profiles?.last_name || '',
-      email: emp?.profiles?.email || '',
-      phone: emp?.profiles?.phone || '',
-    });
-    setIsEditing(false);
-  };
-
-  const fetchEmployeeProfile = async (id: string) => {
+  const fetchUpcomingShifts = async (employeeId: string) => {
+    if (!employeeId) return;
     try {
-      setLoading(true);
-      await loadEmployeeProfile(id);
-    } catch (error: any) {
-      console.error('Error loading employee profile:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to load employee profile',
-        variant: 'destructive',
-      });
-      setEmployee(null);
+      setLoadingShifts(true);
+      const today = new Date();
+      const nextMonth = addDays(today, 30);
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/scheduling/employee/${employeeId}/shifts?start_date=${format(
+          today,
+          'yyyy-MM-dd',
+        )}&end_date=${format(nextMonth, 'yyyy-MM-dd')}`,
+        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } },
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setUpcomingShifts(data.shifts || []);
+      } else {
+        setUpcomingShifts([]);
+      }
+    } catch (error) {
+      console.error('Error fetching upcoming shifts:', error);
+      setUpcomingShifts([]);
     } finally {
-      setLoading(false);
+      setLoadingShifts(false);
     }
   };
 
-  const fetchMyProfile = async () => {
-    try {
-      setLoading(true);
-      
-      // Try to get employee ID, but don't fail if it doesn't exist
-      let me = null;
+  useEffect(() => {
+    const fetchAbout = async () => {
+      if (!(api as any).getMyAbout) return;
       try {
-        me = await api.getEmployeeId();
-      } catch (error: any) {
-        // Employee record doesn't exist yet - this is OK for new signups
-        console.log('No employee record found, using profile data:', error.message);
+        setAboutLoading(true);
+        const data = await (api as any).getMyAbout();
+        if (data) {
+          setAbout(data.about_me || '');
+          setJobLove(data.job_love || '');
+          setHobbies(data.hobbies || '');
+        }
+      } catch (error) {
+        console.error('Error fetching about section:', error);
+      } finally {
+        setAboutLoading(false);
       }
-      
-      if (me?.id) {
-        await loadEmployeeProfile(me.id);
-        return;
-      }
+    };
 
-      // Fallback to base profile if no employee record exists
-      const profile = await api.getProfile();
-      if (profile) {
-        setEmployeeId('');
-        const fallbackEmployee: EmployeeData = {
-          id: profile.id || 'profile',
-          employee_id: profile.employee_code || profile.employee_id || 'N/A',
-          department: profile.department || 'N/A',
-          position: profile.position || profile.job_title || 'N/A',
-          work_location: profile.work_location || profile.location || profile.timezone || 'N/A',
-          join_date: profile.created_at || new Date().toISOString(),
-          status: profile.status || 'active',
-          onboarding_status: profile.onboarding_status || 'not_started',
-          reporting_manager: undefined,
-          reporting_team: [],
-          onboarding_data: {},
-          profiles: {
-            first_name: profile.first_name,
-            last_name: profile.last_name,
-            email: profile.email,
-            phone: profile.phone,
-          },
-        };
-        setEmployee(fallbackEmployee);
-        setFormData({
-          firstName: profile.first_name || '',
-          lastName: profile.last_name || '',
-          email: profile.email || '',
-          phone: profile.phone || '',
-        });
-        setIsEditing(false);
-      } else {
-        setEmployee(null);
-        toast({
-          title: 'Profile not found',
-          description: 'Please contact your administrator to set up your profile.',
-          variant: 'destructive',
-        });
-      }
-    } catch (error: any) {
-      console.error('Error fetching profile:', error);
+    if (employee?.id) {
+      fetchAbout();
+      fetchUpcomingShifts(employee.id);
+    }
+  }, [employee?.id]);
+
+  const handleProfilePictureUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to load profile',
+        title: 'Invalid file type',
+        description: 'Please select an image file (JPG, PNG)',
         variant: 'destructive',
       });
-      setEmployee(null);
-    } finally {
-      setLoading(false);
+      return;
     }
-  };
 
-  const handleSave = async () => {
-    if (!isViewingOwnProfile) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: 'File too large',
+        description: 'Profile picture must be less than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUploadingProfilePic(true);
     try {
-      await api.submitProfileChangeRequest({
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        email: formData.email,
-        phone: formData.phone,
+      const { url, key } = await api.getProfilePicturePresignedUrl(file.type);
+      const uploadResponse = await fetch(url, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          'Content-Type': file.type,
+        },
       });
 
-      toast({
-        title: 'Request submitted',
-        description: 'Your profile update is pending HR approval.',
-      });
-
-      setIsEditing(false);
-      if (employeeParam) {
-        fetchEmployeeProfile(employeeParam);
-      } else {
-        fetchMyProfile();
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload file to storage');
       }
-    } catch (error: any) {
+
+      const result = await api.uploadProfilePicture(url, key);
+
+      if (employee) {
+        setEmployee({
+          ...employee,
+          profiles: {
+            ...employee.profiles,
+            profile_picture_url: result.profile_picture_url,
+          },
+        });
+      }
+
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to submit profile change request',
+        title: 'Success',
+        description: 'Profile picture uploaded successfully',
+      });
+    } catch (error: any) {
+      console.error('Error uploading profile picture:', error);
+      toast({
+        title: 'Upload failed',
+        description: error.message || 'Failed to upload profile picture',
         variant: 'destructive',
       });
+    } finally {
+      setUploadingProfilePic(false);
     }
   };
 
-  const getInitials = () => {
-    const first = employee?.profiles?.first_name?.charAt(0) || '';
-    const last = employee?.profiles?.last_name?.charAt(0) || '';
-    return `${first}${last}`.toUpperCase();
-  };
-
-  const getFullName = () => {
-    return `${employee?.profiles?.first_name || ''} ${employee?.profiles?.last_name || ''}`.trim() || 'Employee';
-  };
-
-  const isViewingOtherProfile = Boolean(employeeParam);
-  const isViewingOwnProfile = !isViewingOtherProfile;
-
-  // Employees can edit their own profile (skills, certifications, past projects)
-  // HR/CEO can view but not edit
-  const canEditOwnProfile = isViewingOwnProfile && (userRole === 'employee' || userRole === 'manager');
-  const canViewOnly = ['hr', 'ceo', 'director', 'admin'].includes(userRole || '');
-  const isViewingAsManager = ['manager', 'hr', 'ceo', 'director', 'admin'].includes(userRole || '');
-  
-  // Calculate onboarding progress
-  const onboardingProgress = calculateOnboardingProgress(employee?.onboarding_data);
-  const getOnboardingStatus = () => {
-    if (!employee?.onboarding_status) return 'Not Started';
-    switch (employee.onboarding_status) {
-      case 'completed': return 'Completed';
-      case 'in_progress': return 'In Progress';
-      case 'not_started': return 'Not Started';
-      default: return 'Pending';
-    }
+  const handleTabChange = (newTab: 'personal' | 'skills' | 'projects' | 'certifications' | 'shifts' | 'history') => {
+    setActiveTab(newTab);
   };
 
   if (loading) {
     return (
       <AppLayout>
-        <div className="space-y-6 max-w-7xl mx-auto">
-          <div className="text-center py-12">Loading profile...</div>
+        <div className="min-h-screen bg-gray-50 px-6 py-4">
+          <div className="mx-auto max-w-7xl text-center text-sm text-gray-500">
+            Loading profile…
+          </div>
         </div>
       </AppLayout>
     );
@@ -397,9 +283,9 @@ export default function MyProfile() {
   if (!employee) {
     return (
       <AppLayout>
-        <div className="space-y-6 max-w-7xl mx-auto">
-          <div className="text-center py-12">
-            <p className="text-muted-foreground">Profile not found</p>
+        <div className="min-h-screen bg-gray-50 px-6 py-4">
+          <div className="mx-auto max-w-7xl text-center text-sm text-gray-500">
+            Profile not found.
           </div>
         </div>
       </AppLayout>
@@ -408,519 +294,528 @@ export default function MyProfile() {
 
   return (
     <AppLayout>
-      <div className="space-y-6 max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">My Profile</h1>
-            <p className="text-muted-foreground">Manage your profile information, skills, certifications, and past projects</p>
+      <div className="min-h-screen bg-gray-50 px-4 py-3">
+        <div className="mx-auto max-w-7xl">
+          {/* Header */}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">My Profile</h1>
+              <p className="mt-0.5 text-xs text-gray-600">
+                Manage your profile information and preferences
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Profile Header Card */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-6">
-              <Avatar className="h-24 w-24">
-                <AvatarImage src={undefined} />
-                <AvatarFallback className="text-2xl">{getInitials()}</AvatarFallback>
-              </Avatar>
-              <div className="flex-1">
-                <div className="flex items-center gap-4 mb-4">
-                  <div>
-                    <h2 className="text-2xl font-bold">{getFullName()}</h2>
-                    <p className="text-muted-foreground">{employee.position || 'Employee'}</p>
-                    {employee.verified_at && (
-                      <p className="text-xs text-sky-600 flex items-center gap-1 mt-1">
-                        <UserCheck className="h-3 w-3" />
-                        Verified on {format(new Date(employee.verified_at), 'MMM dd, yyyy')}
-                      </p>
-                    )}
-                  </div>
-                  {canEditOwnProfile && !canViewOnly && (
-                    <Button
-                      variant={isEditing ? 'default' : 'outline'}
-                      onClick={() => {
-                        if (isEditing) {
-                          setIsEditing(false);
-                          setFormData({
-                            firstName: employee?.profiles?.first_name || '',
-                            lastName: employee?.profiles?.last_name || '',
-                            email: employee?.profiles?.email || '',
-                            phone: employee?.profiles?.phone || '',
-                          });
-                        } else {
-                          setIsEditing(true);
-                        }
-                      }}
-                    >
-                      {isEditing ? (
-                        <>
-                          <X className="mr-2 h-4 w-4" />
-                          Cancel
-                        </>
-                      ) : (
-                        <>
-                          <Edit className="mr-2 h-4 w-4" />
-                          Edit Profile
-                        </>
-                      )}
-                    </Button>
-                  )}
-                </div>
-                
-                {isEditing && canEditOwnProfile ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="firstName">First Name</Label>
-                      <Input
-                        id="firstName"
-                        value={formData.firstName}
-                        onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="lastName">Last Name</Label>
-                      <Input
-                        id="lastName"
-                        value={formData.lastName}
-                        onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={formData.email}
-                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="phone">Phone</Label>
-                      <Input
-                        id="phone"
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <Button onClick={handleSave}>
-                        <Save className="mr-2 h-4 w-4" />
-                        Save Changes
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                    <div className="flex items-center gap-2">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{employee.profiles?.email || 'N/A'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{employee.profiles?.phone || 'N/A'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Building className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{employee.department || 'N/A'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{employee.work_location || 'N/A'}</span>
-                    </div>
-                    {employee.join_date && (
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">Joined {format(new Date(employee.join_date), 'MMM yyyy')}</span>
+          <div className="grid gap-4 lg:grid-cols-[240px,minmax(0,1fr),260px]">
+            {/* Left sidebar */}
+            <aside className="space-y-3">
+              <Card className="liquid-glass-card rounded-xl">
+                <CardContent className="p-4">
+                  <div className="flex flex-col items-center text-center">
+                    <div className="relative mb-3">
+                      <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-gray-200 bg-gray-100">
+                        <Avatar className="h-full w-full">
+                          {employee?.id && employee.profiles?.profile_picture_url ? (
+                            <ProfilePicture 
+                              userId={employee.id} 
+                              src={employee.profiles.profile_picture_url} 
+                            />
+                          ) : (
+                            <AvatarImage src={undefined} />
+                          )}
+                          <AvatarFallback className="text-xl font-semibold text-gray-700">
+                            {initials}
+                          </AvatarFallback>
+                        </Avatar>
                       </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <Badge variant={employee.status === 'active' ? 'default' : 'secondary'}>
-                        {employee.status || 'active'}
-                      </Badge>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="about">
-              <Info className="mr-2 h-4 w-4" />
-              About
-            </TabsTrigger>
-            <TabsTrigger value="skills">
-              <Award className="mr-2 h-4 w-4" />
-              Skills
-            </TabsTrigger>
-            <TabsTrigger value="certifications">
-              <Puzzle className="mr-2 h-4 w-4" />
-              Certifications
-            </TabsTrigger>
-            <TabsTrigger value="projects">
-              <Briefcase className="mr-2 h-4 w-4" />
-              Past Projects
-            </TabsTrigger>
-            <TabsTrigger value="shifts" disabled={!employeeId}>
-              <CalendarDays className="mr-2 h-4 w-4" />
-              My Shifts
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="about">
-            <div className="grid gap-6 md:grid-cols-2">
-              {/* Personal Information */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <User className="h-5 w-5" />
-                    Personal Information
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-muted-foreground">Employee ID</Label>
-                      <p className="font-medium">{employee.employee_id || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <Label className="text-muted-foreground">Department</Label>
-                      <p className="font-medium">{employee.department || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <Label className="text-muted-foreground">Position</Label>
-                      <p className="font-medium">{employee.position || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <Label className="text-muted-foreground">Work Location</Label>
-                      <p className="font-medium">{employee.work_location || 'N/A'}</p>
-                    </div>
-                    {employee.join_date && (
-                      <div>
-                        <Label className="text-muted-foreground">Join Date</Label>
-                        <p className="font-medium">{format(new Date(employee.join_date), 'MMM dd, yyyy')}</p>
-                      </div>
-                    )}
-                    <div>
-                      <Label className="text-muted-foreground">Status</Label>
-                      <Badge variant={employee.status === 'active' ? 'default' : 'secondary'}>
-                        {employee.status || 'active'}
-                      </Badge>
-                    </div>
-                  </div>
-                  
-                  {employee.reporting_manager && (
-                    <div className="pt-4 border-t">
-                      <Label className="text-muted-foreground">Reporting Manager</Label>
-                      <p className="font-medium">
-                        {employee.reporting_manager.first_name} {employee.reporting_manager.last_name}
-                        {employee.reporting_manager.position && ` - ${employee.reporting_manager.position}`}
-                      </p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Onboarding Progress */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5" />
-                    Onboarding Progress
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium">{getOnboardingStatus()}</span>
-                      <span className="text-sm text-muted-foreground">{onboardingProgress}%</span>
-                    </div>
-                    <ProgressBar value={onboardingProgress} className="h-2" />
-                  </div>
-                  <Badge 
-                    variant={
-                      employee?.onboarding_status === 'completed' ? 'default' :
-                      employee?.onboarding_status === 'in_progress' ? 'secondary' :
-                      'outline'
-                    }
-                  >
-                    {getOnboardingStatus()}
-                  </Badge>
-                  {employee?.onboarding_data?.completed_at && (
-                    <p className="text-sm text-muted-foreground">
-                      Completed on {format(new Date(employee.onboarding_data.completed_at), 'MMM dd, yyyy')}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {employee?.probation && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Activity className="h-5 w-5" />
-                      Probation
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Status</span>
-                      <Badge variant="secondary">{employee.probation.status}</Badge>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Ends</span>
-                      <span className="font-medium">{format(new Date(employee.probation.probation_end), 'MMM dd, yyyy')}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {differenceInCalendarDays(new Date(employee.probation.probation_end), new Date())} days remaining
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Financial Information */}
-              {employee?.onboarding_data && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CreditCard className="h-5 w-5" />
-                      Financial Information
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-muted-foreground">Bank Account</Label>
-                        <p className="font-medium">
-                          {isViewingAsManager ? maskNumber(employee.onboarding_data.bank_account_number) : employee.onboarding_data.bank_account_number || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">Bank Name</Label>
-                        <p className="font-medium">{employee.onboarding_data.bank_name || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">Bank Branch</Label>
-                        <p className="font-medium">{employee.onboarding_data.bank_branch || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">IFSC Code</Label>
-                        <p className="font-medium">{employee.onboarding_data.ifsc_code || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">PAN Number</Label>
-                        <p className="font-medium">
-                          {isViewingAsManager ? maskNumber(employee.onboarding_data.pan_number, 4) : employee.onboarding_data.pan_number || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">Aadhar Number</Label>
-                        <p className="font-medium">
-                          {isViewingAsManager ? maskNumber(employee.onboarding_data.aadhar_number, 4) : employee.onboarding_data.aadhar_number || 'N/A'}
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Address Information */}
-              {employee?.onboarding_data && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Home className="h-5 w-5" />
-                      Address Information
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <Label className="text-muted-foreground">Permanent Address</Label>
-                      <p className="font-medium">
-                        {employee.onboarding_data.permanent_address || 'N/A'}
-                        {employee.onboarding_data.permanent_city && `, ${employee.onboarding_data.permanent_city}`}
-                        {employee.onboarding_data.permanent_state && `, ${employee.onboarding_data.permanent_state}`}
-                        {employee.onboarding_data.permanent_postal_code && ` - ${employee.onboarding_data.permanent_postal_code}`}
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-muted-foreground">Current Address</Label>
-                      <p className="font-medium">
-                        {employee.onboarding_data.current_address || 'N/A'}
-                        {employee.onboarding_data.current_city && `, ${employee.onboarding_data.current_city}`}
-                        {employee.onboarding_data.current_state && `, ${employee.onboarding_data.current_state}`}
-                        {employee.onboarding_data.current_postal_code && ` - ${employee.onboarding_data.current_postal_code}`}
-                      </p>
-                    </div>
-                    {employee.onboarding_data.emergency_contact_name && (
-                      <div className="pt-4 border-t">
-                        <Label className="text-muted-foreground">Emergency Contact</Label>
-                        <p className="font-medium">
-                          {employee.onboarding_data.emergency_contact_name}
-                          {employee.onboarding_data.emergency_contact_relation && ` (${employee.onboarding_data.emergency_contact_relation})`}
-                        </p>
-                        {employee.onboarding_data.emergency_contact_phone && (
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {isViewingAsManager ? maskNumber(employee.onboarding_data.emergency_contact_phone, 4) : employee.onboarding_data.emergency_contact_phone}
-                          </p>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadingProfilePic}
+                        className="absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-gray-800 text-white shadow-md transition hover:bg-gray-700 disabled:opacity-50"
+                      >
+                        {uploadingProfilePic ? (
+                          <Upload className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Camera className="h-4 w-4" />
                         )}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Reporting Team */}
-              {employee?.reporting_team && employee.reporting_team.length > 0 && (
-                <Card className="md:col-span-2">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Users className="h-5 w-5" />
-                      Reporting Team ({employee.reporting_team.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                      {employee.reporting_team.map((member) => (
-                        <div key={member.id} className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
-                          <Avatar className="h-10 w-10">
-                            <AvatarFallback>
-                              {member.profiles?.first_name?.charAt(0) || ''}{member.profiles?.last_name?.charAt(0) || ''}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium truncate">
-                              {member.profiles?.first_name} {member.profiles?.last_name}
-                            </p>
-                            <p className="text-sm text-muted-foreground truncate">
-                              {member.position || member.department || 'Employee'}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            handleProfilePictureUpload(file);
+                          }
+                        }}
+                      />
                     </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          </TabsContent>
+                    <h2 className="text-lg font-bold text-gray-900">{fullName}</h2>
+                    <p className="mt-1 text-sm font-medium text-gray-700">
+                      {employee.designation || employee.position || 'Employee'}
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-500">{employee.department || ''}</p>
+                  </div>
 
-          <TabsContent value="skills">
-            {employeeId && (
-              <EmployeeSkillsEditor 
-                employeeId={employeeId} 
-                canEdit={canEditOwnProfile && !canViewOnly} 
-              />
-            )}
-          </TabsContent>
+                  <div className="mt-4 space-y-2.5 border-t border-gray-100 pt-4 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Employee ID</span>
+                      <span className="font-semibold text-gray-900">
+                        {employee.employee_id || 'N/A'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Location</span>
+                      <span className="font-semibold text-gray-900">
+                        {employee.work_location || 'N/A'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Status</span>
+                      <Badge variant="outline" className="h-5 border-gray-300 bg-white px-2 text-[10px] font-medium text-gray-700">
+                        {employee.status || 'active'}
+                      </Badge>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <TabsContent value="certifications">
-            {employeeId && (
-              <EmployeeCertificationsEditor 
-                employeeId={employeeId} 
-                canEdit={canEditOwnProfile && !canViewOnly} 
-              />
-            )}
-          </TabsContent>
+              <Card className="glass-card glass-card-hover rounded-xl">
+                <CardContent className="p-5 space-y-3 text-xs">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-700">
+                    Contact
+                  </h3>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-400">📞</span>
+                      <span className="font-medium text-gray-800">
+                        {employee.profiles?.phone || 'Not provided'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 break-all">
+                      <span className="text-gray-400">✉️</span>
+                      <span className="font-medium text-gray-800">
+                        {employee.profiles?.email || 'Not provided'}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </aside>
 
-          <TabsContent value="projects">
-            {employeeId && (
-              <EmployeePastProjectsEditor 
-                employeeId={employeeId} 
-                canEdit={canEditOwnProfile && !canViewOnly} 
-              />
-            )}
-          </TabsContent>
+            {/* Center panel - Tabbed */}
+            <main>
+              <Card className="liquid-glass-card rounded-xl">
+                <CardContent className="p-4">
+                  {/* Tab Bar */}
+                  <div className="mb-4 flex gap-1 border-b border-gray-200/30">
+                    {[
+                      { key: 'personal', label: 'Personal Details' },
+                      { key: 'skills', label: 'Skills' },
+                      { key: 'projects', label: 'Projects' },
+                      { key: 'certifications', label: 'Certifications' },
+                      { key: 'shifts', label: 'My Shifts' },
+                      { key: 'history', label: 'History' },
+                    ].map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => handleTabChange(tab.key as any)}
+                        className={`relative px-4 py-2.5 text-sm font-medium liquid-glass-nav-item rounded-lg ${
+                          activeTab === tab.key
+                            ? 'liquid-glass-nav-item-active text-gray-900'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        <span className="relative z-10">{tab.label}</span>
+                        {activeTab === tab.key && (
+                          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-red-700 via-red-600 to-red-800 z-20 rounded-full" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
 
-          <TabsContent value="shifts">
-            {employeeId ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <CalendarDays className="h-5 w-5" />
-                    My Scheduled Shifts
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {loadingShifts ? (
-                    <div className="text-center py-8 text-muted-foreground">Loading shifts...</div>
-                  ) : upcomingShifts.length > 0 ? (
-                    <div className="space-y-3">
-                      {upcomingShifts.map((shift) => {
-                        const shiftDate = parseISO(shift.shift_date);
-                        const isShiftToday = isToday(shiftDate);
-                        const isShiftTomorrow = isTomorrow(shiftDate);
-                        
-                        return (
-                          <div
-                            key={shift.id}
-                            className={`p-4 rounded-lg border transition-colors ${
-                              isShiftToday 
-                                ? 'bg-blue-50 dark:bg-blue-950 border-blue-200' 
-                                : isShiftTomorrow 
-                                ? 'bg-amber-50 dark:bg-amber-950 border-amber-200' 
-                                : 'bg-muted/30 border-border'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between mb-2">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <p className="font-semibold">{shift.template_name}</p>
-                                  <Badge 
-                                    variant={
-                                      shift.shift_type === 'night' ? 'destructive' :
-                                      shift.shift_type === 'evening' ? 'secondary' : 'default'
+                  {/* Tab Content - No animation, just show/hide */}
+                  <div className="relative" style={{ minHeight: '500px' }}>
+                      {/* Personal Details Tab */}
+                      {activeTab === 'personal' && (
+                        <div className="space-y-4">
+                          {/* About Section */}
+                          <div>
+                            <div className="mb-3 flex items-center justify-between">
+                              <h3 className="text-lg font-bold text-gray-900">About</h3>
+                              {canEdit && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setAboutEditing((prev) => !prev)}
+                                  disabled={aboutLoading || aboutSaving}
+                                >
+                                  {aboutEditing ? 'Cancel' : 'Edit'}
+                                </Button>
+                              )}
+                            </div>
+
+                            {aboutLoading ? (
+                              <p className="text-sm text-gray-400">Loading about section…</p>
+                            ) : aboutEditing ? (
+                              <form
+                                className="space-y-3"
+                                onSubmit={async (e) => {
+                                  e.preventDefault();
+                                  if (!canEdit) return;
+                                  try {
+                                    setAboutSaving(true);
+                                    if ((api as any).updateMyAbout) {
+                                      await (api as any).updateMyAbout({
+                                        about_me: about || null,
+                                        job_love: jobLove || null,
+                                        hobbies: hobbies || null,
+                                      });
                                     }
-                                    className="text-xs"
-                                  >
-                                    {shift.shift_type?.charAt(0).toUpperCase() + shift.shift_type?.slice(1) || 'Day'} Shift
-                                  </Badge>
+                                    toast({
+                                      title: 'Saved',
+                                      description: 'Your about section has been updated.',
+                                    });
+                                    setAboutEditing(false);
+                                  } catch (error: any) {
+                                    console.error('Error saving about info', error);
+                                    toast({
+                                      title: 'Unable to save',
+                                      description: error?.message || 'Please try again.',
+                                      variant: 'destructive',
+                                    });
+                                  } finally {
+                                    setAboutSaving(false);
+                                  }
+                                }}
+                              >
+                                <div className="space-y-2">
+                                  <p className="text-sm font-semibold text-gray-700">About</p>
+                                  <Textarea
+                                    value={about}
+                                    onChange={(e) => setAbout(e.target.value)}
+                                    rows={3}
+                                    className="border-gray-300 bg-white text-sm text-gray-900 placeholder:text-gray-400"
+                                    placeholder="Tell your team a bit about yourself..."
+                                  />
                                 </div>
-                                <p className="text-sm text-muted-foreground">
-                                  {getShiftDateLabel(shift.shift_date)}
+                                <div className="space-y-2">
+                                  <p className="text-sm font-semibold text-gray-700">
+                                    What I love about my job?
+                                  </p>
+                                  <Textarea
+                                    value={jobLove}
+                                    onChange={(e) => setJobLove(e.target.value)}
+                                    rows={3}
+                                    className="border-gray-300 bg-white text-sm text-gray-900 placeholder:text-gray-400"
+                                    placeholder="Share what energises you at work..."
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <p className="text-sm font-semibold text-gray-700">
+                                    My interests and hobbies
+                                  </p>
+                                  <Textarea
+                                    value={hobbies}
+                                    onChange={(e) => setHobbies(e.target.value)}
+                                    rows={3}
+                                    className="border-gray-300 bg-white text-sm text-gray-900 placeholder:text-gray-400"
+                                    placeholder="Talk about your interests outside work..."
+                                  />
+                                </div>
+                                <div className="flex items-center justify-end gap-2 pt-2">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="default"
+                                    onClick={() => setAboutEditing(false)}
+                                    disabled={aboutSaving}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    type="submit"
+                                    size="default"
+                                    disabled={aboutSaving}
+                                  >
+                                    {aboutSaving ? 'Saving…' : 'Save'}
+                                  </Button>
+                                </div>
+                              </form>
+                            ) : (
+                              <div className="space-y-4">
+                                <p className="text-sm leading-relaxed text-gray-700">
+                                  {about ||
+                                    'Tell your team a bit about yourself – what you do, what you care about, and how you like to work.'}
+                                </p>
+                                <div className="space-y-4 border-t border-gray-100 pt-4">
+                                  <div>
+                                    <h4 className="text-sm font-bold text-gray-900">
+                                      What I love about my job?
+                                    </h4>
+                                    <p className="mt-1.5 text-sm leading-relaxed text-gray-700">
+                                      {jobLove ||
+                                        'Share what energises you at work – solving problems, collaborating with your team, helping customers, or learning new things.'}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <h4 className="text-sm font-bold text-gray-900">
+                                      My interests and hobbies
+                                    </h4>
+                                    <p className="mt-1.5 text-sm leading-relaxed text-gray-700">
+                                      {hobbies ||
+                                        "Use this space to talk about your interests outside work – hobbies, sports, creative pursuits, or anything that's important to you."}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Personal Info Grid */}
+                          <div className="grid gap-4 border-t border-gray-100 pt-4 md:grid-cols-2">
+                            <div className="space-y-4">
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Employee ID</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">{employee.employee_id || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Department</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {employee.department || 'N/A'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Designation</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {employee.designation || employee.position || 'N/A'}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex items-center gap-4 mt-3 text-sm">
-                              <div className="flex items-center gap-2">
-                                <Clock className="h-4 w-4 text-muted-foreground" />
-                                <span className="font-medium">
-                                  {formatShiftTime(shift.start_time)} - {formatShiftTime(shift.end_time)}
-                                </span>
+                            <div className="space-y-4">
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Location</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {employee.work_location || 'Not set'}
+                                </p>
                               </div>
-                              {shift.assigned_by && (
-                                <div className="text-xs text-muted-foreground">
-                                  Assigned by: {shift.assigned_by === 'algorithm' ? 'System' : 'Manager'}
-                                </div>
-                              )}
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600">Joined</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {employee.join_date
+                                    ? new Date(employee.join_date).toLocaleDateString()
+                                    : 'Not available'}
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <CalendarDays className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                      <p className="text-sm">No shifts scheduled for the next 30 days</p>
-                      <p className="text-xs mt-1">Contact your manager or HR for shift assignments</p>
-                    </div>
-                  )}
+                        </div>
+                      )}
+
+                      {/* Skills Tab */}
+                      {activeTab === 'skills' && (
+                        <div>
+                          {employee?.id ? (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Skills</h3>
+                              <EmployeeSkillsEditor employeeId={employee.id} canEdit={canEdit} />
+                            </div>
+                          ) : (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Skills</h3>
+                              <p className="text-sm text-gray-400">Loading employee data...</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Projects Tab */}
+                      {activeTab === 'projects' && (
+                        <div>
+                          {employee?.id ? (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Projects</h3>
+                              <EmployeePastProjectsEditor employeeId={employee.id} canEdit={canEdit} />
+                            </div>
+                          ) : (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Projects</h3>
+                              <p className="text-sm text-gray-400">Loading employee data...</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Certifications Tab */}
+                      {activeTab === 'certifications' && (
+                        <div>
+                          <h3 className="mb-4 text-lg font-bold text-gray-900">Certifications</h3>
+                          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center">
+                            <p className="text-sm text-gray-500">No certifications added yet</p>
+                            {canEdit && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="default"
+                                className="mt-3"
+                              >
+                                Add Certification
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* My Shifts Tab */}
+                      {activeTab === 'shifts' && (
+                        <div>
+                          <h3 className="mb-4 text-lg font-bold text-gray-900">My Shifts</h3>
+                          {loadingShifts ? (
+                            <p className="text-sm text-gray-400">Loading assigned shifts…</p>
+                          ) : upcomingShifts.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+                              No shifts assigned for the next 30 days.
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {upcomingShifts.map((shift) => {
+                                const label = getShiftDateLabel(shift.shift_date);
+                                const type = shift.shift_type || 'day';
+                                return (
+                                  <div
+                                    key={shift.id}
+                                    className="liquid-glass-card flex items-start justify-between rounded-lg px-4 py-3"
+                                  >
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-sm font-bold text-gray-900">
+                                          {shift.template_name || 'Shift'}
+                                        </p>
+                                        <Badge variant="outline" className="h-5 border-gray-300 bg-white px-2 text-[10px] font-medium text-gray-700">
+                                          {type}
+                                        </Badge>
+                                      </div>
+                                      <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-600">
+                                        <CalendarDays className="h-3.5 w-3.5" />
+                                        {label}
+                                      </p>
+                                    </div>
+                                    <div className="mt-1 flex flex-col items-end gap-1 text-xs text-gray-700">
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <Clock className="h-3.5 w-3.5" />
+                                        {formatShiftTime(shift.start_time)} –{' '}
+                                        {formatShiftTime(shift.end_time)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* History Tab */}
+                      {activeTab === 'history' && (
+                        <div>
+                          {employee?.id ? (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Employee History</h3>
+                              <p className="mb-4 text-sm text-gray-600">
+                                View your career progression, promotions, salary changes, and awards
+                              </p>
+                              <EmployeeHistoryTab employeeId={employee.id} isOwnProfile />
+                            </div>
+                          ) : (
+                            <div>
+                              <h3 className="mb-4 text-lg font-bold text-gray-900">Employee History</h3>
+                              <p className="text-sm text-gray-400">Loading employee data...</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                  </div>
                 </CardContent>
               </Card>
-            ) : (
-              <Card>
-                <CardContent className="py-10 text-center text-muted-foreground">
-                  Shifts are available only for employees with active records. Please contact HR if you need access.
+            </main>
+
+            {/* Right sidebar */}
+            <aside>
+              <Card className="liquid-glass-card flex h-full flex-col rounded-xl">
+                <CardContent className="flex h-full flex-col p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-900">Reporting team</h3>
+                    <span className="text-xs text-gray-600">
+                      {reportingTeam.length} members
+                    </span>
+                  </div>
+                  <div className="mb-4">
+                    <Input
+                      type="text"
+                      placeholder="Search team..."
+                      className="h-9 rounded-lg border-gray-300 bg-white px-3 text-xs placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    />
+                  </div>
+
+                  <div className="mt-1 flex-1 space-y-2.5 overflow-y-auto">
+                    {reportingTeam.length === 0 && (
+                      <p className="text-xs text-gray-400">No direct reports configured yet.</p>
+                    )}
+                    {reportingTeam.map((member) => {
+                      const name = `${member.profiles?.first_name || ''} ${
+                        member.profiles?.last_name || ''
+                      }`.trim() || 'Team member';
+                      const initialsMember =
+                        name
+                          .split(' ')
+                          .filter(Boolean)
+                          .map((n) => n[0])
+                          .join('')
+                          .toUpperCase() || 'T';
+                      const status = member.status || 'In';
+
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          className="liquid-glass-card flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-xs"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-[11px] font-semibold text-gray-700">
+                              {initialsMember}
+                            </div>
+                            <div>
+                              <p className="font-bold text-gray-900">{name}</p>
+                              <p className="text-[11px] text-gray-600">
+                                {member.position || member.department || 'Employee'}
+                              </p>
+                            </div>
+                          </div>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                              status === 'In'
+                                ? 'bg-gray-100 text-gray-700 border border-gray-200'
+                                : status === 'Leave'
+                                ? 'bg-gray-100 text-gray-700 border border-gray-200'
+                                : 'bg-gray-100 text-gray-700 border border-gray-200'
+                            }`}
+                          >
+                            {status}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </CardContent>
               </Card>
-            )}
-          </TabsContent>
-        </Tabs>
+            </aside>
+          </div>
+        </div>
       </div>
     </AppLayout>
   );

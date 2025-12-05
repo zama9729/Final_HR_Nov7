@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, Edit, ShieldCheck, Filter, Search, Trash2 } from "lucide-react";
+import { Plus, Edit, ShieldCheck, Filter, Search, Trash2, CheckCircle2, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -35,6 +35,7 @@ interface OrgPolicy {
   value: any;
   effective_from: string;
   effective_to?: string;
+  status?: 'draft' | 'active' | 'retired';
 }
 
 interface EmployeePolicy {
@@ -68,13 +69,25 @@ export default function PoliciesManagement() {
     effective_to: "",
   });
   const [search, setSearch] = useState("");
+  const [publishedProbationPolicy, setPublishedProbationPolicy] = useState<any>(null);
 
   useEffect(() => {
     fetchCatalog();
     fetchOrgPolicies();
     fetchEmployees();
     fetchLibraryPolicies();
+    fetchPublishedProbationPolicy();
   }, []);
+
+  const fetchPublishedProbationPolicy = async () => {
+    try {
+      const data = await api.getActiveProbationPolicy();
+      setPublishedProbationPolicy(data?.policy || null);
+    } catch (error) {
+      // Ignore errors - probation policy might not exist yet
+      setPublishedProbationPolicy(null);
+    }
+  };
 
   useEffect(() => {
     if (selectedEmployee) {
@@ -338,6 +351,120 @@ export default function PoliciesManagement() {
                               )}
                             </TableCell>
                             <TableCell className="space-x-1">
+                              {(() => {
+                                const isProbationPolicy = policy.policy_key?.toLowerCase().includes('probation') || 
+                                                         policy.display_name?.toLowerCase().includes('probation');
+                                const isPublished = isProbationPolicy && publishedProbationPolicy && 
+                                                   publishedProbationPolicy.probation_days === (typeof policy.value === 'number' ? policy.value : parseInt(policy.value) || 90);
+                                
+                                if (isPublished) {
+                                  return (
+                                    <>
+                                      <Badge className="bg-green-500 text-white mr-1">
+                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                        Published
+                                      </Badge>
+                                      <Button
+                                        variant="default"
+                                        size="sm"
+                                        className="bg-blue-600 hover:bg-blue-700 text-white mr-1"
+                                        onClick={async () => {
+                                          try {
+                                            setLoading(true);
+                                            const blob = await api.downloadOrgPolicyPDF(policy.id);
+                                            const url = window.URL.createObjectURL(blob);
+                                            const a = document.createElement('a');
+                                            a.href = url;
+                                            a.download = `policy-${policy.policy_key || policy.id}.pdf`;
+                                            document.body.appendChild(a);
+                                            a.click();
+                                            window.URL.revokeObjectURL(url);
+                                            document.body.removeChild(a);
+                                            toast({
+                                              title: "Download started",
+                                              description: "Policy PDF is downloading",
+                                            });
+                                          } catch (error: any) {
+                                            toast({
+                                              title: "Download failed",
+                                              description: error.message || "Failed to download policy PDF",
+                                              variant: "destructive",
+                                            });
+                                          } finally {
+                                            setLoading(false);
+                                          }
+                                        }}
+                                        disabled={loading}
+                                      >
+                                        <Download className="h-3 w-3 mr-1" />
+                                        Download PDF
+                                      </Button>
+                                    </>
+                                  );
+                                }
+                                
+                                return (
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="bg-green-600 hover:bg-green-700 text-white mr-1"
+                                    onClick={async () => {
+                                    if (isProbationPolicy) {
+                                      if (!confirm("Publishing this probation policy will create/update the probation policy system and apply it to eligible employees. Continue?")) {
+                                        return;
+                                      }
+                                      try {
+                                        setLoading(true);
+                                        // Get or create active probation policy
+                                        const activePolicy = await api.getActiveProbationPolicy();
+                                        const probationDays = typeof policy.value === 'number' ? policy.value : parseInt(policy.value) || 90;
+                                        
+                                        if (activePolicy?.policy) {
+                                          // Update existing
+                                          await api.updateProbationPolicy(activePolicy.policy.id, {
+                                            name: policy.display_name || 'Probation Policy',
+                                            probation_days: probationDays,
+                                            status: 'published'
+                                          });
+                                        } else {
+                                          // Create new
+                                          await api.createProbationPolicy({
+                                            name: policy.display_name || 'Probation Policy',
+                                            probation_days: probationDays,
+                                            status: 'published'
+                                          });
+                                        }
+                                        
+                                        toast({
+                                          title: "Policy published",
+                                          description: "Probation policy has been published and applied to eligible employees",
+                                        });
+                                        await fetchPublishedProbationPolicy();
+                                        fetchOrgPolicies();
+                                      } catch (err: any) {
+                                        toast({
+                                          title: "Error",
+                                          description: err?.message || "Failed to publish probation policy",
+                                          variant: "destructive",
+                                        });
+                                      } finally {
+                                        setLoading(false);
+                                      }
+                                    } else {
+                                      // For non-probation policies, just show success (they're effective immediately)
+                                      toast({
+                                        title: "Policy active",
+                                        description: "This policy is now effective from the specified date",
+                                      });
+                                    }
+                                  }}
+                                  disabled={loading}
+                                >
+                                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                                  Publish
+                                </Button>
+                                );
+                              })()}
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -542,6 +669,76 @@ export default function PoliciesManagement() {
                               : "-"}
                           </TableCell>
                           <TableCell className="space-x-2">
+                            {p.status !== "published" && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="bg-green-600 hover:bg-green-700 text-white"
+                                onClick={async () => {
+                                  if (!confirm("Publish this policy? It will be made available to all employees.")) {
+                                    return;
+                                  }
+                                  try {
+                                    setLoading(true);
+                                    await api.publishManagedPolicy(p.id);
+                                    toast({
+                                      title: "Policy published",
+                                      description: "Policy has been published successfully",
+                                    });
+                                    fetchLibraryPolicies();
+                                  } catch (error: any) {
+                                    toast({
+                                      title: "Error",
+                                      description: error.message || "Failed to publish policy",
+                                      variant: "destructive",
+                                    });
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                                disabled={loading}
+                              >
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                                Publish
+                              </Button>
+                            )}
+                            {(p.status === "published" || p.status === "PUBLISHED") && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="bg-blue-600 hover:bg-blue-700 text-white"
+                                onClick={async () => {
+                                  try {
+                                    setLoading(true);
+                                    const blob = await api.downloadPolicyPDF(p.id);
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `policy-${p.key || p.id}-v${p.version || 'latest'}.pdf`;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    window.URL.revokeObjectURL(url);
+                                    document.body.removeChild(a);
+                                    toast({
+                                      title: "Download started",
+                                      description: "Policy PDF is downloading",
+                                    });
+                                  } catch (error: any) {
+                                    toast({
+                                      title: "Download failed",
+                                      description: error.message || "Failed to download policy PDF",
+                                      variant: "destructive",
+                                    });
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                                disabled={loading}
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                Download PDF
+                              </Button>
+                            )}
                             <Button
                               variant="outline"
                               size="sm"
@@ -552,21 +749,6 @@ export default function PoliciesManagement() {
                               <Edit className="h-3 w-3 mr-1" />
                               Edit
                             </Button>
-                            {p.status === "published" && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() =>
-                                  window.open(
-                                    `/api/policy-management/policies/${p.id}/download`,
-                                    "_blank"
-                                  )
-                                }
-                              >
-                                <Download className="h-3 w-3 mr-1" />
-                                PDF
-                              </Button>
-                            )}
                           </TableCell>
                         </TableRow>
                       ))}

@@ -2,10 +2,11 @@ import express from 'express';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
 import { queryWithOrg } from '../db/pool.js';
+import { audit } from '../utils/auditLog.js';
 
 const router = express.Router();
 
-router.use(authenticateToken, requireRole('admin', 'hr', 'ceo'), setTenantContext, (req, res, next) => {
+router.use(authenticateToken, requireRole('admin', 'hr', 'ceo', 'manager'), setTenantContext, (req, res, next) => {
   if (!req.orgId) {
     return res.status(400).json({ error: 'Organization context missing' });
   }
@@ -15,10 +16,29 @@ router.use(authenticateToken, requireRole('admin', 'hr', 'ceo'), setTenantContex
 router.get('/', async (req, res) => {
   try {
     const { rows: branches } = await queryWithOrg(
-      `SELECT id, org_id, name, code, timezone, holiday_calendar_id, pay_group_id, address, is_active, metadata, created_at, updated_at
-       FROM org_branches
-       WHERE org_id = $1
-       ORDER BY created_at`,
+      `SELECT 
+         b.id, 
+         b.org_id, 
+         b.name, 
+         b.code, 
+         b.timezone, 
+         b.holiday_calendar_id, 
+         b.pay_group_id, 
+         b.address, 
+         b.is_active, 
+         b.metadata, 
+         b.created_at, 
+         b.updated_at,
+         (SELECT COUNT(DISTINCT e.id) 
+          FROM employees e
+          JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
+          WHERE ea.branch_id = b.id AND e.status = 'active' AND e.tenant_id = $1) as employee_count,
+         (SELECT COUNT(DISTINCT t.id)
+          FROM teams t
+          WHERE t.branch_id = b.id AND t.org_id = $1) as team_count
+       FROM org_branches b
+       WHERE b.org_id = $1
+       ORDER BY b.created_at`,
       [req.orgId],
       req.orgId
     );
@@ -106,6 +126,21 @@ router.post('/departments/upsert', async (req, res) => {
     return res.status(400).json({ error: 'Department name required' });
   }
   try {
+    const isUpdate = Boolean(id);
+    
+    // Get old values if updating
+    let oldValues = {};
+    if (isUpdate) {
+      const oldResult = await queryWithOrg(
+        'SELECT name, code, branch_id FROM departments WHERE id = $1 AND org_id = $2',
+        [id, req.orgId],
+        req.orgId
+      );
+      if (oldResult.rows.length > 0) {
+        oldValues = oldResult.rows[0];
+      }
+    }
+    
     const result = await queryWithOrg(
       `INSERT INTO departments (id, org_id, branch_id, name, code)
        VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5)
@@ -118,9 +153,40 @@ router.post('/departments/upsert', async (req, res) => {
       [id || null, req.orgId, branchId || null, name, code || null],
       req.orgId
     );
-    res.json(result.rows[0]);
+    
+    const department = result.rows[0];
+    
+    // Create audit log
+    try {
+      const diff = isUpdate ? {
+        name: oldValues.name !== name ? { old: oldValues.name, new: name } : undefined,
+        code: oldValues.code !== code ? { old: oldValues.code, new: code } : undefined,
+        branch_id: oldValues.branch_id !== branchId ? { old: oldValues.branch_id, new: branchId } : undefined,
+      } : null;
+      
+      await audit({
+        actorId: req.user.id,
+        action: isUpdate ? 'department_update' : 'department_create',
+        entityType: 'department',
+        entityId: department.id,
+        diff: diff,
+        details: {
+          name: department.name,
+          code: department.code,
+          branchId: department.branch_id,
+        },
+        scope: 'org',
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log:', auditError);
+    }
+    
+    res.json(department);
   } catch (error) {
     console.error('Failed to upsert department', error);
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Department with this name already exists in the organization' });
+    }
     res.status(500).json({ error: error.message || 'Failed to save department' });
   }
 });
@@ -131,6 +197,21 @@ router.post('/teams/upsert', async (req, res) => {
     return res.status(400).json({ error: 'Team name required' });
   }
   try {
+    const isUpdate = Boolean(id);
+    
+    // Get old values if updating
+    let oldValues = {};
+    if (isUpdate) {
+      const oldResult = await queryWithOrg(
+        'SELECT name, code, branch_id, department_id, host_branch_id FROM teams WHERE id = $1 AND org_id = $2',
+        [id, req.orgId],
+        req.orgId
+      );
+      if (oldResult.rows.length > 0) {
+        oldValues = oldResult.rows[0];
+      }
+    }
+    
     const result = await queryWithOrg(
       `INSERT INTO teams (id, org_id, branch_id, department_id, name, code, host_branch_id, metadata)
        VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, COALESCE($8::jsonb, '{}'::jsonb))
@@ -146,9 +227,42 @@ router.post('/teams/upsert', async (req, res) => {
       [id || null, req.orgId, branchId || null, departmentId || null, name, code || null, hostBranchId || null, metadata || {}],
       req.orgId
     );
-    res.json(result.rows[0]);
+    
+    const team = result.rows[0];
+    
+    // Create audit log
+    try {
+      const diff = isUpdate ? {
+        name: oldValues.name !== name ? { old: oldValues.name, new: name } : undefined,
+        code: oldValues.code !== code ? { old: oldValues.code, new: code } : undefined,
+        branch_id: oldValues.branch_id !== branchId ? { old: oldValues.branch_id, new: branchId } : undefined,
+        department_id: oldValues.department_id !== departmentId ? { old: oldValues.department_id, new: departmentId } : undefined,
+      } : null;
+      
+      await audit({
+        actorId: req.user.id,
+        action: isUpdate ? 'team_update' : 'team_create',
+        entityType: 'team',
+        entityId: team.id,
+        diff: diff,
+        details: {
+          name: team.name,
+          code: team.code,
+          branchId: team.branch_id,
+          departmentId: team.department_id,
+        },
+        scope: 'org',
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log:', auditError);
+    }
+    
+    res.json(team);
   } catch (error) {
     console.error('Failed to upsert team', error);
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Team with this name already exists for this branch' });
+    }
     res.status(500).json({ error: error.message || 'Failed to save team' });
   }
 });

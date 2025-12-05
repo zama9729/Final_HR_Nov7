@@ -63,10 +63,11 @@ router.get('/pending-counts', authenticateToken, async (req, res) => {
       // For managers, count only their team's pending requests
       if (role === 'manager' && employeeId) {
         // Count pending timesheets for manager's team
+        // Use the same status as the approvals workflow ('pending_approval')
         const timesheetResult = await query(
           `SELECT COUNT(*) as count FROM timesheets t
            JOIN employees e ON e.id = t.employee_id
-           WHERE t.status = 'pending' AND t.tenant_id = $1 AND e.reporting_manager_id = $2`,
+           WHERE t.status = 'pending_approval' AND t.tenant_id = $1 AND e.reporting_manager_id = $2`,
           [tenantId, employeeId]
         );
         timesheetsCount = parseInt(timesheetResult.rows[0]?.count || '0');
@@ -89,9 +90,10 @@ router.get('/pending-counts', authenticateToken, async (req, res) => {
         taxDeclarationsCount = parseInt(taxResult.rows[0]?.count || '0');
       } else {
         // For HR/CEO/Admin, count all pending requests
+        // Timesheets use 'pending_approval' once submitted
         const timesheetResult = await query(
           'SELECT COUNT(*) as count FROM timesheets WHERE status = $1 AND tenant_id = $2',
-          ['pending', tenantId]
+          ['pending_approval', tenantId]
         );
         timesheetsCount = parseInt(timesheetResult.rows[0]?.count || '0');
 
@@ -148,19 +150,26 @@ router.get('/leave-balance', authenticateToken, async (req, res) => {
 
     // Get all leave policies for the tenant
     const policiesResult = await query(
-      'SELECT id, annual_entitlement FROM leave_policies WHERE tenant_id = $1 AND is_active = true',
+      `SELECT id, name, leave_type, annual_entitlement 
+       FROM leave_policies 
+       WHERE tenant_id = $1 AND is_active = true`,
       [tenantId]
     );
 
     let totalLeaves = 0;
-    const policyIds = policiesResult.rows.map(p => p.id);
+    const policyIds = policiesResult.rows.map((p) => p.id);
     
     if (policyIds.length > 0) {
-      totalLeaves = policiesResult.rows.reduce((sum, p) => sum + (p.annual_entitlement || 0), 0);
+      totalLeaves = policiesResult.rows.reduce(
+        (sum, p) => sum + (p.annual_entitlement || 0),
+        0
+      );
     }
 
     // Get approved leave requests for current year
     const currentYear = new Date().getFullYear();
+
+    // Overall approved leaves
     const approvedLeavesResult = await query(
       `SELECT COALESCE(SUM(total_days), 0) as days FROM leave_requests 
        WHERE employee_id = $1 AND status = 'approved' 
@@ -171,10 +180,44 @@ router.get('/leave-balance', authenticateToken, async (req, res) => {
     const approvedLeaves = parseInt(approvedLeavesResult.rows[0]?.days || '0');
     const leaveBalance = totalLeaves - approvedLeaves;
 
+    // Per-policy breakdown for charts (e.g. Casual, Paid, etc.)
+    let breakdown = [];
+    if (policyIds.length > 0) {
+      const breakdownResult = await query(
+        `SELECT 
+           lp.id,
+           lp.name,
+           lp.leave_type,
+           lp.annual_entitlement,
+           COALESCE(SUM(lr.total_days), 0) AS used_days
+         FROM leave_policies lp
+         LEFT JOIN leave_requests lr 
+           ON lr.leave_type_id = lp.id
+           AND lr.employee_id = $1
+           AND lr.status = 'approved'
+           AND EXTRACT(YEAR FROM lr.start_date) = $2
+         WHERE lp.tenant_id = $3
+           AND lp.is_active = true
+         GROUP BY lp.id, lp.name, lp.leave_type, lp.annual_entitlement
+         ORDER BY lp.name`,
+        [employeeId, currentYear, tenantId]
+      );
+
+      breakdown = breakdownResult.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        leave_type: row.leave_type,
+        entitlement: row.annual_entitlement || 0,
+        used: parseInt(row.used_days || '0'),
+        remaining: Math.max(0, (row.annual_entitlement || 0) - parseInt(row.used_days || '0')),
+      }));
+    }
+
     res.json({
       leaveBalance: Math.max(0, leaveBalance), // Ensure non-negative
       totalLeaves,
       approvedLeaves,
+      breakdown,
     });
   } catch (error) {
     console.error('Error fetching leave balance:', error);

@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ArrowLeft, FileText, Download, Building2 } from "lucide-react";
+import { PayrollLayout } from "@/components/layout/PayrollLayout";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -133,21 +134,18 @@ const Reports = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
-      <header className="border-b bg-card/50 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-4">
-          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="mb-2">
+    <PayrollLayout>
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-6">
+          <Button variant="ghost" onClick={() => navigate("/dashboard")} className="mb-2 liquid-glass-nav-item">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
+            Dashboard
           </Button>
           <div>
             <h1 className="text-3xl font-bold text-foreground">Reports & Analytics</h1>
             <p className="text-muted-foreground">Generate and download compliance reports</p>
           </div>
         </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
         {/* Cycle Selector */}
         <Card className="mb-6">
           <CardContent className="pt-6">
@@ -295,7 +293,7 @@ const Reports = () => {
             </div>
           </CardContent>
         </Card>
-      </main>
+      </div>
 
       {/* TDS Summary Dialog */}
       <Dialog open={showTdsDialog} onOpenChange={setShowTdsDialog}>
@@ -395,7 +393,7 @@ const Reports = () => {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </PayrollLayout>
   );
 };
 

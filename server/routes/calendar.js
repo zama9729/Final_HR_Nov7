@@ -288,9 +288,50 @@ router.get('/', authenticateToken, async (req, res) => {
       leaveQuery += ` AND lr.employee_id = $4`;
       leaveParams.push(employee_id);
     }
+
+    // Additional privacy / RLS rule for organization calendar:
+    // - HR / CEO / Director / Admin in organization view should NOT see every employee's annual leave.
+    //   They will still see other special leave types (e.g., sick, maternity, etc.), but routine
+    //   annual/vacation leave is hidden from the org-wide calendar.
+    if (!isEmployeeView && !isManager && ['hr', 'ceo', 'director', 'admin'].includes(userRole)) {
+      leaveQuery += ` AND COALESCE(lp.leave_type::text, '') <> 'annual'`;
+    }
     
     const leaveResult = await query(leaveQuery, leaveParams);
     const leaveEvents = leaveResult.rows;
+
+    // Fetch ad-hoc team schedule events (meetings, milestones) from team_schedule_events
+    let teamScheduleEvents = [];
+    try {
+      const teamEventsRes = await query(
+        `SELECT *
+         FROM team_schedule_events
+         WHERE tenant_id = $1
+           AND end_date >= $2::date
+           AND start_date <= $3::date`,
+        [tenantId, rangeStart, rangeEnd],
+      );
+      teamScheduleEvents = teamEventsRes.rows.map((ev) => ({
+        id: `team_event_${ev.id}`,
+        title: ev.title,
+        start: `${ev.start_date}T${ev.start_time || '00:00:00'}`,
+        end: `${ev.end_date}T${ev.end_time || ev.start_time || '00:00:00'}`,
+        allDay: !ev.start_time && !ev.end_time,
+        resource: {
+          type: 'team_event',
+          event_type: ev.event_type,
+          team_id: ev.team_id,
+          employee_id: ev.employee_id,
+          start_date: ev.start_date,
+          end_date: ev.end_date,
+          start_time: ev.start_time,
+          end_time: ev.end_time,
+          notes: ev.notes,
+        },
+      }));
+    } catch (error) {
+      console.error('Error fetching team schedule events for calendar:', error);
+    }
 
     // Fetch published holidays for the org
     const holidayListsRes = await query(
@@ -485,7 +526,14 @@ router.get('/', authenticateToken, async (req, res) => {
     });
 
     // Combine all types of events
-    const events = [...assignmentEvents, ...scheduleEvents, ...birthdayEvents, ...holidayEvents, ...leaveEventsFormatted];
+    const events = [
+      ...assignmentEvents,
+      ...scheduleEvents,
+      ...birthdayEvents,
+      ...holidayEvents,
+      ...leaveEventsFormatted,
+      ...teamScheduleEvents,
+    ];
 
     // Get project list (for filter dropdown)
     const projectsQuery = isPrivilegedRole

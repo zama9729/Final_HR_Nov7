@@ -2,7 +2,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 import { AuthProvider } from "./contexts/AuthContext";
 import { OrgSetupProvider } from "./contexts/OrgSetupContext";
 import { ProtectedRoute, PublicRoute } from "./components/ProtectedRoute";
@@ -37,6 +38,9 @@ import HrProfileRequests from "./pages/HrProfileRequests";
 import NotFound from "./pages/NotFound";
 import AddEmployee from "./pages/AddEmployee";
 import LeavePolicies from "./pages/LeavePolicies";
+import ProbationPolicies from "./pages/ProbationPolicies";
+import Promotions from "./pages/Promotions";
+import PromotionForm from "./pages/PromotionForm";
 import LeaveRequests from "./pages/LeaveRequests";
 import Onboarding from "./pages/Onboarding";
 import OnboardingNextStep from "./pages/OnboardingNextStep";
@@ -62,9 +66,15 @@ import OffboardingNew from "./pages/OffboardingNew";
 import OffboardingQueue from "./pages/OffboardingQueue";
 import OffboardingDetail from "./pages/OffboardingDetail";
 import OffboardingPolicies from "./pages/OffboardingPolicies";
-import OnboardingEnhanced from "./pages/OnboardingEnhanced";
 import PoliciesManagement from "./pages/PoliciesManagement";
 import PolicyEditor from "./pages/PolicyEditor";
+import UnifiedPolicyManagement from "./pages/UnifiedPolicyManagement";
+import PolicyLibrary from "./pages/PolicyLibrary";
+import Teams from "./pages/Teams";
+import TeamDetail from "./pages/TeamDetail";
+import TeamSchedule from "./pages/TeamSchedule";
+import Projects from "./pages/Projects";
+import ProjectDetail from "./pages/ProjectDetail";
 import PromotionCycles from "./pages/PromotionCycles";
 import TaxDeclaration from "./pages/TaxDeclaration";
 import TaxDeclarationReview from "./pages/TaxDeclarationReview";
@@ -75,14 +85,64 @@ import AuditLogs from "./pages/AuditLogs";
 
 const queryClient = new QueryClient();
 
+// Scroll restoration component for hash navigation
+function ScrollToHash() {
+  const location = useLocation();
+
+  useEffect(() => {
+    // If there's a hash in the URL, scroll to that element
+    if (location.hash) {
+      const id = location.hash.substring(1); // Remove the #
+      const element = document.getElementById(id);
+      if (element) {
+        // Use setTimeout to ensure the element is rendered
+        setTimeout(() => {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      }
+    } else {
+      // Scroll to top on route change (without hash)
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [location]);
+
+  return null;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      {/* SVG Filters for Liquid Glass Distortion Effect */}
+      <svg className="liquid-filters" aria-hidden="true">
+        <defs>
+          {/* Turbulence for liquid distortion */}
+          <filter id="liquid-distortion" x="0%" y="0%" width="100%" height="100%">
+            <feTurbulence
+              baseFrequency="0.02 0.03"
+              numOctaves="3"
+              result="turbulence"
+              seed="2"
+            />
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="turbulence"
+              scale="2"
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+          {/* Subtle blur for glass effect */}
+          <filter id="glass-blur">
+            <feGaussianBlur stdDeviation="1" />
+          </filter>
+        </defs>
+      </svg>
       <BrowserRouter>
         <AuthProvider>
           <OrgSetupProvider>
+          <ScrollToHash />
           <Routes>
             {/* Public routes */}
             <Route path="/auth/login" element={<PublicRoute><Login /></PublicRoute>} />
@@ -110,11 +170,15 @@ const App = () => (
             <Route path="/workflows/new" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><WorkflowEditor /></ProtectedRoute>} />
             <Route path="/workflows/:id/edit" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><WorkflowEditor /></ProtectedRoute>} />
             <Route path="/policies" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><LeavePolicies /></ProtectedRoute>} />
+            <Route path="/probation-policies" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><ProbationPolicies /></ProtectedRoute>} />
+            <Route path="/promotions" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'director', 'manager']}><Promotions /></ProtectedRoute>} />
+            <Route path="/promotions/new" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'director', 'manager']}><PromotionForm /></ProtectedRoute>} />
+            <Route path="/promotions/:id/edit" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'director', 'manager']}><PromotionForm /></ProtectedRoute>} />
             <Route path="/holidays" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><HolidayManagement /></ProtectedRoute>} />
-            <Route path="/analytics" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><Analytics /></ProtectedRoute>} />
-            <Route path="/employee-stats" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><EmployeeStats /></ProtectedRoute>} />
-            <Route path="/audit-logs" element={<ProtectedRoute allowedRoles={['ceo', 'hr']}><AuditLogs /></ProtectedRoute>} />
-            <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><CEODashboard /></ProtectedRoute>} />
+            <Route path="/analytics" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'manager']}><Analytics /></ProtectedRoute>} />
+            <Route path="/employee-stats" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'manager']}><EmployeeStats /></ProtectedRoute>} />
+            <Route path="/audit-logs" element={<ProtectedRoute allowedRoles={['ceo', 'hr', 'admin']}><AuditLogs /></ProtectedRoute>} />
+            <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin','manager']}><CEODashboard /></ProtectedRoute>} />
             <Route path="/projects/new" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectNew /></ProtectedRoute>} />
             <Route path="/projects/:id/suggestions" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectSuggestions /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute><UnifiedCalendar /></ProtectedRoute>} />
@@ -134,15 +198,14 @@ const App = () => (
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
             <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><ShiftManagement /></ProtectedRoute>} />
             <Route path="/scheduling" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><StaffScheduling /></ProtectedRoute>} />
-            <Route path="/scheduling/calendar" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin', 'manager']}><UnifiedCalendar /></ProtectedRoute>} />
             <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
             <Route path="/rag/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><RAGDocumentUpload /></ProtectedRoute>} />
             <Route path="/attendance/clock" element={<ProtectedRoute><ClockInOut /></ProtectedRoute>} />
             <Route path="/hr/profile-requests" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><HrProfileRequests /></ProtectedRoute>} />
             <Route path="/attendance/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><AttendanceUpload /></ProtectedRoute>} />
             <Route path="/attendance/history" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><AttendanceUploadHistory /></ProtectedRoute>} />
-            <Route path="/analytics/attendance" element={<ProtectedRoute allowedRoles={['ceo', 'hr', 'director', 'admin']}><AttendanceAnalytics /></ProtectedRoute>} />
-            <Route path="/payroll" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin']}><Payroll /></ProtectedRoute>} />
+            <Route path="/analytics/attendance" element={<ProtectedRoute allowedRoles={['ceo', 'hr', 'director', 'admin', 'manager']}><AttendanceAnalytics /></ProtectedRoute>} />
+            <Route path="/payroll" element={<ProtectedRoute allowedRoles={['accountant', 'ceo', 'admin', 'manager']}><Payroll /></ProtectedRoute>} />
             <Route path="/tax/declaration" element={<ProtectedRoute><TaxDeclaration /></ProtectedRoute>} />
             <Route path="/tax/declarations/review" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin', 'accountant']}><TaxDeclarationReview /></ProtectedRoute>} />
             <Route path="/reports/form16" element={<ProtectedRoute><Form16 /></ProtectedRoute>} />
@@ -155,10 +218,18 @@ const App = () => (
             <Route path="/offboarding/:id" element={<ProtectedRoute><OffboardingDetail /></ProtectedRoute>} />
             
             {/* Multi-tenant routes */}
-            <Route path="/onboarding/enhanced" element={<ProtectedRoute><OnboardingEnhanced /></ProtectedRoute>} />
             <Route path="/policies/management" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><PoliciesManagement /></ProtectedRoute>} />
             <Route path="/policies/editor/:id" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><PolicyEditor /></ProtectedRoute>} />
+            <Route path="/policies/unified" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><UnifiedPolicyManagement /></ProtectedRoute>} />
+            <Route path="/policies/library" element={<ProtectedRoute><PolicyLibrary /></ProtectedRoute>} />
             <Route path="/promotion/cycles" element={<ProtectedRoute><PromotionCycles /></ProtectedRoute>} />
+            
+            {/* Teams & Projects routes */}
+            <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
+            <Route path="/teams/:id" element={<ProtectedRoute><TeamDetail /></ProtectedRoute>} />
+            <Route path="/team-schedule" element={<ProtectedRoute><TeamSchedule /></ProtectedRoute>} />
+            <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
+            <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
             
             {/* Redirects */}
             <Route path="/" element={<Navigate to="/dashboard" />} />

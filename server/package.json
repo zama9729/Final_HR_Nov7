@@ -8,6 +8,7 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "test": "node server/tests/permissions.test.js && node server/tests/routes.test.js && node server/tests/timesheet-clock.test.js && node server/tests/profile-change.test.js && node server/tests/roster-engine.test.js",
+    "test:promotions": "node ./scripts/test-promotion-workflow.js",
     "test:permissions": "node server/tests/permissions.test.js",
     "test:routes": "node server/tests/routes.test.js",
     "seed:policies": "node server/scripts/seed-policy-catalog.js",
@@ -17,7 +18,8 @@
     "seed:termination-demo": "node server/scripts/seed-termination-demo.js",
     "org:reset": "node server/scripts/reset-org.js",
     "fix:role": "node server/scripts/fix-user-role.js",
-    "list:emails": "node scripts/list-emails.js"
+    "list:emails": "node scripts/list-emails.js",
+    "init:minio": "node server/scripts/init-minio.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.937.0",

@@ -7,7 +7,7 @@ import { createPool, query as dbQuery } from './db/pool.js';
 import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
 import profilesRoutes from './routes/profiles.js';
-import onboardingRoutes from './routes/onboarding.js';
+import onboardingRoutes, { ensureDocumentInfra } from './routes/onboarding.js';
 import onboardingTrackerRoutes from './routes/onboarding-tracker.js';
 import organizationsRoutes from './routes/organizations.js';
 import statsRoutes from './routes/stats.js';
@@ -25,6 +25,8 @@ import workflowsRoutes from './routes/workflows.js';
 import skillsRoutes from './routes/skills.js';
 import projectsRoutes from './routes/projects.js';
 import employeeProjectsRoutes from './routes/employee-projects.js';
+import teamsRoutes from './routes/teams.js';
+import reportingLinesRoutes from './routes/reporting-lines.js';
 import holidaysRoutes from './routes/holidays.js';
 import calendarRoutes from './routes/calendar.js';
 import analyticsRoutes from './routes/analytics.js';
@@ -46,11 +48,14 @@ import rehireRoutes from './routes/rehire.js';
 import policiesRoutes from './routes/policies.js';
 import policyPlatformRoutes from './routes/policy-platform.js';
 import policyManagementRoutes from './routes/policy-management.js';
+import unifiedPoliciesRoutes from './routes/unified-policies.js';
 import usersRoutes from './routes/users.js';
 import payrollSsoRoutes from './routes/payroll-sso.js';
 import taxDeclarationsRoutes from './routes/tax-declarations.js';
 import reimbursementRoutes from './routes/reimbursements.js';
 import reportsRoutes from './routes/reports.js';
+import announcementsRoutes from './routes/announcements.js';
+import teamScheduleEventsRoutes from './routes/team-schedule-events.js';
 import setupRoutes from './routes/setup.js';
 import branchesRoutes from './routes/branches.js';
 import superRoutes from './routes/super.js';
@@ -58,16 +63,21 @@ import auditLogsRoutes from './routes/audit-logs.js';
 import schedulingRoutes from './routes/scheduling.js';
 import rosterRoutes from './routes/roster.js';
 import probationRoutes from './routes/probation.js';
+import probationPoliciesRoutes from './routes/probation-policies.js';
 import documentUploadRoutes from './routes/document-upload.js';
+import backgroundCheckRoutes from './routes/background-check.js';
+import employeeHistoryRoutes from './routes/employee-history.js';
 import { setTenantContext } from './middleware/tenant.js';
-import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs } from './services/cron.js';
+import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders } from './services/cron.js';
 import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
 import { scheduleAutoLogout } from './services/attendance-auto-logout.js';
+import { schedulePromotionApplication } from './services/promotion-cron.js';
 import { createAttendanceTables } from './utils/createAttendanceTables.js';
 import { createSchedulingTables } from './utils/createSchedulingTables.js';
 import { ensureAdminRole } from './utils/runMigration.js';
 import { ensureOnboardingColumns } from './utils/ensureOnboardingColumns.js';
+import { ensureManagerRoles } from './utils/ensureManagerRoles.js';
 import { scheduleAnalyticsRefresh } from './services/analytics-refresh.js';
 
 dotenv.config();
@@ -123,6 +133,10 @@ const deriveReceiptsMountPath = () => {
 const receiptsMountPath = deriveReceiptsMountPath();
 app.use(receiptsMountPath, express.static(receiptsDirectory));
 
+ensureDocumentInfra()
+  .then(() => console.log('✅ Onboarding document infrastructure ready'))
+  .catch((error) => console.error('Failed to ensure onboarding document infrastructure:', error));
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -147,6 +161,7 @@ app.use('/api/workflows', authenticateToken, setTenantContext, workflowsRoutes);
 
 // Onboarding routes (no auth required for some endpoints)
 app.use('/api/onboarding', onboardingRoutes);
+app.use('/api/onboarding', backgroundCheckRoutes); // Background check routes under onboarding
 app.use('/api/onboarding/docs', documentUploadRoutes);
 app.use('/api/onboarding-tracker', onboardingTrackerRoutes);
 app.use('/api/appraisal-cycles', appraisalCycleRoutes);
@@ -158,6 +173,8 @@ app.use('/api', importsRoutes);
 app.use('/api/v1', authenticateToken, setTenantContext, skillsRoutes);
 app.use('/api/v1/projects', authenticateToken, setTenantContext, projectsRoutes);
 app.use('/api/v1', authenticateToken, setTenantContext, employeeProjectsRoutes);
+app.use('/api/teams', authenticateToken, setTenantContext, teamsRoutes);
+app.use('/api/reporting-lines', authenticateToken, setTenantContext, reportingLinesRoutes);
 app.use('/api', authenticateToken, setTenantContext, holidaysRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/analytics', authenticateToken, analyticsRoutes);
@@ -177,6 +194,7 @@ app.use('/api/offboarding', authenticateToken, offboardingRoutes);
 app.use('/api/rehire', authenticateToken, rehireRoutes);
 app.use('/api/audit-logs', authenticateToken, setTenantContext, auditLogsRoutes);
 app.use('/api/probation', authenticateToken, probationRoutes);
+app.use('/api/probation-policies', authenticateToken, setTenantContext, probationPoliciesRoutes);
 app.use('/api/setup', setupRoutes);
 app.use('/api/branches', branchesRoutes);
 app.use('/api/super', superRoutes);
@@ -185,13 +203,17 @@ app.use('/api/orgs', organizationsRoutes);
 app.use('/api/policies', authenticateToken, setTenantContext, policiesRoutes);
 app.use('/api/policy-platform', policyPlatformRoutes);
 app.use('/api/policy-management', authenticateToken, setTenantContext, policyManagementRoutes);
+app.use('/api/unified-policies', unifiedPoliciesRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/promotion', authenticateToken, setTenantContext, promotionsRoutes);
+app.use('/api', authenticateToken, setTenantContext, employeeHistoryRoutes);
 // Payroll SSO integration (separate from payroll routes)
 app.use('/api/payroll/sso', payrollSsoRoutes);
 app.use('/api/tax/declarations', taxDeclarationsRoutes);
 app.use('/api/v1/reimbursements', reimbursementRoutes);
 app.use('/api/reports', authenticateToken, reportsRoutes);
+app.use('/api/announcements', authenticateToken, announcementsRoutes);
+app.use('/api/team-schedule/events', teamScheduleEventsRoutes);
 
 // Tenant info endpoint for payroll service compatibility
 app.get('/api/tenant', authenticateToken, async (req, res) => {
@@ -281,6 +303,39 @@ createPool().then(async () => {
     console.warn('⚠️  Please manually run the migration to add onboarding columns');
   }
   
+  // Ensure anyone with direct reports is at least a manager
+  try {
+    await ensureManagerRoles();
+  } catch (error) {
+    console.error('Error ensuring manager roles:', error);
+  }
+  
+  // Initialize MinIO buckets
+  try {
+    const { ensureBucketExists, getStorageProvider, getOnboardingBucket, isS3Available } = await import('./services/storage.js');
+    const storageProvider = getStorageProvider();
+    
+    if (storageProvider === 's3' && isS3Available()) {
+      const bucketName = getOnboardingBucket();
+      console.log(`\n[MinIO] Initializing bucket: ${bucketName}`);
+      console.log(`[MinIO] Endpoint: ${process.env.MINIO_ENDPOINT || process.env.AWS_S3_ENDPOINT || 'not set'}`);
+      await ensureBucketExists(bucketName);
+      console.log(`✅ MinIO bucket '${bucketName}' is ready\n`);
+    } else {
+      console.log('\n⚠️  MinIO/S3 storage is not configured. Document uploads will use local storage.');
+      console.log('   To enable MinIO, ensure these environment variables are set:');
+      console.log('   - MINIO_ENABLED=true');
+      console.log('   - MINIO_ENDPOINT=localhost (or minio for Docker)');
+      console.log('   - MINIO_ACCESS_KEY=minioadmin');
+      console.log('   - MINIO_SECRET_KEY=minioadmin123');
+      console.log('   - MINIO_BUCKET_ONBOARDING=hr-onboarding-docs\n');
+    }
+  } catch (error) {
+    console.error('\n⚠️  Error initializing MinIO buckets:', error.message);
+    console.error('   Document uploads may not work until MinIO is properly configured');
+    console.error('   Run: node server/scripts/init-minio.js to diagnose the issue\n');
+  }
+
   // Ensure attendance tables exist
   try {
     const tableCheck = await dbQuery(`
@@ -321,6 +376,14 @@ createPool().then(async () => {
       console.log('✅ Scheduling tables created successfully');
     } else {
       console.log('✅ Scheduling tables found');
+      // Always ensure new columns exist, even if tables already exist
+      console.log('🔄 Ensuring team scheduling columns exist...');
+      try {
+        await createSchedulingTables();
+        console.log('✅ Team scheduling columns verified');
+      } catch (colError) {
+        console.warn('⚠️  Could not verify team scheduling columns:', colError.message);
+      }
     }
   } catch (error) {
     console.error('Error checking/creating scheduling tables:', error);
@@ -450,6 +513,8 @@ createPool().then(async () => {
   await scheduleOffboardingJobs();
   await scheduleAutoLogout();
   await scheduleProbationJobs();
+  await scheduleTimesheetReminders();
+  schedulePromotionApplication();
   console.log('✅ Cron jobs scheduled');
 
   // SSL/HTTPS Configuration

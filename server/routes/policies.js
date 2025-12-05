@@ -136,6 +136,99 @@ router.get('/org', authenticateToken, setTenantContext, async (req, res) => {
   }
 });
 
+// Download org policy as PDF
+router.get('/org/:id/download', authenticateToken, setTenantContext, async (req, res) => {
+  try {
+    const orgId = req.orgId || req.user?.org_id;
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization not found' });
+    }
+
+    const { id } = req.params;
+    
+    // Get policy details
+    const policyResult = await queryWithOrg(
+      `SELECT 
+        op.*,
+        pc.display_name,
+        pc.category,
+        pc.description,
+        pc.value_type,
+        o.name as org_name
+      FROM org_policies_legacy op
+      JOIN policy_catalog pc ON pc.key = op.policy_key
+      JOIN organizations o ON o.id = op.org_id
+      WHERE op.id = $1 AND op.org_id = $2`,
+      [id, orgId],
+      orgId
+    );
+
+    if (policyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Policy not found' });
+    }
+
+    const policy = policyResult.rows[0];
+
+    // Generate PDF using PDFKit
+    try {
+      const pdfkitModule = await import('pdfkit');
+      const PDFDocument = pdfkitModule.default || pdfkitModule;
+      
+      const doc = new PDFDocument({ margin: 50 });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="policy-${policy.policy_key}-${policy.id}.pdf"`);
+      doc.pipe(res);
+
+      // Header
+      doc.fontSize(16).text(policy.org_name || 'Organization', { align: 'center' });
+      doc.moveDown();
+      doc.fontSize(12).text('Organization Policy Document', { align: 'center' });
+      doc.moveDown(2);
+
+      // Policy details
+      doc.fontSize(18).text(policy.display_name || policy.policy_key, { align: 'left' });
+      doc.moveDown();
+      
+      doc.fontSize(10).text(`Policy Key: ${policy.policy_key}`, { align: 'left' });
+      doc.fontSize(10).text(`Category: ${policy.category}`, { align: 'left' });
+      if (policy.description) {
+        doc.fontSize(10).text(`Description: ${policy.description}`, { align: 'left' });
+      }
+      doc.moveDown();
+
+      // Policy value
+      doc.fontSize(12).text('Policy Value:', { align: 'left' });
+      doc.moveDown(0.5);
+      const valueText = typeof policy.value === 'object' 
+        ? JSON.stringify(policy.value, null, 2)
+        : String(policy.value);
+      doc.fontSize(11).text(valueText, { align: 'left' });
+      doc.moveDown();
+
+      // Effective dates
+      doc.fontSize(10).text(`Effective From: ${new Date(policy.effective_from).toLocaleDateString()}`, { align: 'left' });
+      if (policy.effective_to) {
+        doc.fontSize(10).text(`Effective To: ${new Date(policy.effective_to).toLocaleDateString()}`, { align: 'left' });
+      } else {
+        doc.fontSize(10).text('Effective To: Indefinite', { align: 'left' });
+      }
+
+      // Footer
+      doc.fontSize(8)
+        .text(`Generated: ${new Date().toLocaleString()}`, 50, doc.page.height - 50, { align: 'left' })
+        .text(`Policy ID: ${id}`, doc.page.width - 200, doc.page.height - 50, { align: 'right' });
+
+      doc.end();
+    } catch (pdfError) {
+      console.error('Error generating PDF:', pdfError);
+      res.status(500).json({ error: 'Failed to generate PDF: ' + pdfError.message });
+    }
+  } catch (error) {
+    console.error('Error downloading org policy:', error);
+    res.status(500).json({ error: error.message || 'Failed to download policy' });
+  }
+});
+
 // Create/update org policy (HR/CEO/Admin)
 router.post('/org', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
   try {

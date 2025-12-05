@@ -10,9 +10,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { Star, Plus, Calendar } from "lucide-react";
+import { Star, Plus, Calendar, ArrowUpCircle } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { api } from "@/lib/api";
+import { useNavigate } from "react-router-dom";
 
 interface AppraisalCycle {
   id: string;
@@ -50,6 +51,7 @@ interface PerformanceReview {
 }
 
 export default function Appraisals() {
+  const navigate = useNavigate();
   const { user, userRole } = useAuth();
   const [cycles, setCycles] = useState<AppraisalCycle[]>([]);
   const [selectedCycle, setSelectedCycle] = useState<string>("");
@@ -264,6 +266,7 @@ export default function Appraisals() {
                 <TableHead>Rating</TableHead>
                 <TableHead>Score</TableHead>
                 <TableHead>Status</TableHead>
+                {isHROrAbove && <TableHead>Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -274,6 +277,19 @@ export default function Appraisals() {
                   <TableCell>{review.rating && renderStars(Number(review.rating))}</TableCell>
                   <TableCell>{review.performance_score}</TableCell>
                   <TableCell className="capitalize">{review.status}</TableCell>
+                  {isHROrAbove && (
+                    <TableCell>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate(`/promotions/new?appraisalId=${review.id}&employeeId=${review.employee_id}`)}
+                        disabled={review.status !== 'submitted' && review.status !== 'acknowledged'}
+                      >
+                        <ArrowUpCircle className="h-4 w-4 mr-1" />
+                        Propose Promotion
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

@@ -99,6 +99,118 @@ const getTenantIdForUser = async (userId) => {
   return tenantResult.rows[0]?.tenant_id || null;
 };
 
+/**
+ * Recalculates employee pay after adjustments are added/edited/deleted
+ * Updates payroll_run_employees.net_pay_cents and payroll_runs.total_amount_cents
+ * 
+ * Formula: New Net Pay = (Base Gross - Base Deductions) + Sum(Adjustments)
+ * 
+ * @param {string} runId - Payroll run ID
+ * @param {string} employeeId - Employee ID
+ * @returns {Promise<void>}
+ */
+const recalculateEmployeePay = async (runId, employeeId) => {
+  try {
+    // Step 1: Fetch current payroll_run_employees record
+    const employeeResult = await query(
+      `SELECT 
+        gross_pay_cents,
+        deductions_cents,
+        net_pay_cents,
+        metadata
+       FROM payroll_run_employees
+       WHERE payroll_run_id = $1 AND employee_id = $2`,
+      [runId, employeeId]
+    );
+
+    if (employeeResult.rows.length === 0) {
+      console.warn(`No payroll_run_employees record found for run ${runId}, employee ${employeeId}`);
+      return;
+    }
+
+    const employeeRecord = employeeResult.rows[0];
+    const baseGrossCents = Number(employeeRecord.gross_pay_cents || 0);
+    const baseDeductionsCents = Number(employeeRecord.deductions_cents || 0);
+
+    // Step 2: Fetch ALL adjustments for this employee and run
+    const adjustmentsResult = await query(
+      `SELECT amount, is_taxable
+       FROM payroll_run_adjustments
+       WHERE payroll_run_id = $1 AND employee_id = $2`,
+      [runId, employeeId]
+    );
+
+    // Step 3: Calculate sum of adjustments
+    // Adjustments are stored as NUMERIC(12,2) in the database (e.g., 1000.50)
+    // We need to convert to cents (multiply by 100)
+    // Note: The stored gross_pay_cents may or may not include adjustments depending on when they were added
+    // For recalculation, we treat gross_pay_cents as the base and add all adjustments
+    let taxableAdjustmentCents = 0;
+    let nonTaxableAdjustmentCents = 0;
+    
+    adjustmentsResult.rows.forEach((adj) => {
+      const adjCents = Math.round(Number(adj.amount || 0) * 100);
+      if (adj.is_taxable) {
+        // Taxable adjustments are added to gross pay before deductions
+        taxableAdjustmentCents += adjCents;
+      } else {
+        // Non-taxable adjustments are added directly to net pay after deductions
+        nonTaxableAdjustmentCents += adjCents;
+      }
+    });
+
+    // Step 4: Calculate new net pay
+    // Formula: New Net Pay = (Base Gross + Taxable Adjustments - Base Deductions) + Non-Taxable Adjustments
+    // This ensures that:
+    // - Taxable adjustments increase gross (and thus net after deductions)
+    // - Non-taxable adjustments increase net directly
+    const adjustedGrossCents = baseGrossCents + taxableAdjustmentCents;
+    const newNetPayCents = adjustedGrossCents - baseDeductionsCents + nonTaxableAdjustmentCents;
+
+    // Ensure net pay is not negative (safety check)
+    const finalNetPayCents = Math.max(0, newNetPayCents);
+
+    // Step 5: Update payroll_run_employees table
+    await query(
+      `UPDATE payroll_run_employees
+       SET net_pay_cents = $1,
+           updated_at = now()
+       WHERE payroll_run_id = $2 AND employee_id = $3`,
+      [finalNetPayCents, runId, employeeId]
+    );
+
+    // Step 6: Update payroll_runs.total_amount_cents by summing all employees
+    const totalResult = await query(
+      `SELECT COALESCE(SUM(net_pay_cents), 0) as total_cents
+       FROM payroll_run_employees
+       WHERE payroll_run_id = $1 AND status != 'excluded'`,
+      [runId]
+    );
+
+    const newTotalAmountCents = Number(totalResult.rows[0]?.total_cents || 0);
+
+    await query(
+      `UPDATE payroll_runs
+       SET total_amount_cents = $1,
+           updated_at = now()
+       WHERE id = $2`,
+      [newTotalAmountCents, runId]
+    );
+
+    console.log(
+      `Recalculated pay for employee ${employeeId} in run ${runId}: ` +
+      `Base Net: ${baseGrossCents - baseDeductionsCents}, ` +
+      `Taxable Adjustments: ${taxableAdjustmentCents}, ` +
+      `Non-Taxable Adjustments: ${nonTaxableAdjustmentCents}, ` +
+      `New Net: ${finalNetPayCents}, ` +
+      `Run Total: ${newTotalAmountCents}`
+    );
+  } catch (error) {
+    console.error(`Error recalculating pay for employee ${employeeId} in run ${runId}:`, error);
+    throw error;
+  }
+};
+
 // Get payroll calendar
 router.get('/calendar', authenticateToken, async (req, res) => {
   try {
@@ -324,6 +436,9 @@ router.post('/runs/:id/adjustments', authenticateToken, requireCapability(CAPABI
       details: { payroll_run_id: id, employee_id, component_name, amount, is_taxable },
     });
 
+    // Immediately recalculate employee pay after adjustment is added
+    await recalculateEmployeePay(id, employee_id);
+
     res.status(201).json(adjustmentResult.rows[0]);
   } catch (error) {
     console.error('Error creating payroll adjustment:', error);
@@ -403,6 +518,10 @@ router.put('/adjustments/:adjustmentId', authenticateToken, requireCapability(CA
       details: { fields: Object.keys(req.body || {}) },
     });
 
+    // Immediately recalculate employee pay after adjustment is updated
+    const adjustment = adjustmentResult.rows[0];
+    await recalculateEmployeePay(adjustment.payroll_run_id, adjustment.employee_id);
+
     res.json(updatedResult.rows[0]);
   } catch (error) {
     console.error('Error updating payroll adjustment:', error);
@@ -435,18 +554,26 @@ router.delete('/adjustments/:adjustmentId', authenticateToken, requireCapability
       return res.status(400).json({ error: 'Adjustments can only be deleted when payroll run is in draft status' });
     }
 
-    await query(
-      'DELETE FROM payroll_run_adjustments WHERE id = $1',
-      [adjustmentId]
-    );
+    const adjustment = adjustmentResult.rows[0];
+    const payrollRunId = adjustment.payroll_run_id;
+    const employeeId = adjustment.employee_id;
 
     await audit({
       actorId: req.user.id,
       action: 'payroll_adjustment_deleted',
       entityType: 'payroll_run_adjustment',
       entityId: adjustmentId,
-      details: { payroll_run_id: adjustmentResult.rows[0].payroll_run_id },
+      details: { payroll_run_id: payrollRunId },
     });
+
+    // Delete the adjustment
+    await query(
+      'DELETE FROM payroll_run_adjustments WHERE id = $1',
+      [adjustmentId]
+    );
+
+    // Immediately recalculate employee pay after adjustment is deleted
+    await recalculateEmployeePay(payrollRunId, employeeId);
 
     res.json({ success: true });
   } catch (error) {
@@ -458,10 +585,15 @@ router.delete('/adjustments/:adjustmentId', authenticateToken, requireCapability
 // Create payroll run
 router.post('/runs', authenticateToken, requireCapability(CAPABILITIES.PAYROLL_RUN), async (req, res) => {
   try {
-    const { pay_period_start, pay_period_end, pay_date } = req.body;
+    const { pay_period_start, pay_period_end, pay_date, run_type = 'regular' } = req.body;
 
     if (!pay_period_start || !pay_period_end || !pay_date) {
       return res.status(400).json({ error: 'pay_period_start, pay_period_end, and pay_date are required' });
+    }
+
+    // Validate run_type
+    if (run_type && !['regular', 'off_cycle'].includes(run_type)) {
+      return res.status(400).json({ error: 'run_type must be either "regular" or "off_cycle"' });
     }
 
     const tenantId = await getTenantIdForUser(req.user.id);
@@ -474,11 +606,11 @@ router.post('/runs', authenticateToken, requireCapability(CAPABILITIES.PAYROLL_R
     const runResult = await query(
       `INSERT INTO payroll_runs (
         tenant_id, pay_period_start, pay_period_end, pay_date,
-        status, created_by
+        status, run_type, created_by
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *`,
-      [tenantId, pay_period_start, pay_period_end, pay_date, 'draft', req.user.id]
+      [tenantId, pay_period_start, pay_period_end, pay_date, 'draft', run_type, req.user.id]
     );
 
     const run = runResult.rows[0];
@@ -489,7 +621,7 @@ router.post('/runs', authenticateToken, requireCapability(CAPABILITIES.PAYROLL_R
       action: 'payroll_run_created',
       entityType: 'payroll_run',
       entityId: run.id,
-      details: { pay_period_start, pay_period_end, pay_date },
+      details: { pay_period_start, pay_period_end, pay_date, run_type },
     });
 
     res.status(201).json(run);
@@ -557,6 +689,32 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
       return acc;
     }, {});
 
+    // Step A: Fetch all completed off_cycle runs within the same pay period
+    // Only for regular runs - off_cycle runs don't need to check previous payments
+    const alreadyPaidByEmployee = new Map();
+    if (run.run_type === 'regular') {
+      const previousRunsResult = await query(
+        `SELECT 
+          pre.employee_id,
+          SUM(pre.net_pay_cents) as total_already_paid_cents
+         FROM payroll_runs pr
+         JOIN payroll_run_employees pre ON pre.payroll_run_id = pr.id
+         WHERE pr.tenant_id = $1
+           AND pr.id != $2
+           AND pr.run_type = 'off_cycle'
+           AND pr.status = 'completed'
+           AND pr.pay_period_start >= $3
+           AND pr.pay_period_end <= $4
+         GROUP BY pre.employee_id`,
+        [run.tenant_id, id, run.pay_period_start, run.pay_period_end]
+      );
+
+      // Step B: Aggregate total net_pay_cents paid per employee
+      previousRunsResult.rows.forEach((row) => {
+        alreadyPaidByEmployee.set(row.employee_id, Number(row.total_already_paid_cents || 0));
+      });
+    }
+
     // Process each employee (simplified - would need actual rate calculation)
     let totalAmount = 0;
     let totalEmployees = 0;
@@ -619,15 +777,48 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
 
       const otherDeductionsCents = Math.round(grossPayCents * 0.1); // placeholder for other deductions
       const totalDeductionsCents = tdsCents + pfCents + otherDeductionsCents;
-      const netPayCents = grossPayCents - totalDeductionsCents + nonTaxableAdjustmentCents + reimbursementCents;
+      
+      // Step C: Calculate base net pay
+      let baseNetPayCents = grossPayCents - totalDeductionsCents + nonTaxableAdjustmentCents + reimbursementCents;
+      
+      // Step C: For regular runs, deduct already paid amount from previous off_cycle runs
+      const previousPaidCents = alreadyPaidByEmployee.get(ts.employee_id) || 0;
+      let finalNetPayCents = baseNetPayCents;
+      
+      if (run.run_type === 'regular' && previousPaidCents > 0) {
+        // Deduct the already paid amount
+        finalNetPayCents = baseNetPayCents - previousPaidCents;
+        
+        // Safety: Handle negative net pay gracefully
+        if (finalNetPayCents < 0) {
+          console.warn(
+            `Employee ${ts.employee_id} has negative net pay after deduction. ` +
+            `Base: ${baseNetPayCents}, Already Paid: ${previousPaidCents}, Final: ${finalNetPayCents}. ` +
+            `Setting to 0 and logging warning.`
+          );
+          // Option 1: Set to 0 (current implementation)
+          finalNetPayCents = 0;
+          // Option 2: Could also carry forward negative amount as a deduction in next period
+          // For now, we'll set to 0 as per requirement
+        }
+      }
+
+      // Prepare metadata with already_paid_cents for payslip display
+      const metadata = {
+        tds_cents: tdsCents,
+        pf_cents: pfCents,
+        reimbursement_cents: reimbursementCents,
+        non_taxable_adjustments_cents: nonTaxableAdjustmentCents,
+        already_paid_cents: previousPaidCents,
+      };
 
       await query(
         `INSERT INTO payroll_run_employees (
           payroll_run_id, employee_id, hours, rate_cents,
           gross_pay_cents, deductions_cents, net_pay_cents, status,
-          metadata
+          already_paid_cents, metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           id,
           ts.employee_id,
@@ -635,14 +826,10 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
           rateCents,
           grossPayCents,
           totalDeductionsCents,
-          netPayCents,
+          finalNetPayCents,
           'processed',
-          JSON.stringify({
-            tds_cents: tdsCents,
-            pf_cents: pfCents,
-            reimbursement_cents: reimbursementCents,
-            non_taxable_adjustments_cents: nonTaxableAdjustmentCents,
-          }),
+          previousPaidCents,
+          JSON.stringify(metadata),
         ]
       );
 
@@ -659,7 +846,7 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
         );
       }
 
-      totalAmount += netPayCents;
+      totalAmount += finalNetPayCents;
       totalEmployees++;
     }
 

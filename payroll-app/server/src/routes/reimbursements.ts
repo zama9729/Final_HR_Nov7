@@ -465,5 +465,215 @@ const handleReview = (status: "approved" | "rejected") => [
 router.post("/:id/approve", ...handleReview("approved"));
 router.post("/:id/reject", ...handleReview("rejected"));
 
+// Get pending count for notifications
+router.get("/pending/count", async (req: Request, res: Response) => {
+  try {
+    const tenantId = (req as any).tenantId as string;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "No organization found" });
+    }
+
+    const orgId = await getOrganizationId(tenantId);
+    if (!orgId) {
+      return res.status(400).json({ error: "Organization not found" });
+    }
+
+    const countResult = await query(
+      `SELECT COUNT(*) as count
+       FROM employee_reimbursements
+       WHERE org_id = $1 AND status = 'pending'`,
+      [orgId]
+    );
+
+    const count = parseInt(countResult.rows[0]?.count || "0", 10);
+    res.json({ count });
+  } catch (error: any) {
+    console.error("Error fetching pending count:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch pending count" });
+  }
+});
+
+// Get reimbursement history with filtering and sorting
+router.get("/history", async (req: Request, res: Response) => {
+  try {
+    const tenantId = (req as any).tenantId as string;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: "No organization found" });
+    }
+
+    const orgId = await getOrganizationId(tenantId);
+    if (!orgId) {
+      return res.status(400).json({ error: "Organization not found" });
+    }
+
+    // Extract query parameters
+    const {
+      status,
+      employee_id,
+      employee_name,
+      from_date,
+      to_date,
+      sort_by = "submitted_at",
+      sort_order = "desc",
+    } = req.query;
+
+    // Build the query
+    // Try using payroll_employee_view first, fallback to employees + profiles if view doesn't exist
+    let queryStr = `
+      SELECT 
+        r.*,
+        COALESCE(ev.employee_code, e.employee_id, 'N/A') as employee_code,
+        COALESCE(ev.full_name, p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as employee_name,
+        COALESCE(p.email, ev.email, e.email, 'N/A') as email
+      FROM employee_reimbursements r
+      LEFT JOIN employees e ON e.id = r.employee_id
+      LEFT JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN payroll_employee_view ev ON ev.employee_id::text = r.employee_id::text AND ev.org_id = r.org_id
+      WHERE r.org_id = $1
+    `;
+
+    const params: any[] = [orgId];
+    let paramIndex = 2;
+
+    // Add filters
+    if (status) {
+      queryStr += ` AND r.status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
+    }
+
+    if (employee_id) {
+      queryStr += ` AND (e.employee_id ILIKE $${paramIndex} OR ev.employee_id ILIKE $${paramIndex} OR ev.employee_code ILIKE $${paramIndex})`;
+      params.push(`%${employee_id}%`);
+      paramIndex++;
+    }
+
+    if (employee_name) {
+      queryStr += ` AND (
+        COALESCE(ev.full_name, p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, '') ILIKE $${paramIndex}
+      )`;
+      params.push(`%${employee_name}%`);
+      paramIndex++;
+    }
+
+    if (from_date) {
+      queryStr += ` AND r.submitted_at >= $${paramIndex}::date`;
+      params.push(from_date);
+      paramIndex++;
+    }
+
+    if (to_date) {
+      queryStr += ` AND r.submitted_at <= $${paramIndex}::date + INTERVAL '1 day'`;
+      params.push(to_date);
+      paramIndex++;
+    }
+
+    // Add sorting
+    const validSortColumns = ["submitted_at", "amount", "status", "employee_name", "employee_code"];
+    const sortColumn = validSortColumns.includes(sort_by as string) ? sort_by : "submitted_at";
+    const sortDirection = sort_order === "asc" ? "ASC" : "DESC";
+
+    if (sortColumn === "employee_name") {
+      queryStr += ` ORDER BY employee_name ${sortDirection}, r.submitted_at DESC`;
+    } else if (sortColumn === "employee_code") {
+      queryStr += ` ORDER BY employee_code ${sortDirection}, r.submitted_at DESC`;
+    } else {
+      queryStr += ` ORDER BY r.${sortColumn} ${sortDirection}`;
+    }
+
+    let result;
+    try {
+      result = await query(queryStr, params);
+    } catch (viewError: any) {
+      // If payroll_employee_view doesn't exist or has issues, fallback to simpler query
+      console.warn("[REIMBURSEMENT] Error with payroll_employee_view, using fallback:", viewError.message);
+      queryStr = `
+        SELECT 
+          r.*,
+          COALESCE(e.employee_id, 'N/A') as employee_code,
+          COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as employee_name,
+          COALESCE(p.email, e.email, 'N/A') as email
+        FROM employee_reimbursements r
+        LEFT JOIN employees e ON e.id = r.employee_id
+        LEFT JOIN profiles p ON p.id = e.user_id
+        WHERE r.org_id = $1
+      `;
+      
+      // Rebuild params without view-specific filters
+      const fallbackParams: any[] = [orgId];
+      let fallbackIndex = 2;
+      
+      if (status) {
+        queryStr += ` AND r.status = $${fallbackIndex}`;
+        fallbackParams.push(status);
+        fallbackIndex++;
+      }
+      
+      if (employee_id) {
+        queryStr += ` AND e.employee_id ILIKE $${fallbackIndex}`;
+        fallbackParams.push(`%${employee_id}%`);
+        fallbackIndex++;
+      }
+      
+      if (employee_name) {
+        queryStr += ` AND (p.first_name || ' ' || p.last_name ILIKE $${fallbackIndex} OR p.first_name ILIKE $${fallbackIndex} OR p.last_name ILIKE $${fallbackIndex} OR e.full_name ILIKE $${fallbackIndex})`;
+        fallbackParams.push(`%${employee_name}%`);
+        fallbackIndex++;
+      }
+      
+      if (from_date) {
+        queryStr += ` AND r.submitted_at >= $${fallbackIndex}::date`;
+        fallbackParams.push(from_date);
+        fallbackIndex++;
+      }
+      
+      if (to_date) {
+        queryStr += ` AND r.submitted_at <= $${fallbackIndex}::date + INTERVAL '1 day'`;
+        fallbackParams.push(to_date);
+        fallbackIndex++;
+      }
+      
+      // Add sorting
+      const validSortColumns = ["submitted_at", "amount", "status", "employee_name", "employee_code"];
+      const sortColumn = validSortColumns.includes(sort_by as string) ? sort_by : "submitted_at";
+      const sortDirection = sort_order === "asc" ? "ASC" : "DESC";
+      
+      if (sortColumn === "employee_name") {
+        queryStr += ` ORDER BY employee_name ${sortDirection}, r.submitted_at DESC`;
+      } else if (sortColumn === "employee_code") {
+        queryStr += ` ORDER BY employee_code ${sortDirection}, r.submitted_at DESC`;
+      } else {
+        queryStr += ` ORDER BY r.${sortColumn} ${sortDirection}`;
+      }
+      
+      result = await query(queryStr, fallbackParams);
+    }
+
+    // Calculate summary statistics
+    const totalAmount = result.rows.reduce((sum, row) => sum + parseFloat(row.amount || 0), 0);
+    const paidAmount = result.rows
+      .filter((row) => row.status === "paid")
+      .reduce((sum, row) => sum + parseFloat(row.amount || 0), 0);
+    const approvedAmount = result.rows
+      .filter((row) => row.status === "approved" || row.status === "paid")
+      .reduce((sum, row) => sum + parseFloat(row.amount || 0), 0);
+
+    res.json({
+      reimbursements: result.rows.map(mapReimbursementRow),
+      summary: {
+        total_count: result.rows.length,
+        total_amount: totalAmount,
+        paid_amount: paidAmount,
+        approved_amount: approvedAmount,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error fetching reimbursement history:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch reimbursement history" });
+  }
+});
+
 export default router;
 

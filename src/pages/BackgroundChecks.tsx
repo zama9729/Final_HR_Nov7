@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import { Plus, FileText, Loader2 } from "lucide-react";
+import { Plus, FileText, Loader2, Download, CheckCircle2, AlertCircle, Clock, PauseCircle, XCircle, Users } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface BackgroundCheck {
@@ -28,6 +29,21 @@ interface BackgroundCheck {
   };
 }
 
+interface BackgroundCheckAttachment {
+  id: string;
+  document_type: string;
+  file_name: string;
+  mime_type?: string;
+  file_size?: number;
+  status?: string;
+  decision?: string;
+  notes?: string;
+  download_url?: string | null;
+  uploaded_at?: string;
+  verified_by?: string | null;
+  verified_at?: string | null;
+}
+
 interface BackgroundCheckReport extends BackgroundCheck {
   result_summary?: Record<string, any>;
   events?: {
@@ -37,6 +53,7 @@ interface BackgroundCheckReport extends BackgroundCheck {
     created_at: string;
     note?: string;
   }[];
+  attachments?: BackgroundCheckAttachment[];
 }
 
 interface EmployeeOption {
@@ -49,17 +66,29 @@ interface EmployeeOption {
 }
 
 const statusClass = (status: string) => {
-  switch (status) {
-    case "completed_green":
-      return "bg-emerald-500";
-    case "completed_amber":
-      return "bg-amber-500 text-black";
-    case "completed_red":
-      return "bg-red-500";
-    case "in_progress":
+  const normalized = (status || "").toLowerCase();
+  switch (normalized) {
+    case "pending":
+      // Pending – blue
       return "bg-blue-500";
+    case "in_progress":
     case "vendor_delay":
+      // Anything actively moving – keep in the blue family
+      return "bg-blue-500";
+    case "on_hold":
+    case "hold":
+      // Hold – yellow
       return "bg-yellow-500 text-black";
+    case "completed":
+    case "completed_green":
+    case "completed_amber":
+    case "completed_red":
+      // Any completed flavour – show as green
+      return "bg-emerald-500";
+    case "failed":
+    case "rejected":
+    case "cancelled":
+      return "bg-red-500";
     default:
       return "bg-gray-500";
   }
@@ -67,6 +96,7 @@ const statusClass = (status: string) => {
 
 export default function BackgroundChecks() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [checks, setChecks] = useState<BackgroundCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -84,9 +114,21 @@ export default function BackgroundChecks() {
   const [consentIp, setConsentIp] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [report, setReport] = useState<BackgroundCheckReport | null>(null);
+  const [activeReportId, setActiveReportId] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false);
+  const [selectedAttachment, setSelectedAttachment] = useState<BackgroundCheckAttachment | null>(null);
+  const [attachmentAction, setAttachmentAction] = useState<"approve" | "hold" | "unhold" | null>(null);
+  const [attachmentComment, setAttachmentComment] = useState("");
+  const [attachmentProcessing, setAttachmentProcessing] = useState(false);
+  const [onboardingCounts, setOnboardingCounts] = useState({ total: 0, notStarted: 0, inProgress: 0, completed: 0 });
 
   useEffect(() => {
     fetchChecks();
+  }, []);
+
+  useEffect(() => {
+    fetchOnboardingCounts();
   }, []);
 
   useEffect(() => {
@@ -108,6 +150,28 @@ export default function BackgroundChecks() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchOnboardingCounts = async () => {
+    try {
+      const data = await api.getOnboardingEmployees();
+      if (Array.isArray(data)) {
+        const notStarted = data.filter((item: any) => ['not_started', 'pending'].includes(item.onboarding_status)).length;
+        const inProgress = data.filter((item: any) => item.onboarding_status === 'in_progress').length;
+        const completed = data.filter((item: any) => item.onboarding_status === 'completed').length;
+        setOnboardingCounts({
+          total: data.length,
+          notStarted,
+          inProgress,
+          completed,
+        });
+      } else {
+        setOnboardingCounts({ total: 0, notStarted: 0, inProgress: 0, completed: 0 });
+      }
+    } catch (error) {
+      console.error('Error fetching onboarding counts:', error);
+      setOnboardingCounts({ total: 0, notStarted: 0, inProgress: 0, completed: 0 });
     }
   };
 
@@ -208,9 +272,144 @@ export default function BackgroundChecks() {
     }
   };
 
-  const openReport = async (id: string) => {
+  const formatFileSize = (size?: number | null) => {
+    if (!size || size <= 0) return "";
+    const kb = size / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    return `${(kb / 1024).toFixed(1)} MB`;
+  };
+
+  const statusSummary = useMemo(() => {
+    return checks.reduce(
+      (acc, check) => {
+        const status = (check.status || "").toLowerCase();
+        switch (status) {
+          case "pending":
+            acc.pending += 1;
+            break;
+          case "in_progress":
+          case "vendor_delay":
+            acc.inProgress += 1;
+            break;
+          case "on_hold":
+          case "hold":
+            acc.onHold += 1;
+            break;
+          case "completed":
+          case "completed_green":
+          case "completed_amber":
+          case "completed_red":
+            acc.completed += 1;
+            break;
+          case "failed":
+          case "rejected":
+          case "cancelled":
+            acc.rejected += 1;
+            break;
+          default:
+            break;
+        }
+        return acc;
+      },
+      { pending: 0, inProgress: 0, onHold: 0, completed: 0, rejected: 0 }
+    );
+  }, [checks]);
+
+  const onboardingActiveCount = onboardingCounts.notStarted + onboardingCounts.inProgress;
+
+  const getAttachmentStatusBadge = (status?: string | null) => {
+    const normalized = (status || "PENDING").toUpperCase();
+    switch (normalized) {
+      case "APPROVED":
+        return (
+          <Badge className="bg-emerald-500">
+            <CheckCircle2 className="h-3 w-3 mr-1" />
+            Approved
+          </Badge>
+        );
+      case "HOLD":
+        return (
+          <Badge className="bg-amber-500 text-black">
+            <AlertCircle className="h-3 w-3 mr-1" />
+            On Hold
+          </Badge>
+        );
+      default:
+        return (
+          <Badge variant="outline">
+            <Clock className="h-3 w-3 mr-1" />
+            Pending
+          </Badge>
+        );
+    }
+  };
+
+  const handleAttachmentAction = (attachment: BackgroundCheckAttachment, action: "approve" | "hold" | "unhold") => {
+    setSelectedAttachment(attachment);
+    setAttachmentAction(action);
+    setAttachmentComment(action === "hold" ? "" : attachment.notes || "");
+    setAttachmentDialogOpen(true);
+  };
+
+  const submitAttachmentAction = async () => {
+    if (!selectedAttachment || !attachmentAction || !report?.employee_id || !activeReportId) {
+      return;
+    }
+
+    if (attachmentAction === "hold" && !attachmentComment.trim()) {
+      toast({
+        title: "Comment required",
+        description: "Please add a note when placing a document on hold.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
-      const result = await api.getBackgroundCheckReport(id);
+      setAttachmentProcessing(true);
+      const endpoint =
+        `/api/onboarding/${report.employee_id}/background-check/documents/${selectedAttachment.id}/` +
+        (attachmentAction === "approve"
+          ? "approve"
+          : attachmentAction === "unhold"
+          ? "unhold"
+          : "hold");
+
+      await api.customRequest(endpoint, {
+        method: "POST",
+        body: JSON.stringify({ comment: attachmentComment.trim() || null }),
+      });
+
+      toast({
+        title: "Updated",
+        description:
+          attachmentAction === "approve"
+            ? "Document approved."
+            : attachmentAction === "hold"
+            ? "Document placed on hold."
+            : "Document moved back to pending.",
+      });
+
+      setAttachmentDialogOpen(false);
+      setSelectedAttachment(null);
+      setAttachmentAction(null);
+      setAttachmentComment("");
+      fetchReport(activeReportId);
+    } catch (error: any) {
+      toast({
+        title: "Unable to update",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setAttachmentProcessing(false);
+    }
+  };
+
+  const fetchReport = async (id: string) => {
+    try {
+      setReportLoading(true);
+      const result = await api.getBackgroundCheckReport(id, { legacy: true });
       setReport(result);
     } catch (error: any) {
       toast({
@@ -218,7 +417,25 @@ export default function BackgroundChecks() {
         description: error?.message || "Please try again.",
         variant: "destructive",
       });
+      setActiveReportId(null);
+      setReport(null);
+    } finally {
+      setReportLoading(false);
     }
+  };
+
+  const openReport = (id: string) => {
+    setActiveReportId(id);
+    fetchReport(id);
+  };
+
+  const closeReport = () => {
+    setActiveReportId(null);
+    setReport(null);
+    setAttachmentDialogOpen(false);
+    setSelectedAttachment(null);
+    setAttachmentAction(null);
+    setAttachmentComment("");
   };
 
   return (
@@ -235,6 +452,74 @@ export default function BackgroundChecks() {
             <Plus className="mr-2 h-4 w-4" />
             New Background Check
           </Button>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <Card className="shadow-sm border-blue-100 bg-blue-50/60">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-blue-700 flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Pending
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-blue-900">{statusSummary.pending}</p>
+              <p className="text-xs text-muted-foreground">Awaiting HR review</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-sm border-indigo-100 bg-indigo-50/60">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-indigo-700 flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+                In Progress
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-indigo-900">{statusSummary.inProgress}</p>
+              <p className="text-xs text-muted-foreground">Vendor or HR in progress</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-sm border-yellow-100 bg-yellow-50/60">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-yellow-700 flex items-center gap-2">
+                <PauseCircle className="h-4 w-4" />
+                On Hold
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-yellow-900">{statusSummary.onHold}</p>
+              <p className="text-xs text-muted-foreground">Waiting for clarifications</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-sm border-emerald-100 bg-emerald-50/60">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-emerald-700 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4" />
+                Completed
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-emerald-900">{statusSummary.completed}</p>
+              <p className="text-xs text-muted-foreground">Successfully verified</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-sm border-emerald-100 bg-emerald-50/60">
+            <CardHeader className="pb-2 flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-emerald-700 flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Active Onboarding
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/onboarding-tracker')}>
+                View
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-emerald-900">{onboardingActiveCount}</p>
+              <p className="text-xs text-muted-foreground">
+                Total onboarding ({onboardingCounts.total} overall)
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         <Card>
@@ -414,63 +699,226 @@ export default function BackgroundChecks() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!report} onOpenChange={(open) => !open && setReport(null)}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog
+        open={Boolean(activeReportId)}
+        onOpenChange={(open) => {
+          if (!open) closeReport();
+        }}
+      >
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Background Check Report</DialogTitle>
-            <DialogDescription>Audit trail, vendor notes, and summarized findings.</DialogDescription>
+            <DialogDescription>Timeline of actions and every document submitted for this check.</DialogDescription>
           </DialogHeader>
-          {report ? (
-            <div className="space-y-4">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-semibold">
-                    {report.employee_profile
-                      ? `${report.employee_profile.first_name} ${report.employee_profile.last_name}`
-                      : "Candidate"}
-                  </h3>
-                  <Badge className={`${statusClass(report.status)} text-white capitalize`}>
-                    {report.status.replace(/_/g, " ")}
-                  </Badge>
-                  <Badge variant="outline">{report.type}</Badge>
+          {reportLoading ? (
+            <div className="py-10 text-center text-muted-foreground">Loading report…</div>
+          ) : report ? (
+            <div className="grid gap-6 md:grid-cols-[1fr,1.3fr] max-h-[75vh] overflow-y-auto pr-1">
+              <div className="space-y-4">
+                <div className="rounded border bg-muted/30 p-3 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold">
+                      {report.employee_profile
+                        ? `${report.employee_profile.first_name} ${report.employee_profile.last_name}`
+                        : "Candidate"}
+                    </h3>
+                    <Badge className={`${statusClass(report.status)} text-white capitalize`}>
+                      {report.status.replace(/_/g, " ")}
+                    </Badge>
+                    <Badge variant="outline">{report.type}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Initiated: {format(new Date(report.created_at), "dd MMM yyyy")}
+                    {report.completed_at && ` • Completed: ${format(new Date(report.completed_at), "dd MMM yyyy")}`}
+                  </p>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Initiated: {format(new Date(report.created_at), "dd MMM yyyy")}
-                  {report.completed_at && ` • Completed: ${format(new Date(report.completed_at), "dd MMM yyyy")}`}
-                </p>
+
+                {report.result_summary && (
+                  <div className="rounded border bg-muted/40 p-3 text-xs">
+                    <p className="text-[10px] tracking-wide text-muted-foreground uppercase mb-1">Result summary</p>
+                    <pre className="whitespace-pre-wrap">{JSON.stringify(report.result_summary, null, 2)}</pre>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm font-semibold">
+                    <span>Timeline</span>
+                    <span className="text-xs text-muted-foreground">
+                      {report.events?.length ? `${report.events.length} entries` : "No events"}
+                    </span>
+                  </div>
+                  <ScrollArea className="max-h-[280px] rounded border bg-background">
+                    <div className="p-3 text-sm space-y-3">
+                      {report.events && report.events.length > 0 ? (
+                        report.events.map((event) => (
+                          <div key={event.id} className="border-l-2 border-primary/60 pl-3">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span className="font-semibold">{event.event_type}</span>
+                              <span>{format(new Date(event.created_at), "dd MMM yyyy HH:mm")}</span>
+                            </div>
+                            {event.note && <p className="mt-1 text-sm">{event.note}</p>}
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-muted-foreground text-sm text-center py-6">No events recorded.</p>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </div>
               </div>
-              {report.result_summary && (
-                <div className="rounded-md border bg-muted/50 p-3 text-xs">
-                  <pre className="whitespace-pre-wrap">
-                    {JSON.stringify(report.result_summary, null, 2)}
-                  </pre>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm font-semibold">
+                  <span>Documents</span>
+                  <span className="text-xs text-muted-foreground">
+                    {report.attachments?.length ? `${report.attachments.length} files` : "No files"}
+                  </span>
                 </div>
-              )}
-              <div>
-                <h4 className="text-sm font-semibold mb-2">Timeline</h4>
-                <ScrollArea className="max-h-52 rounded-md border p-3 text-sm">
-                  {report.events && report.events.length > 0 ? (
-                    report.events.map((event) => (
-                      <div key={event.id} className="border-b pb-2 mb-2 last:pb-0 last:border-0 last:mb-0">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span className="font-semibold">{event.event_type}</span>
-                          <span>{format(new Date(event.created_at), "dd MMM yyyy HH:mm")}</span>
-                        </div>
-                        {event.note && <p className="mt-1">{event.note}</p>}
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-muted-foreground">No events recorded.</p>
-                  )}
-                </ScrollArea>
+                {report.attachments && report.attachments.length > 0 ? (
+                  <ScrollArea className="max-h-[65vh] pr-2">
+                    <div className="space-y-3">
+                      {report.attachments.map((doc, index) => {
+                        const decision = (doc.decision || doc.status || "pending").toUpperCase();
+                        const canAct = !!report.employee_id && (decision === "PENDING" || decision === "HOLD");
+
+                        return (
+                          <div key={doc.id} className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-1">
+                                <p className="text-sm font-semibold">
+                                  {index + 1}. {doc.file_name || "Unnamed file"}
+                                </p>
+                                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+                                    {doc.document_type}
+                                  </Badge>
+                                  <span>{doc.uploaded_at ? format(new Date(doc.uploaded_at), "dd MMM yyyy") : "Unknown"}</span>
+                                  {doc.file_size && <span>{formatFileSize(doc.file_size)}</span>}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {getAttachmentStatusBadge(decision)}
+                                {doc.download_url && (
+                                  <Button variant="ghost" size="icon" onClick={() => window.open(doc.download_url!, "_blank")}>
+                                    <Download className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            {doc.notes && (
+                              <p className="text-xs text-muted-foreground bg-background rounded px-2 py-1">
+                                Comment: {doc.notes}
+                              </p>
+                            )}
+                            {canAct && (
+                              <div className="flex flex-wrap gap-2">
+                                {decision === "HOLD" && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleAttachmentAction(doc, "unhold")}
+                                  >
+                                    Unhold
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleAttachmentAction(doc, "approve")}
+                                >
+                                  Approve
+                                </Button>
+                                {decision === "PENDING" && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleAttachmentAction(doc, "hold")}
+                                  >
+                                    Hold
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <div className="rounded border bg-muted/20 p-4 text-sm text-muted-foreground">
+                    No documents have been linked to this background check.
+                  </div>
+                )}
               </div>
             </div>
           ) : (
-            <div className="py-10 text-center text-muted-foreground">Loading report…</div>
+            <div className="py-10 text-center text-muted-foreground">Select a background check to view details.</div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setReport(null)}>
+            <Button variant="outline" onClick={closeReport}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={attachmentDialogOpen}
+        onOpenChange={(open) => {
+          setAttachmentDialogOpen(open);
+          if (!open) {
+            setSelectedAttachment(null);
+            setAttachmentAction(null);
+            setAttachmentComment("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {attachmentAction === "approve"
+                ? "Approve document"
+                : attachmentAction === "unhold"
+                ? "Move document back to pending"
+                : "Put document on hold"}
+            </DialogTitle>
+            <DialogDescription>
+              {attachmentAction === "approve"
+                ? "Confirm this document looks good. You can leave an optional note."
+                : attachmentAction === "unhold"
+                ? "Move this document from On Hold back to Pending so it can be reviewed again."
+                : "Share why this document needs clarification. The candidate will be notified."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Document</Label>
+              <p className="text-sm font-medium">{selectedAttachment?.file_name || selectedAttachment?.document_type}</p>
+            </div>
+            <div>
+              <Label htmlFor="attachment-comment">
+                Comment {attachmentAction === "hold" ? "(required)" : "(optional)"}
+              </Label>
+              <Textarea
+                id="attachment-comment"
+                rows={4}
+                value={attachmentComment}
+                onChange={(event) => setAttachmentComment(event.target.value)}
+                placeholder={attachmentAction === "hold" ? "Explain what needs to be fixed…" : "Add an optional note…"}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAttachmentDialogOpen(false)} disabled={attachmentProcessing}>
+              Cancel
+            </Button>
+            <Button onClick={submitAttachmentAction} disabled={attachmentProcessing}>
+              {attachmentProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              {attachmentAction === "approve"
+                ? "Approve"
+                : attachmentAction === "unhold"
+                ? "Unhold"
+                : "Hold"}
             </Button>
           </DialogFooter>
         </DialogContent>

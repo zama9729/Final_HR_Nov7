@@ -39,6 +39,7 @@ import {
   Area,
   AreaChart,
 } from "recharts";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface OverviewData {
   total_employees: number;
@@ -59,6 +60,26 @@ interface HistogramData {
   wfh: number;
 }
 
+interface PendingApproval {
+  id: string;
+  week_start_date: string;
+  week_end_date: string;
+  status: string;
+  submitted_at: string | null;
+  total_hours: number;
+  employee: {
+    id: string;
+    employee_id: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+  };
+  manager_id: string | null;
+  manager_first_name: string | null;
+  manager_last_name: string | null;
+  manager_email: string | null;
+}
+
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
@@ -77,28 +98,39 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function AttendanceAnalytics() {
   const { toast } = useToast();
+  const { userRole } = useAuth();
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [histogram, setHistogram] = useState<HistogramData[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [dateRange, setDateRange] = useState({
     from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
     to: new Date(),
   });
   const [selectedPeriod, setSelectedPeriod] = useState("30");
 
+  const allowedRoles = ["admin", "hr", "ceo", "director"];
+  const canViewAnalytics = userRole ? allowedRoles.includes(userRole) : false;
+
   useEffect(() => {
-    fetchData();
-  }, [dateRange]);
+    if (canViewAnalytics) {
+      fetchData();
+    } else {
+      setLoading(false);
+    }
+  }, [dateRange, canViewAnalytics]);
 
   const fetchData = async () => {
+    if (!canViewAnalytics) return;
     setLoading(true);
     try {
       const fromStr = format(dateRange.from, "yyyy-MM-dd");
       const toStr = format(dateRange.to, "yyyy-MM-dd");
 
-      const [overviewData, histogramData] = await Promise.all([
+      const [overviewData, histogramData, approvalsData] = await Promise.all([
         api.getAttendanceOverview({ from: fromStr, to: toStr }),
         api.getAttendanceHistogram({ from: fromStr, to: toStr }),
+        api.getPendingTimesheetApprovals({ from: fromStr, to: toStr }),
       ]);
 
       setOverview(overviewData);
@@ -108,6 +140,8 @@ export default function AttendanceAnalytics() {
         date: item.date || format(parseISO(item.date), "yyyy-MM-dd"),
       }));
       setHistogram(formattedHistogram);
+
+      setPendingApprovals(approvalsData?.pending || []);
       
       console.log("Histogram data:", formattedHistogram); // Debug log
     } catch (error: any) {
@@ -177,6 +211,27 @@ export default function AttendanceAnalytics() {
     maxPresent: Math.max(...histogram.map(h => h.present)),
     minPresent: Math.min(...histogram.map(h => h.present)),
   } : null;
+
+  if (!canViewAnalytics) {
+    return (
+      <AppLayout>
+        <div className="p-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Attendance Analytics</CardTitle>
+              <CardDescription>Access restricted</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Attendance analytics are available only to HR, Directors, and Executive roles. If you
+                believe you need access, please contact HR or an administrator.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
@@ -302,6 +357,7 @@ export default function AttendanceAnalytics() {
                   </p>
                 </CardContent>
               </Card>
+
             </div>
 
             {/* Statistics Cards */}
@@ -361,12 +417,13 @@ export default function AttendanceAnalytics() {
               </div>
             )}
 
-            {/* Charts Section */}
+            {/* Charts & Approvals Section */}
             <Tabs defaultValue="timeline" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="timeline">Timeline</TabsTrigger>
                 <TabsTrigger value="trends">Trends</TabsTrigger>
                 <TabsTrigger value="location">Work Location</TabsTrigger>
+                <TabsTrigger value="approvals">Pending Approvals</TabsTrigger>
               </TabsList>
 
               <TabsContent value="timeline" className="space-y-4">
@@ -380,7 +437,7 @@ export default function AttendanceAnalytics() {
                   <CardContent>
                     {histogram.length > 0 ? (
                       <ResponsiveContainer width="100%" height={400}>
-                        <ComposedChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
+                        <BarChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                           <XAxis
                             dataKey="date"
@@ -393,10 +450,10 @@ export default function AttendanceAnalytics() {
                           <YAxis tick={{ fontSize: 12 }} />
                           <Tooltip content={<CustomTooltip />} />
                           <Legend />
-                          <Bar dataKey="present" fill="#10b981" name="Present" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="absent" fill="#ef4444" name="Absent" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="late" fill="#f59e0b" name="Late" radius={[4, 4, 0, 0]} />
-                        </ComposedChart>
+                          <Bar dataKey="late" stackId="a" fill="#f59e0b" name="Late" radius={[0, 0, 4, 4]} />
+                          <Bar dataKey="absent" stackId="a" fill="#ef4444" name="Absent" />
+                          <Bar dataKey="present" stackId="a" fill="#10b981" name="Present" radius={[4, 4, 0, 0]} />
+                        </BarChart>
                       </ResponsiveContainer>
                     ) : (
                       <div className="text-center py-16 text-muted-foreground">
@@ -495,7 +552,7 @@ export default function AttendanceAnalytics() {
                   <CardContent>
                     {histogram.length > 0 ? (
                       <ResponsiveContainer width="100%" height={400}>
-                        <ComposedChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
+                        <BarChart data={histogram} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                           <XAxis
                             dataKey="date"
@@ -508,15 +565,89 @@ export default function AttendanceAnalytics() {
                           <YAxis tick={{ fontSize: 12 }} />
                           <Tooltip content={<CustomTooltip />} />
                           <Legend />
-                          <Bar dataKey="wfo" fill="#3b82f6" name="WFO" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="wfh" fill="#8b5cf6" name="WFH" radius={[4, 4, 0, 0]} />
-                        </ComposedChart>
+                          <Bar dataKey="wfh" stackId="b" fill="#8b5cf6" name="WFH" radius={[0, 0, 4, 4]} />
+                          <Bar dataKey="wfo" stackId="b" fill="#3b82f6" name="WFO" radius={[4, 4, 0, 0]} />
+                        </BarChart>
                       </ResponsiveContainer>
                     ) : (
                       <div className="text-center py-16 text-muted-foreground">
                         <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                         <p className="text-lg font-medium">No data available</p>
                         <p className="text-sm mt-2">No attendance records found for the selected period</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="approvals" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Pending Timesheet Approvals</CardTitle>
+                    <CardDescription>
+                      Timesheets submitted and awaiting manager/HR/CEO action for the selected period.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {pendingApprovals.length === 0 ? (
+                      <div className="text-center py-10 text-muted-foreground text-sm">
+                        No pending timesheet approvals for this period.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b text-xs text-muted-foreground">
+                              <th className="py-2 px-2 text-left">Employee</th>
+                              <th className="py-2 px-2 text-left">Period</th>
+                              <th className="py-2 px-2 text-left">Submitted At</th>
+                              <th className="py-2 px-2 text-left">Manager</th>
+                              <th className="py-2 px-2 text-left">Hours</th>
+                              <th className="py-2 px-2 text-left">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pendingApprovals.map((ts) => (
+                              <tr key={ts.id} className="border-b last:border-0">
+                                <td className="py-2 px-2">
+                                  <div className="font-medium">
+                                    {ts.employee.first_name} {ts.employee.last_name}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {ts.employee.employee_id} · {ts.employee.email}
+                                  </div>
+                                </td>
+                                <td className="py-2 px-2 text-xs">
+                                  {format(parseISO(ts.week_start_date), "dd MMM yyyy")} –{" "}
+                                  {format(parseISO(ts.week_end_date), "dd MMM yyyy")}
+                                </td>
+                                <td className="py-2 px-2 text-xs">
+                                  {ts.submitted_at
+                                    ? format(parseISO(ts.submitted_at), "dd MMM yyyy HH:mm")
+                                    : "—"}
+                                </td>
+                                <td className="py-2 px-2 text-xs">
+                                  {ts.manager_first_name ? (
+                                    <>
+                                      {ts.manager_first_name} {ts.manager_last_name}
+                                      <div className="text-xs text-muted-foreground">
+                                        {ts.manager_email}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <span className="text-muted-foreground">Unassigned</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-2 text-xs">
+                                  {ts.total_hours ?? 0}
+                                </td>
+                                <td className="py-2 px-2 text-xs capitalize">
+                                  {ts.status.replace('_', ' ')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </CardContent>

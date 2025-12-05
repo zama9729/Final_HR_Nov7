@@ -5,6 +5,8 @@ import crypto from 'crypto';
 import { query, queryWithOrg } from '../db/pool.js';
 import { rebuildSegmentsForEmployee } from '../services/assignment-segmentation.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { createJoiningEvent, createHikeEvent } from '../utils/employee-events.js';
+import { audit } from '../utils/auditLog.js';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import { sendInviteEmail } from '../services/email.js';
@@ -320,6 +322,19 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'No organization found' });
     }
 
+    // Check if profile_picture_url column exists
+    const columnCheck = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_name = 'profiles' AND column_name = 'profile_picture_url'`
+    );
+    const hasProfilePictureColumn = columnCheck.rows.length > 0;
+
+    // Build profiles JSON conditionally based on column existence
+    const profilePictureField = hasProfilePictureColumn 
+      ? `'profile_picture_url', p.profile_picture_url`
+      : `'profile_picture_url', NULL::text`;
+
     const result = await query(
       `SELECT 
         e.*,
@@ -327,7 +342,8 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
           'first_name', p.first_name,
           'last_name', p.last_name,
           'email', p.email,
-          'phone', p.phone
+          'phone', p.phone,
+          ${profilePictureField}
         ) as profiles,
         ${assignmentSelectFragment}
       FROM employees e
@@ -341,6 +357,188 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching org chart:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Profile picture upload endpoint
+router.post('/profile-picture/upload', authenticateToken, async (req, res) => {
+  try {
+    const { url, key } = req.body;
+    const userId = req.user.id;
+
+    if (!url || !key) {
+      return res.status(400).json({ error: 'url and key are required' });
+    }
+
+    // Get user's tenant_id for RLS
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [userId]
+    );
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Verify the key belongs to this user's tenant (RLS check)
+    const keyPrefix = tenantId ? `tenants/${tenantId}/profile-pictures/${userId}` : `profile-pictures/${userId}`;
+    if (!key.startsWith(keyPrefix)) {
+      return res.status(403).json({ error: 'Unauthorized: Invalid file path' });
+    }
+
+    // Check if profile_picture_url column exists
+    const columnCheck = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_name = 'profiles' AND column_name = 'profile_picture_url'`
+    );
+    
+    if (columnCheck.rows.length === 0) {
+      return res.status(400).json({ 
+        error: 'Profile picture feature not available. Please run the database migration first.',
+        migration_required: true 
+      });
+    }
+
+    // Construct public URL (use presigned URL or public bucket URL)
+    const minioPublicUrl = process.env.MINIO_PUBLIC_URL || process.env.MINIO_ENDPOINT?.replace('minio:', 'localhost:') || 'http://localhost:9000';
+    const bucket = process.env.MINIO_BUCKET_ONBOARDING || process.env.DOCS_STORAGE_BUCKET || 'hr-onboarding-docs';
+    const publicUrl = `${minioPublicUrl}/${bucket}/${key}`;
+
+    // Update profile with picture URL
+    await query(
+      'UPDATE profiles SET profile_picture_url = $1, updated_at = now() WHERE id = $2',
+      [publicUrl, userId]
+    );
+
+    res.json({ 
+      success: true, 
+      profile_picture_url: publicUrl,
+      message: 'Profile picture uploaded successfully' 
+    });
+  } catch (error) {
+    console.error('Error uploading profile picture:', error);
+    res.status(500).json({ error: error.message || 'Failed to upload profile picture' });
+  }
+});
+
+// Get presigned URL for profile picture upload
+router.post('/profile-picture/presign', authenticateToken, async (req, res) => {
+  try {
+    const { contentType } = req.body;
+    const userId = req.user.id;
+
+    if (!contentType || !contentType.startsWith('image/')) {
+      return res.status(400).json({ error: 'Invalid content type. Only images are allowed.' });
+    }
+
+    // Get user's tenant_id for RLS
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [userId]
+    );
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Import storage functions
+    const { getPresignedPutUrl, getStorageProvider } = await import('../services/storage.js');
+    
+    // Check if S3/MinIO is available
+    const storageProvider = getStorageProvider();
+    if (storageProvider !== 's3') {
+      return res.status(400).json({ 
+        error: 'S3/MinIO storage is not configured. Please configure MinIO environment variables to enable profile picture uploads.',
+        storage_provider: storageProvider,
+        requires_s3: true,
+        message: 'MinIO is required for profile picture uploads. Please set MINIO_ENABLED=true and configure MinIO credentials.'
+      });
+    }
+    
+    // Generate object key with tenant isolation (RLS)
+    const ext = contentType === 'image/jpeg' ? 'jpg' : contentType === 'image/png' ? 'png' : 'jpg';
+    const fileName = `${Date.now()}_${crypto.randomUUID()}.${ext}`;
+    const objectKey = `tenants/${tenantId}/profile-pictures/${userId}/${fileName}`;
+
+    // Generate presigned URL (5 minute expiry)
+    const url = await getPresignedPutUrl({
+      objectKey,
+      contentType,
+      expiresIn: 300, // 5 minutes
+    });
+
+    res.json({
+      url,
+      key: objectKey,
+      expiresIn: 300,
+    });
+  } catch (error) {
+    console.error('Error generating presigned URL for profile picture:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate upload URL' });
+  }
+});
+
+// Get presigned URL for viewing profile picture
+router.get('/profile-picture/:userId', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Get the profile picture URL from database
+    const profileResult = await query(
+      'SELECT profile_picture_url, tenant_id FROM profiles WHERE id = $1',
+      [userId]
+    );
+
+    if (!profileResult.rows.length) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    const profile = profileResult.rows[0];
+    
+    if (!profile.profile_picture_url) {
+      return res.status(404).json({ error: 'No profile picture found' });
+    }
+
+    // Extract object key from the stored URL
+    // URL format: http://localhost:9000/bucket/tenants/.../profile-pictures/.../filename.png
+    const urlParts = profile.profile_picture_url.split('/');
+    const bucketIndex = urlParts.findIndex(part => part.includes('tenants') || part === 'docshr' || part === 'hr-onboarding-docs');
+    
+    if (bucketIndex === -1) {
+      return res.status(400).json({ error: 'Invalid profile picture URL format' });
+    }
+
+    // Extract key (everything after bucket)
+    const key = urlParts.slice(bucketIndex + 1).join('/');
+
+    // Import storage functions
+    const { getPresignedGetUrl, getStorageProvider } = await import('../services/storage.js');
+    
+    // Check if S3/MinIO is available
+    const storageProvider = getStorageProvider();
+    if (storageProvider !== 's3') {
+      return res.status(400).json({ 
+        error: 'S3/MinIO storage is not configured.',
+        storage_provider: storageProvider,
+      });
+    }
+
+    // Generate presigned GET URL (1 hour expiry for viewing)
+    const presignedUrl = await getPresignedGetUrl({
+      objectKey: key,
+      expiresIn: 3600, // 1 hour
+    });
+
+    res.json({
+      url: presignedUrl,
+      expiresIn: 3600,
+    });
+  } catch (error) {
+    console.error('Error generating presigned GET URL:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate presigned URL' });
   }
 });
 
@@ -380,12 +578,20 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
     
     // Check if verified_by column exists
-    const columnCheck = await query(
+    const verifiedByCheck = await query(
       `SELECT column_name 
        FROM information_schema.columns 
        WHERE table_name = 'employees' AND column_name = 'verified_by'`
     );
-    const hasVerifiedBy = columnCheck.rows.length > 0;
+    const hasVerifiedBy = verifiedByCheck.rows.length > 0;
+
+    // Check if profile_picture_url column exists
+    const profilePicCheck = await query(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_name = 'profiles' AND column_name = 'profile_picture_url'`
+    );
+    const hasProfilePictureColumn = profilePicCheck.rows.length > 0;
 
     // Build query conditionally based on column existence
     const verifiedByJoin = hasVerifiedBy 
@@ -399,6 +605,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
         ) as verified_by_profile`
       : `NULL::jsonb as verified_by_profile`;
 
+    // Build profiles JSON conditionally based on column existence
+    const profilePictureField = hasProfilePictureColumn 
+      ? `'profile_picture_url', p.profile_picture_url`
+      : `'profile_picture_url', NULL::text`;
+
     // Get employee with profile data, reporting manager info, and organization info
     const employeeResult = await query(
       `SELECT 
@@ -407,7 +618,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
           'first_name', p.first_name,
           'last_name', p.last_name,
           'email', p.email,
-          'phone', p.phone
+          'phone', p.phone,
+          ${profilePictureField}
         ) as profiles,
         json_build_object(
           'id', mgr_e.id,
@@ -596,6 +808,16 @@ router.post('/', authenticateToken, async (req, res) => {
       );
       const createdEmployee = empResult.rows[0];
 
+      // Create JOINING event
+      try {
+        if (createdEmployee.join_date) {
+          await createJoiningEvent(tenantId, createdEmployee.id, createdEmployee.join_date);
+        }
+      } catch (eventError) {
+        console.error('Error creating joining event:', eventError);
+        // Don't fail employee creation if event creation fails
+      }
+
       if (homeBranchId || homeDepartmentId || homeTeamId) {
         await queryWithOrg(
           `INSERT INTO employee_assignments (
@@ -783,7 +1005,8 @@ router.patch('/:id', authenticateToken, async (req, res) => {
       workLocation,
       joinDate,
       reportingManagerId,
-      status
+      status,
+      ctc
     } = req.body;
 
     await query('BEGIN');
@@ -859,19 +1082,91 @@ router.patch('/:id', authenticateToken, async (req, res) => {
           employeeUpdates.push(`status = $${paramIndex++}`);
           employeeParams.push(status);
         }
+        if (ctc !== undefined) {
+          employeeUpdates.push(`ctc = $${paramIndex++}`);
+          employeeParams.push(ctc);
+        }
 
         if (employeeUpdates.length > 0) {
           employeeUpdates.push(`updated_at = now()`);
           employeeParams.push(id);
           
+          // Get old values for audit diff
+          const oldEmpResult = await query(
+            'SELECT position, department, ctc, status, reporting_manager_id FROM employees WHERE id = $1',
+            [id]
+          );
+          const oldValues = oldEmpResult.rows[0] || {};
+          
           await query(
             `UPDATE employees SET ${employeeUpdates.join(', ')} WHERE id = $${paramIndex}`,
             employeeParams
           );
+          
+          // Get new values for audit diff
+          const newEmpResult = await query(
+            'SELECT position, department, ctc, status, reporting_manager_id FROM employees WHERE id = $1',
+            [id]
+          );
+          const newValues = newEmpResult.rows[0] || {};
+          
+          // Create audit log for employee update
+          const diff = {};
+          if (position !== undefined && oldValues.position !== newValues.position) {
+            diff.position = { old: oldValues.position, new: newValues.position };
+          }
+          if (department !== undefined && oldValues.department !== newValues.department) {
+            diff.department = { old: oldValues.department, new: newValues.department };
+          }
+          if (ctc !== undefined && oldValues.ctc !== newValues.ctc) {
+            diff.ctc = { old: oldValues.ctc, new: newValues.ctc };
+          }
+          if (status !== undefined && oldValues.status !== newValues.status) {
+            diff.status = { old: oldValues.status, new: newValues.status };
+          }
+          if (reportingManagerId !== undefined && oldValues.reporting_manager_id !== newValues.reporting_manager_id) {
+            diff.reporting_manager_id = { old: oldValues.reporting_manager_id, new: newValues.reporting_manager_id };
+          }
+          
+          if (Object.keys(diff).length > 0) {
+            try {
+              await audit({
+                actorId: req.user.id,
+                action: 'employee_update',
+                entityType: 'employee',
+                entityId: id,
+                diff: diff,
+                details: {
+                  updatedFields: Object.keys(diff),
+                  employeeId: employeeId || id,
+                },
+                scope: 'org',
+              });
+            } catch (auditError) {
+              console.error('Error creating audit log:', auditError);
+              // Don't fail the update if audit logging fails
+            }
+          }
         }
       }
 
       await query('COMMIT');
+
+      // Create HIKE event if CTC was updated and increased
+      if (ctc !== undefined && oldCTC !== null && ctc > oldCTC) {
+        try {
+          await createHikeEvent(tenantId, id, {
+            oldCTC: oldCTC,
+            newCTC: ctc,
+            effectiveDate: new Date().toISOString().split('T')[0],
+            sourceTable: 'employees',
+            sourceId: id,
+          });
+        } catch (eventError) {
+          console.error('Error creating hike event:', eventError);
+          // Don't fail employee update if event creation fails
+        }
+      }
 
       // Check for auto-promotion if reporting_manager_id was updated
       if (reportingManagerId !== undefined) {

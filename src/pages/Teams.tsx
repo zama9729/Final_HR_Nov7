@@ -137,7 +137,6 @@ export default function Teams() {
         ...formData,
         owner_manager_id: formData.owner_manager_id === '__none__' ? '' : formData.owner_manager_id,
       };
-
       if (editingTeam) {
         await api.updateTeam(editingTeam.id, dataToSave);
         toast({
@@ -147,7 +146,6 @@ export default function Teams() {
       } else {
         const newTeam = await api.createTeam(dataToSave);
         const teamId = newTeam?.id || (newTeam as any)?.id;
-
         // Add selected employees to the team
         if (selectedEmployeeIds.size > 0 && teamId) {
           const addEmployeePromises = Array.from(selectedEmployeeIds).map((employeeId) =>
@@ -160,10 +158,8 @@ export default function Teams() {
               return null;
             })
           );
-
           const results = await Promise.all(addEmployeePromises);
           const successCount = results.filter(r => r !== null).length;
-
           toast({
             title: 'Success',
             description: successCount === selectedEmployeeIds.size

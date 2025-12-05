@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sidebar, SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { Bot, Send, X, Loader2, MessageSquare, Trash2, Plus, Edit2, Check, XIcon } from "lucide-react";
 import { format } from "date-fns";
@@ -37,7 +36,7 @@ export function AIAssistant() {
   const [isLoading, setIsLoading] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
@@ -365,22 +364,28 @@ export function AIAssistant() {
 
   if (!isOpen) {
     return (
-      <Button
+      <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-50"
-        size="icon"
+        className="ai-chat-button flex items-center justify-center focus:outline-none"
+        aria-label="Open AI Assistant"
       >
-        <Bot className="h-6 w-6" />
-      </Button>
+        <Bot className="h-7 w-7 text-[#E41E26] relative z-10" strokeWidth={2.5} />
+      </button>
     );
   }
 
   return (
     <>
-      <div className="fixed bottom-6 right-6 w-[900px] h-[700px] shadow-2xl z-50 flex gap-0 bg-background rounded-lg border overflow-hidden">
+      {/* Backdrop */}
+      <div 
+        className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40"
+        onClick={() => setIsOpen(false)}
+      />
+      {/* Chat Popup */}
+      <div className="fixed bottom-24 right-6 w-[400px] h-[580px] shadow-2xl z-50 flex flex-col gap-0 bg-background rounded-2xl border overflow-hidden liquid-glass-dropdown">
         {/* Sidebar - Conversation History */}
         {showHistory && (
-          <Sidebar className="w-64 border-r flex flex-col">
+          <Sidebar className="w-48 border-r flex flex-col">
             <SidebarHeader className="p-3 border-b">
               <div className="flex items-center justify-between">
                 <h3 className="font-medium text-sm">Conversations</h3>
@@ -526,7 +531,7 @@ export function AIAssistant() {
           </div>
 
           {/* Chat Messages - Minimal */}
-          <ScrollArea className="flex-1" ref={scrollRef}>
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
             <div className="p-4 space-y-4">
               {messages.length === 0 && (
                 <div className="text-center text-muted-foreground py-12">
@@ -561,7 +566,7 @@ export function AIAssistant() {
                 </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
 
           {/* Minimal Input */}
           <div className="border-t p-3">

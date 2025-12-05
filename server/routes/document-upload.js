@@ -64,6 +64,19 @@ router.post('/presign', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Invalid file type. Allowed: pdf, doc, docx, jpg, png, tiff' });
     }
 
+    // Check if S3/MinIO is available
+    const { getStorageProvider } = await import('../services/storage.js');
+    const storageProvider = getStorageProvider();
+    
+    if (storageProvider !== 's3') {
+      return res.status(400).json({ 
+        error: 'S3/MinIO storage is not configured. Please configure MinIO environment variables to enable document uploads.',
+        storage_provider: storageProvider,
+        requires_s3: true,
+        message: 'MinIO is required for document uploads. Please set MINIO_ENABLED=true and configure MinIO credentials.'
+      });
+    }
+
     const tenantId = await getTenantIdForUser(userId);
     const keyPrefix = tenantId ? `employees/${tenantId}/${userId}` : `employees/${userId}`;
     const safeExt = allowedMimeTypes[contentType];
@@ -95,25 +108,52 @@ router.post('/presign', authenticateToken, async (req, res) => {
  */
 router.post('/complete', authenticateToken, async (req, res) => {
   try {
-    const { key, filename, size, checksum, docType, consent, notes } = req.body;
+    const { key, filename, size, checksum, docType, consent, notes, employeeId: providedEmployeeId } = req.body;
     const userId = req.user.id;
 
     if (!key || !filename || !size) {
       return res.status(400).json({ error: 'key, filename, and size are required' });
     }
 
-    // Get employee ID for this user
-    const employeeResult = await query(
-      'SELECT id, tenant_id FROM employees WHERE user_id = $1',
+    // Get tenant ID
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
       [userId]
     );
-
-    if (employeeResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Employee record not found' });
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
     }
 
-    const employeeId = employeeResult.rows[0].id;
-    const tenantId = employeeResult.rows[0].tenant_id;
+    // Get employee ID - use provided employeeId or find by user_id
+    let employeeId = providedEmployeeId;
+    if (!employeeId) {
+      const employeeResult = await query(
+        'SELECT id, tenant_id FROM employees WHERE user_id = $1',
+        [userId]
+      );
+      if (employeeResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Employee record not found. Please provide employeeId in request body.' });
+      }
+      employeeId = employeeResult.rows[0].id;
+      
+      // Verify tenant match
+      if (employeeResult.rows[0].tenant_id !== tenantId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+    } else {
+      // Verify provided employeeId belongs to same tenant
+      const empResult = await query(
+        'SELECT tenant_id FROM employees WHERE id = $1',
+        [employeeId]
+      );
+      if (empResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Employee not found' });
+      }
+      if (empResult.rows[0].tenant_id !== tenantId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+    }
 
     // Run malware scan (stub)
     const scanResult = await scanFile(key);
@@ -137,39 +177,120 @@ router.post('/complete', authenticateToken, async (req, res) => {
     };
     const contentType = mimeMap[ext] || 'application/octet-stream';
 
-    // Save to hr_documents table
-    const docResult = await query(
-      `INSERT INTO hr_documents (
-        employee_id, object_key, filename, content_type, size_bytes,
-        uploaded_by, checksum, verification_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
-      RETURNING id, uploaded_at`,
-      [employeeId, key, filename, contentType, size, userId, checksum || null]
-    );
+    // Ensure onboarding_documents table exists
+    await query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'document_status_enum') THEN
+          CREATE TYPE document_status_enum AS ENUM (
+            'uploaded', 'pending', 'approved', 'rejected', 'hold',
+            'resubmission_requested', 'quarantined'
+          );
+        END IF;
+      END $$;
+    `);
 
-    const documentId = docResult.rows[0].id;
+    const requiredStatuses = ['uploaded', 'pending', 'approved', 'rejected', 'hold', 'resubmission_requested', 'quarantined'];
+    for (const status of requiredStatuses) {
+      await query(`ALTER TYPE document_status_enum ADD VALUE IF NOT EXISTS '${status}'`);
+    }
 
-    // Also save to onboarding_documents for compatibility
+    await query(`
+      CREATE TABLE IF NOT EXISTS onboarding_documents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+        candidate_id UUID,
+        tenant_id UUID,
+        document_type TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        storage_key TEXT,
+        object_key TEXT,
+        storage_provider TEXT DEFAULT 's3',
+        mime_type TEXT,
+        file_size INTEGER,
+        uploaded_by UUID REFERENCES profiles(id),
+        uploaded_at TIMESTAMPTZ DEFAULT now(),
+        status document_status_enum DEFAULT 'uploaded',
+        checksum TEXT,
+        verified_by UUID REFERENCES profiles(id),
+        verified_at TIMESTAMPTZ,
+        hr_notes TEXT
+      )
+    `);
+
+    // Ensure legacy tables get new columns required by the workflow
+    await query(`
+      ALTER TABLE onboarding_documents
+        ADD COLUMN IF NOT EXISTS file_path TEXT,
+        ADD COLUMN IF NOT EXISTS storage_key TEXT,
+        ADD COLUMN IF NOT EXISTS object_key TEXT,
+        ADD COLUMN IF NOT EXISTS storage_provider TEXT DEFAULT 's3',
+        ADD COLUMN IF NOT EXISTS mime_type TEXT,
+        ADD COLUMN IF NOT EXISTS file_size INTEGER,
+        ADD COLUMN IF NOT EXISTS checksum TEXT,
+        ADD COLUMN IF NOT EXISTS status document_status_enum DEFAULT 'uploaded'
+    `);
+
+    // Save to onboarding_documents table (primary table for onboarding)
+    let documentId;
+    let onboardingDocRecord = null;
+    let hrDocRecord = null;
     if (docType) {
-      await query(
+      const onboardingDocResult = await query(
         `INSERT INTO onboarding_documents (
-          employee_id, tenant_id, document_type, file_name, storage_key,
+          employee_id, candidate_id, tenant_id, document_type, file_name, file_path, storage_key,
           storage_provider, mime_type, file_size, uploaded_by, status, object_key, checksum
-        ) VALUES ($1, $2, $3, $4, $5, 's3', $6, $7, $8, 'uploaded', $5, $9)
-        ON CONFLICT DO NOTHING`,
-        [employeeId, tenantId, docType.toUpperCase(), filename, key, contentType, size, userId, checksum || null]
+        ) VALUES ($1, $2, $3, $4, $5, $6, $6, 's3', $7, $8, $9, 'pending', $6, $10)
+        RETURNING id, uploaded_at`,
+        [employeeId, employeeId, tenantId, docType.toUpperCase(), filename, key, contentType, size, userId, checksum || null]
       );
+      onboardingDocRecord = onboardingDocResult.rows[0] || null;
+      documentId = onboardingDocRecord?.id;
+    }
+
+    // Also try to save to hr_documents if table exists (for HR viewing)
+    try {
+      const hrDocResult = await query(
+        `INSERT INTO hr_documents (
+          employee_id, object_key, filename, content_type, size_bytes,
+          uploaded_by, checksum, verification_status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+        RETURNING id, uploaded_at`,
+        [employeeId, key, filename, contentType, size, userId, checksum || null]
+      );
+      hrDocRecord = hrDocResult.rows[0] || null;
+    } catch (hrTableError) {
+      // hr_documents table might not exist, that's okay
+      console.log('hr_documents table not available:', hrTableError.message);
+    }
+
+    if (!documentId) {
+      const fallbackResult = await query(
+        `SELECT id, uploaded_at FROM onboarding_documents WHERE object_key = $1 ORDER BY uploaded_at DESC LIMIT 1`,
+        [key]
+      );
+      if (fallbackResult.rows.length > 0) {
+        onboardingDocRecord = onboardingDocRecord || fallbackResult.rows[0];
+        documentId = fallbackResult.rows[0].id;
+      }
     }
 
     // Audit log
-    await audit({
-      tenantId,
-      userId,
-      action: 'document_uploaded',
-      resourceType: 'document',
-      resourceId: documentId,
-      metadata: { filename, size, objectKey: key },
-    });
+    if (documentId) {
+      await audit({
+        actorId: userId,
+        action: 'document_uploaded',
+        entityType: 'document',
+        entityId: documentId,
+        details: {
+          tenantId,
+          filename,
+          size,
+          objectKey: key,
+          docType: docType ? docType.toUpperCase() : null,
+        },
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -179,7 +300,7 @@ router.post('/complete', authenticateToken, async (req, res) => {
         filename,
         size_bytes: size,
         verification_status: 'pending',
-        uploaded_at: docResult.rows[0].uploaded_at,
+        uploaded_at: onboardingDocRecord?.uploaded_at || hrDocRecord?.uploaded_at || new Date().toISOString(),
       },
     });
   } catch (error) {

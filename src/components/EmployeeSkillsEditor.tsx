@@ -168,7 +168,7 @@ export default function EmployeeSkillsEditor({ employeeId, canEdit = false }: { 
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {skills.map((s) => (
-              <div key={s.id} className="border rounded p-3 text-sm flex items-center justify-between hover:bg-muted/50 transition-colors">
+              <div key={s.id} className="border rounded p-3 text-sm flex items-center justify-between hover:bg-muted/50 hover-lift transition-colors">
                 <div className="flex-1">
                   <div className="font-medium">{s.name}</div>
                   <div className="text-muted-foreground">

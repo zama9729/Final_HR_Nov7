@@ -250,6 +250,12 @@ export const api = {
     
     createCompensation: (employeeId, data) =>
       client.post(`/api/employees/${employeeId}/compensation`, data),
+    
+    bulkImportSalary: (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return client.upload(`/api/imports/bulk-salary-structure`, formData);
+    },
 
     updateStatus: (employeeId: string, status: string) =>
       client.patch(`/api/employees/${employeeId}/status`, { status }),
@@ -282,6 +288,100 @@ export const api = {
     
     getCyclePayslips: (cycleId) =>
       client.get(`/api/payroll-cycles/${cycleId}/payslips`),
+    
+    getBankTransferPreview: async (cycleId: string) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/payroll-cycles/${cycleId}/export/bank-transfer/preview`, {
+        method: "GET",
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to fetch preview" }));
+        throw new Error(error.error || "Failed to fetch preview");
+      }
+      
+      return response.json();
+    },
+    
+    downloadBankTransferFile: async (cycleId: string) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/payroll-cycles/${cycleId}/export/bank-transfer`, {
+        method: "GET",
+        credentials: "include", // Include cookies for authentication
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to download bank transfer file" }));
+        throw new Error(error.error || "Failed to download bank transfer file");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      
+      // Get filename from Content-Disposition header or use default
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = `Salary_Payout_${cycleId.substring(0, 8)}.xlsx`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    },
+  },
+
+  advanceSalary: {
+    list: (status?: string) => {
+      const params = new URLSearchParams();
+      if (status) {
+        params.set("status", status);
+      }
+      const queryString = params.toString();
+      const endpoint = `/api/advance-salary${queryString ? `?${queryString}` : ""}`;
+      return client.get(endpoint);
+    },
+
+    create: (data: {
+      employee_id: string;
+      amount_mode: 'fixed' | 'months';
+      value: number;
+      tenure_months: number;
+      start_month: string;
+      disbursement_date: string;
+      notes?: string;
+    }) => client.post("/api/advance-salary", data),
+
+    downloadSlip: async (advanceId: string) => {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api/advance-salary/${advanceId}/slip`, {
+        method: "GET",
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Failed to download advance slip" }));
+        throw new Error(error.error || "Failed to download advance slip");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `advance-salary-${advanceId.substring(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    },
+
+    cancel: (advanceId: string) =>
+      client.post(`/api/advance-salary/${advanceId}/cancel`, {}),
   },
   
   payslips: {
@@ -459,6 +559,35 @@ export const api = {
     submit: (formData: FormData) => client.upload("/api/v1/reimbursements/submit", formData),
     myClaims: () => client.get<{ reimbursements: any[] }>("/api/v1/reimbursements/my-claims"),
     pending: () => client.get<{ reimbursements: any[] }>("/api/v1/reimbursements/pending"),
+    pendingCount: () => client.get<{ count: number }>("/api/v1/reimbursements/pending/count"),
+    history: (params?: {
+      status?: string;
+      employee_id?: string;
+      employee_name?: string;
+      from_date?: string;
+      to_date?: string;
+      sort_by?: string;
+      sort_order?: "asc" | "desc";
+    }) => {
+      const queryParams = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && value !== "") {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      const queryString = queryParams.toString();
+      return client.get<{
+        reimbursements: any[];
+        summary: {
+          total_count: number;
+          total_amount: number;
+          paid_amount: number;
+          approved_amount: number;
+        };
+      }>(`/api/v1/reimbursements/history${queryString ? `?${queryString}` : ""}`);
+    },
     approve: (id: string) => client.post(`/api/v1/reimbursements/${id}/approve`, {}),
     reject: (id: string) => client.post(`/api/v1/reimbursements/${id}/reject`, {}),
   },

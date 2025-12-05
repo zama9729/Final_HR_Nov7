@@ -306,6 +306,47 @@ export async function scheduleProbationJobs() {
         }
       }
 
+      // Notify HR when probation ends (today or yesterday)
+      const endedProbations = await query(
+        `
+        SELECT p.*, e.employee_id, e.tenant_id,
+               json_build_object(
+                 'first_name', prof.first_name,
+                 'last_name', prof.last_name
+               ) as employee_profile
+        FROM probations p
+        JOIN employees e ON e.id = p.employee_id
+        JOIN profiles prof ON prof.id = e.user_id
+        WHERE p.status = ANY($1::text[])
+          AND p.probation_end::date >= CURRENT_DATE - INTERVAL '1 day'
+          AND p.probation_end::date <= CURRENT_DATE
+        `,
+        [['in_probation', 'extended']]
+      );
+
+      for (const probation of endedProbations.rows) {
+        // Get HR users for this tenant
+        const hrUsers = await query(
+          `SELECT DISTINCT p.id as user_id
+           FROM profiles p
+           JOIN user_roles ur ON ur.user_id = p.id
+           WHERE p.tenant_id = $1
+             AND ur.role IN ('hr', 'ceo', 'admin', 'director')`,
+          [probation.tenant_id]
+        );
+
+        const employeeName = `${probation.employee_profile?.first_name || ''} ${probation.employee_profile?.last_name || ''}`.trim() || probation.employee_id;
+
+        for (const hr of hrUsers.rows) {
+          await notifyUser(
+            probation.tenant_id,
+            hr.user_id,
+            'Probation Period Ended - Action Required',
+            `Probation period for ${employeeName} (${probation.employee_id}) ended on ${probation.probation_end}. ${probation.auto_confirm_at_end ? 'Auto-confirmed.' : 'Please review and confirm full-time employment.'}`
+          );
+        }
+      }
+
       const autoConfirm = await query(
         `
         SELECT * FROM probations
@@ -342,6 +383,63 @@ export async function scheduleProbationJobs() {
   });
 }
 
-export default { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs };
+// Weekly timesheet submission reminders (default Friday 17:00 Asia/Kolkata)
+export async function scheduleTimesheetReminders() {
+  if (String(process.env.CRON_ENABLED || 'true') !== 'true') return;
+  let cron;
+  try {
+    ({ default: cron } = await import('node-cron'));
+  } catch (e) {
+    console.error('node-cron not installed, skipping timesheet reminder scheduler');
+    return;
+  }
 
+  // Default: every Friday 17:00 Asia/Kolkata (approx 11:30 UTC)
+  const expr = process.env.TIMESHEET_REMINDER_CRON || '30 11 * * 5';
 
+  cron.schedule(expr, async () => {
+    try {
+      const employeesRes = await query(
+        `SELECT e.id, e.user_id, e.tenant_id
+         FROM employees e
+         JOIN profiles p ON p.id = e.user_id
+         WHERE e.status = 'active' AND p.tenant_id IS NOT NULL`
+      );
+
+      const today = new Date();
+      const day = today.getUTCDay(); // use UTC base, we only need week window
+      const diffToMonday = (day + 6) % 7;
+      const weekStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+      weekStart.setUTCDate(weekStart.getUTCDate() - diffToMonday);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+      const weekStartStr = weekStart.toISOString().split('T')[0];
+
+      for (const emp of employeesRes.rows) {
+        const tsRes = await query(
+          `SELECT status
+           FROM timesheets
+           WHERE employee_id = $1
+             AND week_start_date = $2`,
+          [emp.id, weekStartStr]
+        );
+
+        const hasSubmitted = tsRes.rows.some((t) =>
+          ['pending_approval', 'approved'].includes(t.status)
+        );
+        if (hasSubmitted) continue;
+
+        await notifyUser(
+          emp.tenant_id,
+          emp.user_id,
+          'Timesheet reminder',
+          `Please review and submit your timesheet for the week starting ${weekStartStr}.`
+        );
+      }
+    } catch (error) {
+      console.error('Timesheet reminder cron error', error);
+    }
+  });
+}
+
+export default { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders };

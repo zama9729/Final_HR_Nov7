@@ -2,6 +2,8 @@ import express from 'express';
 import { query } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { audit } from '../utils/auditLog.js';
+import { getPresignedGetUrl } from '../services/storage.js';
+import { linkDocumentsToBackgroundCheck } from '../utils/backgroundCheckDocs.js';
 
 const router = express.Router();
 const FEATURE_ENABLED = process.env.TERMINATION_REHIRE_V1 !== 'false';
@@ -242,8 +244,15 @@ router.post('/', authenticateToken, async (req, res) => {
           return res.status(400).json({ error: 'Document does not belong to employee' });
         }
         await query(
-          `INSERT INTO background_check_documents (background_check_id, document_id)
-           VALUES ($1, $2)
+          `INSERT INTO background_check_documents (
+             background_check_id,
+             document_id,
+             onboarding_document_id,
+             is_required,
+             verification_status,
+             decision
+           )
+           VALUES ($1, $2, $2, true, 'PENDING', 'pending')
            ON CONFLICT DO NOTHING`,
           [check.id, doc.id]
         );
@@ -392,6 +401,12 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
     if (!rows.length) {
       return res.status(404).json({ error: 'Background check not found' });
     }
+    const checkRecord = rows[0];
+
+    if (checkRecord?.employee_id) {
+      await linkDocumentsToBackgroundCheck(checkRecord.id, checkRecord.employee_id);
+    }
+
     const events = await query(
       `
       SELECT * FROM background_check_events
@@ -400,16 +415,68 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       `,
       [req.params.id]
     );
-    const attachments = await query(
+    const attachmentResult = await query(
       `
-      SELECT d.id, d.document_type, d.file_name, d.status
+      SELECT 
+        d.id,
+        d.document_type,
+        d.file_name,
+        d.mime_type,
+        d.file_size,
+        d.status AS document_status,
+        d.storage_key,
+        d.file_path,
+        d.uploaded_at,
+        d.hr_notes,
+        COALESCE(bcd.verification_status::text, bcd.decision, d.status::text) AS decision,
+        bcd.notes,
+        bcd.verified_by,
+        bcd.verified_at
       FROM background_check_documents bcd
       JOIN onboarding_documents d ON d.id = bcd.document_id
       WHERE bcd.background_check_id = $1
       `,
       [req.params.id]
     );
-    res.json({ ...rows[0], events: events.rows, attachments: attachments.rows });
+
+    const attachments = await Promise.all(
+      attachmentResult.rows.map(async (doc) => {
+        let downloadUrl = null;
+        const objectKey = doc.storage_key || doc.file_path;
+        if (objectKey) {
+          try {
+            downloadUrl = await getPresignedGetUrl({ objectKey, expiresIn: 300 });
+          } catch (error) {
+            console.warn('Failed to generate download url for document', doc.id, error.message);
+          }
+        }
+
+        return {
+          id: doc.id,
+          document_type: doc.document_type,
+          file_name: doc.file_name,
+          mime_type: doc.mime_type,
+          file_size: doc.file_size,
+          uploaded_at: doc.uploaded_at,
+          status: doc.document_status,
+          decision: doc.decision,
+          notes: doc.notes || doc.hr_notes,
+          verified_by: doc.verified_by,
+          verified_at: doc.verified_at,
+          download_url: downloadUrl,
+        };
+      })
+    );
+
+    if (checkRecord.status === 'pending' && attachments.length > 0) {
+      await query(
+        `UPDATE background_checks SET status = 'in_progress', updated_at = now() WHERE id = $1`,
+        [checkRecord.id]
+      );
+      checkRecord.status = 'in_progress';
+    }
+
+    res.json({ ...checkRecord, events: events.rows, attachments });
   } catch (error) {
     console.error('Error fetching background check report:', error);
     res.status(500).json({ error: 'Failed to fetch report' });

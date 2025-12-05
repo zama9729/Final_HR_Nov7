@@ -124,7 +124,7 @@ export default function OffboardingQueue() {
                 {filteredRequests.map((request) => (
                   <div 
                     key={request.id} 
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 hover-lift transition-colors cursor-pointer"
                     onClick={() => navigate(`/offboarding/${request.id}`)}
                   >
                     <div className="flex-1">

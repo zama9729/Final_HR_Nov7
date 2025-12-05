@@ -13,26 +13,44 @@ import {
 } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Loader2, CalendarDays, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
 // Roles that can view the full organization calendar from the Team Calendar widget.
-// Keep this in sync with the unified calendar page and backend calendar route.
 const privilegedRoles = new Set(['hr', 'ceo', 'director', 'admin', 'manager']);
 
 const EVENT_META: Record<
   string,
   { label: string; color: string; bg: string; dot: string }
 > = {
-  shift: { label: 'Shift', color: 'text-blue-700 dark:text-blue-200', bg: 'bg-blue-50 dark:bg-blue-900/30', dot: 'bg-blue-500 dark:bg-blue-300' },
-  project: { label: 'Project', color: 'text-purple-700 dark:text-purple-200', bg: 'bg-purple-50 dark:bg-purple-900/30', dot: 'bg-purple-500 dark:bg-purple-300' },
-  holiday: { label: 'Holiday', color: 'text-emerald-700 dark:text-emerald-200', bg: 'bg-emerald-50 dark:bg-emerald-900/30', dot: 'bg-emerald-500 dark:bg-emerald-300' },
-  birthday: { label: 'Birthday', color: 'text-amber-700 dark:text-amber-200', bg: 'bg-amber-50 dark:bg-amber-900/30', dot: 'bg-amber-500 dark:bg-amber-300' },
-  leave: { label: 'Leave', color: 'text-rose-700 dark:text-rose-200', bg: 'bg-rose-50 dark:bg-rose-900/30', dot: 'bg-rose-500 dark:bg-rose-300' },
-  announcement: { label: 'Announcement', color: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-800/60', dot: 'bg-slate-500 dark:bg-slate-400' },
+  shift: { label: 'Shift', color: 'text-blue-700', bg: 'bg-blue-50', dot: 'bg-blue-500' },
+  project: { label: 'Project', color: 'text-purple-700', bg: 'bg-purple-50', dot: 'bg-purple-500' },
+  holiday: { label: 'Holiday', color: 'text-emerald-700', bg: 'bg-emerald-50', dot: 'bg-emerald-500' },
+  birthday: { label: 'Birthday', color: 'text-amber-700', bg: 'bg-amber-50', dot: 'bg-amber-500' },
+  leave: { label: 'Leave', color: 'text-rose-700', bg: 'bg-rose-50', dot: 'bg-rose-500' },
+  announcement: { label: 'Announcement', color: 'text-slate-700', bg: 'bg-slate-50', dot: 'bg-slate-500' },
+  team_event: { label: 'Team Event', color: 'text-indigo-700', bg: 'bg-indigo-50', dot: 'bg-indigo-500' },
+  personal: { label: 'Personal', color: 'text-gray-800', bg: 'bg-gray-100', dot: 'bg-gray-700' },
 };
 
 type CalendarEvent = {
@@ -44,6 +62,7 @@ type CalendarEvent = {
   description?: string;
   location?: string;
   shiftSubtype?: 'day' | 'night';
+  isPersonal?: boolean;
 };
 
 function toKey(date: Date) {
@@ -51,12 +70,63 @@ function toKey(date: Date) {
 }
 
 export function CalendarPanel() {
-  const { userRole } = useAuth();
+  const { user, userRole } = useAuth();
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
   const [viewLevel, setViewLevel] = useState<'employee' | 'organization'>('employee');
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [personalEvents, setPersonalEvents] = useState<CalendarEvent[]>([]);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addDate, setAddDate] = useState<string | null>(null);
+  const [addTitle, setAddTitle] = useState('');
+  const [addNotes, setAddNotes] = useState('');
+
+  const normalizeName = (name: string | undefined | null) =>
+    (name || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const selfName = normalizeName(
+    [user?.firstName, user?.lastName].filter(Boolean).join(' '),
+  );
+
+  // Load any saved personal notes/tasks for this user
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const raw = localStorage.getItem(`teamCalendarPersonal:${user.id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as CalendarEvent[];
+        setPersonalEvents(
+          Array.isArray(parsed)
+            ? parsed.map((evt) => ({ ...evt, type: 'personal', isPersonal: true }))
+            : [],
+        );
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }, [user?.id]);
+
+  // Persist personal events
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const payload = personalEvents.map(({ id, date, title, description }) => ({
+        id,
+        date,
+        title,
+        description,
+        type: 'personal',
+        isPersonal: true,
+      }));
+      localStorage.setItem(`teamCalendarPersonal:${user.id}`, JSON.stringify(payload));
+    } catch {
+      // ignore storage errors
+    }
+  }, [personalEvents, user?.id]);
 
   useEffect(() => {
     if (!privilegedRoles.has(userRole || '') && viewLevel !== 'employee') {
@@ -93,7 +163,9 @@ export function CalendarPanel() {
                       ? 'birthday'
                       : resourceType === 'leave'
                         ? 'leave'
-                        : 'announcement';
+                        : resourceType === 'team_event'
+                          ? 'team_event'
+                          : 'announcement';
 
             const rawISO =
               (typeof event?.resource?.shift_date === 'string' && event.resource.shift_date) ||
@@ -112,17 +184,50 @@ export function CalendarPanel() {
                 dateOnly = format(parsed, 'yyyy-MM-dd');
               }
             } catch {
-              // fallback to string split
               dateOnly = rawISO.split('T')[0] || rawISO;
             }
             if (!dateOnly) {
               dateOnly = rawISO.split('T')[0] || rawISO;
             }
 
-            const time =
-              event?.resource?.start_time && event?.resource?.end_time
-                ? `${event.resource.start_time} - ${event.resource.end_time}`
+            // Derive a human-readable time range if available.
+            let startTime: string | undefined =
+              typeof event?.resource?.start_time === 'string' && event.resource.start_time
+                ? event.resource.start_time
                 : undefined;
+            let endTime: string | undefined =
+              typeof event?.resource?.end_time === 'string' && event.resource.end_time
+                ? event.resource.end_time
+                : undefined;
+
+            // Fallback: try to parse from start/end timestamps if explicit time fields aren't present.
+            if (!startTime && typeof event?.start === 'string') {
+              try {
+                const d = new Date(event.start);
+                if (!isNaN(d.getTime())) {
+                  startTime = format(d, 'HH:mm');
+                }
+              } catch {
+                // ignore parse errors
+              }
+            }
+            if (!endTime && typeof event?.end === 'string') {
+              try {
+                const d = new Date(event.end);
+                if (!isNaN(d.getTime())) {
+                  endTime = format(d, 'HH:mm');
+                }
+              } catch {
+                // ignore parse errors
+              }
+            }
+
+            const time =
+              startTime && endTime
+                ? `${startTime} - ${endTime}`
+                : startTime
+                  ? startTime
+                  : undefined;
 
             const shiftSubtype: CalendarEvent['shiftSubtype'] =
               normalizedType === 'shift'
@@ -131,13 +236,34 @@ export function CalendarPanel() {
                   : 'day'
                 : undefined;
 
+            const employeeNameFromResource =
+              typeof event?.resource?.employee_name === 'string'
+                ? event.resource.employee_name
+                : undefined;
+
+            const isSelfBirthdayEvent =
+              normalizedType === 'birthday' &&
+              !!selfName &&
+              normalizeName(employeeNameFromResource) === selfName;
+
+            const title =
+              isSelfBirthdayEvent
+                ? 'Your birthday'
+                : event.title || event?.resource?.template_name || 'Event';
+
+            const description = isSelfBirthdayEvent
+              ? undefined
+              : employeeNameFromResource ||
+                event?.resource?.project_name ||
+                event?.resource?.name;
+
             return {
               id: event.id || `event-${idx}`,
               type: normalizedType,
-              title: event.title || event?.resource?.template_name || 'Event',
+              title,
               date: dateOnly,
               time,
-              description: event?.resource?.employee_name || event?.resource?.project_name || event?.resource?.name,
+              description,
               shiftSubtype,
             } as CalendarEvent;
           })
@@ -188,7 +314,7 @@ export function CalendarPanel() {
     return () => {
       isMounted = false;
     };
-  }, [currentMonth, viewLevel]);
+  }, [currentMonth, viewLevel, userRole]);
 
   const monthMatrix = useMemo(() => {
     const start = startOfWeek(startOfMonth(currentMonth), { weekStartsOn: 1 });
@@ -204,152 +330,275 @@ export function CalendarPanel() {
   }, [currentMonth]);
 
   const eventsByDate = useMemo(() => {
-    return events.reduce<Record<string, CalendarEvent[]>>((acc, event) => {
+    const allEvents = [...events, ...personalEvents];
+    return allEvents.reduce<Record<string, CalendarEvent[]>>((acc, event) => {
       const key = event.date;
       if (!acc[key]) acc[key] = [];
       acc[key].push(event);
       return acc;
     }, {});
-  }, [events]);
+  }, [events, personalEvents]);
+
+  const openAddForDate = (date: Date) => {
+    if (viewLevel !== 'employee') return;
+    const key = toKey(date);
+    setAddDate(key);
+    setAddTitle('');
+    setAddNotes('');
+    setAddDialogOpen(true);
+  };
+
+  const handleSavePersonal = () => {
+    if (!addDate || !addTitle.trim()) {
+      setError('Please add a title for your note or task.');
+      return;
+    }
+    const newEvent: CalendarEvent = {
+      id: `personal-${addDate}-${Date.now()}`,
+      type: 'personal',
+      title: addTitle.trim(),
+      date: addDate,
+      description: addNotes || undefined,
+      isPersonal: true,
+    };
+    setPersonalEvents((prev) => [...prev, newEvent]);
+    setAddDialogOpen(false);
+    setAddTitle('');
+    setAddNotes('');
+    setError(null);
+  };
 
   return (
-    <Card className="border border-slate-100 dark:border-slate-800 shadow-md bg-white/90 dark:bg-slate-900/80 backdrop-blur">
-      <CardHeader className="flex flex-col gap-4 border-b border-slate-100 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-xl font-semibold text-slate-900 dark:text-slate-100">
-            <CalendarDays className="h-5 w-5 text-blue-500 dark:text-blue-300" />
-            Team Calendar
-          </CardTitle>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Shifts, projects, holidays, birthdays, and announcements in one glance.
-          </p>
-        </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <ToggleGroup
-            type="single"
-            value={viewLevel}
-            onValueChange={(val) => val && setViewLevel(val as 'employee' | 'organization')}
-            className="rounded-full border border-slate-200 bg-slate-50 px-1 dark:bg-slate-800 dark:border-slate-700"
-          >
-            <ToggleGroupItem
-              value="employee"
-              className="rounded-full px-4 text-sm data-[state=on]:bg-white data-[state=on]:text-blue-600"
-            >
-              My calendar
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              value="organization"
-              disabled={!privilegedRoles.has(userRole || '')}
-              className="rounded-full px-4 text-sm data-[state=on]:bg-white data-[state=on]:text-blue-600 disabled:opacity-40"
-            >
-              Organization
-            </ToggleGroupItem>
-          </ToggleGroup>
-          <div className="flex items-center gap-2 rounded-full bg-white dark:bg-slate-800 px-3 py-2 shadow-sm dark:border dark:border-slate-700">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-              className="h-8 w-8 rounded-full"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{format(currentMonth, 'MMMM yyyy')}</div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-              className="h-8 w-8 rounded-full"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setCurrentMonth(startOfMonth(new Date()))}
-              className="ml-2 rounded-full bg-blue-50 text-xs font-semibold text-blue-600 hover:bg-blue-100"
-            >
-              Today
-            </Button>
+    <TooltipProvider>
+      <Card className="glass-card rounded-xl border border-gray-200 shadow-sm">
+        <CardHeader className="flex flex-col gap-4 border-b border-gray-100 lg:flex-row lg:items-center lg:justify-between pb-4">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-xl font-bold text-gray-900">
+              <CalendarDays className="h-5 w-5 text-gray-700" />
+              Team Calendar
+            </CardTitle>
+            <p className="mt-1 text-sm text-gray-600">
+              Shifts, projects, holidays, birthdays, and announcements in one glance.
+            </p>
           </div>
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <div className="grid grid-cols-7 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/40 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-            <div key={day} className="px-4 py-3 text-center">
-              {day}
-            </div>
-          ))}
-        </div>
-        <div className="grid grid-cols-7 gap-px bg-slate-100 dark:bg-slate-800">
-          {monthMatrix.map((day) => {
-            const key = toKey(day);
-            const dayEvents = eventsByDate[key] || [];
-            return (
-              <div
-                key={key}
-                className={`min-h-[120px] bg-white dark:bg-slate-900 p-2 transition hover:bg-slate-50 dark:hover:bg-slate-800 ${
-                  !isSameMonth(day, currentMonth) ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-slate-100'
-                }`}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            {privilegedRoles.has(userRole || '') ? (
+              <ToggleGroup
+                type="single"
+                value={viewLevel}
+                onValueChange={(val) => val && setViewLevel(val as 'employee' | 'organization')}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold">{format(day, 'd')}</span>
-                  {isToday(day) && (
-                    <Badge className="rounded-full bg-blue-50 dark:bg-blue-500/20 px-2 text-[10px] font-semibold uppercase text-blue-600 dark:text-blue-200">
-                      Today
-                    </Badge>
-                  )}
-                </div>
-                <div className="mt-2 flex flex-col gap-1">
-                  {dayEvents.length === 0 && (
-                    <span className="text-xs font-medium text-slate-300 dark:text-slate-500">Week Off</span>
-                  )}
-                  {dayEvents.slice(0, 3).map((event) => {
-                    const styles =
-                      event.type === 'shift' && event.shiftSubtype === 'night'
-                        ? { bg: 'bg-sky-50 dark:bg-sky-500/20', color: 'text-sky-700 dark:text-sky-100', dot: 'bg-sky-500 dark:bg-sky-300' }
-                        : event.type === 'shift' && event.shiftSubtype === 'day'
-                          ? { bg: 'bg-rose-50 dark:bg-rose-500/20', color: 'text-rose-700 dark:text-rose-100', dot: 'bg-rose-500 dark:bg-rose-300' }
-                          : EVENT_META[event.type] || EVENT_META.announcement;
-                    return (
-                      <div
-                        key={event.id}
-                        className={`${styles.bg} ${styles.color} flex items-center gap-2 rounded-lg px-2 py-1 text-xs`}
-                      >
-                        <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
-                        <div className="flex flex-col">
-                          <span className="font-semibold">{event.title}</span>
-                          {event.time && <span className="text-[10px] text-slate-500">{event.time}</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {dayEvents.length > 3 && (
-                    <span className="text-[11px] font-medium text-blue-600 dark:text-blue-300">
-                      +{dayEvents.length - 3} more
-                    </span>
-                  )}
-                </div>
+                <ToggleGroupItem
+                  value="employee"
+                  className="rounded-md px-4 text-sm font-medium data-[state=on]:liquid-glass-nav-item-active data-[state=on]:text-gray-900"
+                >
+                  My calendar
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="organization"
+                  className="rounded-md px-4 text-sm font-medium data-[state=on]:liquid-glass-nav-item-active data-[state=on]:text-gray-900"
+                >
+                  Organization
+                </ToggleGroupItem>
+              </ToggleGroup>
+            ) : (
+              <div className="text-sm font-medium text-gray-700 px-4 py-2">
+                My calendar
               </div>
-            );
-          })}
-        </div>
-        {loading && (
-          <div className="flex items-center justify-center gap-2 border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-sm text-slate-500 dark:text-slate-300">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading events…
+            )}
+            <div className="flex items-center gap-2 rounded-lg bg-white border border-gray-200 px-3 py-2 shadow-sm">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+                className="h-8 w-8 rounded-md hover:bg-gray-100"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <div className="text-sm font-bold text-gray-900 min-w-[120px] text-center">{format(currentMonth, 'MMMM yyyy')}</div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+                className="h-8 w-8 rounded-md hover:bg-gray-100"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setCurrentMonth(startOfMonth(new Date()))}
+                className="ml-2"
+              >
+                Today
+              </Button>
+            </div>
           </div>
-        )}
-        {error && (
-          <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-sm text-rose-600 dark:text-rose-400">
-            {error}
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50 text-xs font-bold uppercase tracking-wide text-gray-600">
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+              <div key={day} className="px-3 py-3 text-center">
+                {day}
+              </div>
+            ))}
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <div className="grid grid-cols-7 gap-px bg-gray-100">
+            {monthMatrix.map((day) => {
+              const key = toKey(day);
+              const dayEvents = eventsByDate[key] || [];
+              const visibleEvents = dayEvents.slice(0, 3);
+              const hiddenEvents = dayEvents.slice(3);
+              const isCurrentMonth = isSameMonth(day, currentMonth);
+              
+              return (
+                <div
+                  key={key}
+                  className={`min-h-[140px] bg-white p-2.5 transition hover:bg-gray-50 ${
+                    !isCurrentMonth ? 'text-gray-300' : 'text-gray-900'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-sm font-bold ${isToday(day) ? 'text-gray-900' : ''}`}>
+                      {format(day, 'd')}
+                    </span>
+                    {isToday(day) && (
+                      <Badge className="rounded-full bg-gray-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                        Today
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {visibleEvents.map((event) => {
+                      const styles = EVENT_META[event.type] || EVENT_META.announcement;
+                      return (
+                        <Tooltip key={event.id}>
+                          <TooltipTrigger asChild>
+                            <div
+                              className={`${styles.bg} ${styles.color} flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs cursor-pointer hover:opacity-90 transition-opacity`}
+                            >
+                              <span className={`h-2 w-2 rounded-full ${styles.dot} flex-shrink-0`} />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold truncate">{event.title}</div>
+                                {event.time && (
+                                  <div className="text-[10px] text-gray-600 mt-0.5">{event.time}</div>
+                                )}
+                                {event.description && (
+                                  <div className="text-[10px] text-gray-500 truncate mt-0.5">{event.description}</div>
+                                )}
+                              </div>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            <div className="space-y-1">
+                              <p className="font-semibold">{event.title}</p>
+                              {event.time && <p className="text-xs text-gray-400">Time: {event.time}</p>}
+                              {event.description && <p className="text-xs text-gray-400">{event.description}</p>}
+                              {event.location && <p className="text-xs text-gray-400">Location: {event.location}</p>}
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                    {hiddenEvents.length > 0 && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="text-[11px] font-semibold text-gray-700 hover:text-gray-900 cursor-pointer py-1 px-2 rounded-md hover:bg-gray-100 transition-colors">
+                            +{hiddenEvents.length} more
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-sm">
+                          <div className="space-y-2">
+                            <p className="font-semibold text-sm mb-2">Additional Events ({hiddenEvents.length})</p>
+                            {hiddenEvents.map((event) => {
+                              const styles = EVENT_META[event.type] || EVENT_META.announcement;
+                              return (
+                                <div key={event.id} className="space-y-1 border-b border-gray-200 last:border-0 pb-2 last:pb-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
+                                    <p className="font-semibold text-sm">{event.title}</p>
+                                  </div>
+                                  {event.time && <p className="text-xs text-gray-400 ml-4">Time: {event.time}</p>}
+                                  {event.description && <p className="text-xs text-gray-400 ml-4">{event.description}</p>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                    {viewLevel === 'employee' && (
+                      <button
+                        type="button"
+                        onClick={() => openAddForDate(day)}
+                        className="mt-1 inline-flex items-center justify-center rounded-full border border-dashed border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:border-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                      >
+                        <Plus className="mr-1 h-3 w-3" />
+                        Add
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {loading && (
+            <div className="flex items-center justify-center gap-2 border-t border-gray-200 px-4 py-4 text-sm text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading events…
+            </div>
+          )}
+          {error && (
+            <div className="border-t border-gray-200 px-4 py-4 text-sm text-rose-600">
+              {error}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add to My calendar</DialogTitle>
+            <DialogDescription>
+              Create a private note, task, or event for your own Team Calendar. Only you will see this entry.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 px-1 py-2">
+            {addDate && (
+              <p className="text-xs text-gray-500">
+                Date: <span className="font-medium">{addDate}</span>
+              </p>
+            )}
+            <div className="space-y-1">
+              <Label htmlFor="personal-title">Title</Label>
+              <Input
+                id="personal-title"
+                value={addTitle}
+                onChange={(e) => setAddTitle(e.target.value)}
+                placeholder="e.g. 1:1 with manager, prepare deck, follow-ups"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="personal-notes">Notes (optional)</Label>
+              <Textarea
+                id="personal-notes"
+                value={addNotes}
+                onChange={(e) => setAddNotes(e.target.value)}
+                rows={3}
+                placeholder="Add details, checklist items, or meeting links…"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSavePersonal}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </TooltipProvider>
   );
 }
 
 export default CalendarPanel;
-

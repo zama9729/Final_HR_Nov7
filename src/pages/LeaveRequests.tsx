@@ -52,6 +52,11 @@ export default function LeaveRequests() {
   const [teamRequests, setTeamRequests] = useState<LeaveRequest[]>([]);
   const [approvedRequests, setApprovedRequests] = useState<LeaveRequest[]>([]);
   const [policies, setPolicies] = useState<LeavePolicy[]>([]);
+  const [leaveBalance, setLeaveBalance] = useState<{
+    total: number;
+    used: number;
+    remaining: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedPolicyId, setSelectedPolicyId] = useState<string>("");
@@ -84,6 +89,21 @@ export default function LeaveRequests() {
       setMyRequests(requestsData.myRequests || []);
       setTeamRequests(requestsData.teamRequests || []);
       setApprovedRequests(requestsData.approvedRequests || []);
+
+      // Fetch leave balance for real-time view
+      try {
+        const balance = await api.getLeaveBalance();
+        const remaining = balance.leaveBalance || 0;
+        const used = balance.approvedLeaves || 0;
+        const total = balance.totalLeaves || remaining + used;
+        setLeaveBalance({
+          total,
+          used,
+          remaining: Math.max(0, remaining),
+        });
+      } catch (error) {
+        console.error("Error fetching leave balance for leave page:", error);
+      }
     } catch (error: any) {
       console.error("Error fetching leave requests:", error);
       toast({
@@ -170,9 +190,31 @@ export default function LeaveRequests() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Leave Requests</h1>
-          <p className="text-muted-foreground">Manage leave applications and approvals</p>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Leave Requests</h1>
+            <p className="text-muted-foreground">Manage leave applications and approvals</p>
+          </div>
+          {leaveBalance && (
+            <Card className="min-w-[260px]">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold">My Leave Balance</CardTitle>
+                <CardDescription>Real-time approved leave usage</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-baseline justify-between">
+                  <div>
+                    <p className="text-2xl font-bold">
+                      {leaveBalance.remaining} <span className="text-sm font-normal text-muted-foreground">days remaining</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {leaveBalance.used} used · {leaveBalance.total} total
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <Tabs defaultValue={userRole && ["manager", "hr", "director", "ceo"].includes(userRole) ? "pending" : "my-requests"}>
@@ -202,7 +244,7 @@ export default function LeaveRequests() {
                     teamRequests.map((request) => (
                       <div
                         key={request.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 hover-lift transition-colors"
                       >
                         <div className="flex items-center gap-4">
                           <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -260,7 +302,7 @@ export default function LeaveRequests() {
                     approvedRequests.map((request) => (
                       <div
                         key={request.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 hover-lift transition-colors"
                       >
                         <div className="flex items-center gap-4">
                           <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
@@ -309,6 +351,9 @@ export default function LeaveRequests() {
                     <DialogContent>
                       <DialogHeader>
                         <DialogTitle>Submit Leave Request</DialogTitle>
+                        <CardDescription>
+                          Select your leave type and dates. Approved requests will immediately update your leave balance.
+                        </CardDescription>
                       </DialogHeader>
                       <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
