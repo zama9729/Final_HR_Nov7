@@ -24,3 +24,4 @@ CREATE INDEX IF NOT EXISTS idx_team_schedule_events_employee ON team_schedule_ev
 CREATE INDEX IF NOT EXISTS idx_team_schedule_events_date ON team_schedule_events(start_date, end_date);
 
 
+
