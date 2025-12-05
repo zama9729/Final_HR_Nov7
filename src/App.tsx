@@ -30,6 +30,7 @@ import Workflows from "./pages/Workflows";
 import WorkflowEditor from "./pages/WorkflowEditor";
 import Timesheets from "./pages/Timesheets";
 import TimesheetApprovals from "./pages/TimesheetApprovals";
+import TimesheetGenerator from "./pages/TimesheetGenerator";
 import Analytics from "./pages/Analytics";
 import AttendanceAnalytics from "./pages/AttendanceAnalytics";
 import AttendanceUpload from "./pages/AttendanceUpload";
@@ -188,6 +189,7 @@ const App = () => (
             {/* Common routes */}
             <Route path="/timesheets" element={<ProtectedRoute><Timesheets /></ProtectedRoute>} />
             <Route path="/timesheet-approvals" element={<ProtectedRoute allowedRoles={['manager', 'hr', 'director', 'ceo', 'admin']}><TimesheetApprovals /></ProtectedRoute>} />
+            <Route path="/timesheet-generator/:employeeId?" element={<ProtectedRoute><TimesheetGenerator /></ProtectedRoute>} />
             <Route path="/leaves" element={<ProtectedRoute><LeaveRequests /></ProtectedRoute>} />
             <Route path="/org-chart" element={<ProtectedRoute><OrgChart /></ProtectedRoute>} />
             <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />

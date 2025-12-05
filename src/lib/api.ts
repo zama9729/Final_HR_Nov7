@@ -69,6 +69,36 @@ class ApiClient {
     }
   }
 
+  // Convenience methods
+  async get(endpoint: string) {
+    return this.request(endpoint, { method: 'GET' });
+  }
+
+  async post(endpoint: string, data?: any) {
+    return this.request(endpoint, {
+      method: 'POST',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async put(endpoint: string, data?: any) {
+    return this.request(endpoint, {
+      method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async patch(endpoint: string, data?: any) {
+    return this.request(endpoint, {
+      method: 'PATCH',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async delete(endpoint: string) {
+    return this.request(endpoint, { method: 'DELETE' });
+  }
+
   private async ragRequest(endpoint: string, options: RequestInit = {}, isFormData = false) {
     const url = `${RAG_API_URL}${endpoint}`;
     const headers: HeadersInit = {
@@ -1115,6 +1145,32 @@ class ApiClient {
     return this.request('/api/team-schedule/events', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  async getPersonalCalendarEvents(params?: { start_date?: string; end_date?: string }) {
+    const suffix = params && (params.start_date || params.end_date)
+      ? `?${new URLSearchParams(params as any).toString()}`
+      : '';
+    return this.request(`/api/personal-calendar-events${suffix}`);
+  }
+
+  async createPersonalCalendarEvent(data: {
+    title: string;
+    description?: string;
+    event_date: string;
+    start_time?: string;
+    end_time?: string;
+  }) {
+    return this.request('/api/personal-calendar-events', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePersonalCalendarEvent(id: string) {
+    return this.request(`/api/personal-calendar-events/${id}`, {
+      method: 'DELETE',
     });
   }
 

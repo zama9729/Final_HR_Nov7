@@ -319,8 +319,7 @@ export function TopNavBar() {
 
             <NavLink
               to="/dashboard"
-              className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center relative group"
-              title={organization?.name || "Dashboard"}
+              className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center relative"
             >
               {organization?.logo_url ? (
                 <img
@@ -332,13 +331,6 @@ export function TopNavBar() {
                 <span className="px-2 text-base font-semibold bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
                   {getLogoText()}
                 </span>
-              )}
-              {/* Tooltip on hover */}
-              {organization?.name && (
-                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50 shadow-lg">
-                  {organization.name}
-                  <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900"></div>
-                </div>
               )}
             </NavLink>
           </div>

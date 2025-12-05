@@ -57,6 +57,7 @@ import reimbursementRunRoutes from './routes/reimbursement-runs.js';
 import reportsRoutes from './routes/reports.js';
 import announcementsRoutes from './routes/announcements.js';
 import teamScheduleEventsRoutes from './routes/team-schedule-events.js';
+import personalCalendarEventsRoutes from './routes/personal-calendar-events.js';
 import setupRoutes from './routes/setup.js';
 import branchesRoutes from './routes/branches.js';
 import superRoutes from './routes/super.js';
@@ -211,11 +212,12 @@ app.use('/api', authenticateToken, setTenantContext, employeeHistoryRoutes);
 // Payroll SSO integration (separate from payroll routes)
 app.use('/api/payroll/sso', payrollSsoRoutes);
 app.use('/api/tax/declarations', taxDeclarationsRoutes);
-app.use('/api/v1/reimbursements', reimbursementRoutes);
-app.use('/api/v1/reimbursement-runs', reimbursementRunRoutes);
+app.use('/api/v1/reimbursements', authenticateToken, setTenantContext, reimbursementRoutes);
+app.use('/api/v1/reimbursement-runs', authenticateToken, setTenantContext, reimbursementRunRoutes);
 app.use('/api/reports', authenticateToken, reportsRoutes);
 app.use('/api/announcements', authenticateToken, announcementsRoutes);
 app.use('/api/team-schedule/events', teamScheduleEventsRoutes);
+app.use('/api/personal-calendar-events', authenticateToken, setTenantContext, personalCalendarEventsRoutes);
 
 // Tenant info endpoint for payroll service compatibility
 app.get('/api/tenant', authenticateToken, async (req, res) => {

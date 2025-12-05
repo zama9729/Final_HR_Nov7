@@ -9,6 +9,8 @@ import {
   parseMonthInput,
   normalizeCoordinate,
 } from '../services/timesheet-clock.js';
+import ExcelJS from 'exceljs';
+import { getTenantIdForUser } from '../utils/tenant.js';
 
 // Helper function to auto-persist holiday entries
 async function persistHolidayEntries(timesheetId, orgId, employee, month, existingEntries) {
@@ -1165,6 +1167,784 @@ router.post('/:id/approve', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error approving/rejecting timesheet:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Timesheet Excel Export
+// GET /api/timesheets/:employeeId/export?month=YYYY-MM
+router.get('/:employeeId/export', authenticateToken, async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { month } = req.query;
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM' });
+    }
+
+    const [year, monthNum] = month.split('-').map(Number);
+    const monthStart = new Date(year, monthNum - 1, 1);
+    const monthEnd = new Date(year, monthNum, 0); // Last day of month
+    const monthStartStr = monthStart.toISOString().split('T')[0];
+    const monthEndStr = monthEnd.toISOString().split('T')[0];
+    
+    // Month names array (declare once at top of function)
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                       'July', 'August', 'September', 'October', 'November', 'December'];
+
+    // Get tenant ID
+    const tenantId = await getTenantIdForUser(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Check permissions: employee can export own, managers/HR/CEO can export team
+    // Fetch user role from database
+    const roleResult = await query(
+      `SELECT role FROM user_roles WHERE user_id = $1
+       ORDER BY CASE role
+         WHEN 'admin' THEN 0
+         WHEN 'ceo' THEN 1
+         WHEN 'director' THEN 2
+         WHEN 'hr' THEN 3
+         WHEN 'manager' THEN 4
+         WHEN 'employee' THEN 5
+         ELSE 6
+       END
+       LIMIT 1`,
+      [req.user.id]
+    );
+    const userRole = roleResult.rows[0]?.role || 'employee';
+    const isPrivileged = ['hr', 'director', 'ceo', 'admin', 'manager'].includes(userRole);
+    
+    // Verify employee exists and get their data
+    const empResult = await query(
+      `SELECT e.id, e.employee_id, e.tenant_id, e.user_id,
+              p.first_name, p.last_name, p.email,
+              od.date_of_birth
+       FROM employees e
+       JOIN profiles p ON p.id = e.user_id
+       LEFT JOIN onboarding_data od ON od.employee_id = e.id
+       WHERE e.id = $1 AND e.tenant_id = $2`,
+      [employeeId, tenantId]
+    );
+
+    if (empResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const employee = empResult.rows[0];
+
+    // Permission check: if not privileged, must be viewing own data
+    if (!isPrivileged && employee.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'You can only export your own timesheet' });
+    }
+
+    // Get employee's active project (primary project for the month)
+    // Try project_allocations first, then fallback to assignments table
+    let projectResult = await query(
+      `SELECT p.id, p.name, p.code
+       FROM project_allocations pa
+       JOIN projects p ON p.id = pa.project_id
+       WHERE pa.employee_id = $1
+         AND pa.org_id = $2
+         AND (pa.start_date IS NULL OR pa.start_date <= $3::date)
+         AND (pa.end_date IS NULL OR pa.end_date >= $4::date)
+       ORDER BY pa.start_date DESC NULLS LAST
+       LIMIT 1`,
+      [employeeId, tenantId, monthEndStr, monthStartStr]
+    );
+    
+    // Fallback to assignments table if no project_allocations found
+    if (projectResult.rows.length === 0) {
+      projectResult = await query(
+        `SELECT p.id, p.name, p.code
+         FROM assignments a
+         JOIN projects p ON p.id = a.project_id
+         WHERE a.employee_id = $1
+           AND p.org_id = $2
+           AND (a.start_date IS NULL OR a.start_date <= $3::date)
+           AND (a.end_date IS NULL OR a.end_date >= $4::date)
+         ORDER BY a.start_date DESC NULLS LAST
+         LIMIT 1`,
+        [employeeId, tenantId, monthEndStr, monthStartStr]
+      );
+    }
+    
+    const project = projectResult.rows[0] || { name: 'N/A', code: 'N/A' };
+
+    // Get attendance/clock data for the month
+    const attendanceResult = await query(
+      `SELECT 
+         DATE(clock_in_at) as work_date,
+         MIN(clock_in_at::time)::text as login_time,
+         MAX(clock_out_at::time)::text as logout_time
+       FROM clock_punch_sessions
+       WHERE employee_id = $1
+         AND tenant_id = $2
+         AND DATE(clock_in_at) >= $3::date
+         AND DATE(clock_in_at) <= $4::date
+         AND clock_out_at IS NOT NULL
+       GROUP BY DATE(clock_in_at)
+       ORDER BY work_date`,
+      [employeeId, tenantId, monthStartStr, monthEndStr]
+    );
+
+    // Also check check_in_check_outs table
+    const checkInOutResult = await query(
+      `SELECT 
+         work_date,
+         MIN(check_in_time::time)::text as login_time,
+         MAX(check_out_time::time)::text as logout_time
+       FROM check_in_check_outs
+       WHERE employee_id = $1
+         AND tenant_id = $2
+         AND work_date >= $3::date
+         AND work_date <= $4::date
+         AND check_out_time IS NOT NULL
+       GROUP BY work_date
+       ORDER BY work_date`,
+      [employeeId, tenantId, monthStartStr, monthEndStr]
+    );
+
+    // Merge attendance data
+    const attendanceMap = new Map();
+    [...attendanceResult.rows, ...checkInOutResult.rows].forEach(row => {
+      const date = row.work_date instanceof Date 
+        ? row.work_date.toISOString().split('T')[0] 
+        : String(row.work_date).split('T')[0];
+      if (!attendanceMap.has(date)) {
+        attendanceMap.set(date, { login: null, logout: null });
+      }
+      const existing = attendanceMap.get(date);
+      if (row.login_time && (!existing.login || row.login_time < existing.login)) {
+        existing.login = row.login_time;
+      }
+      if (row.logout_time && (!existing.logout || row.logout_time > existing.logout)) {
+        existing.logout = row.logout_time;
+      }
+    });
+
+    // Get calendar events/tasks for the month from multiple sources
+    const eventsByDate = new Map();
+
+    // 1. Get team_schedule_events (team calendar events)
+    try {
+      const teamEventsResult = await query(
+        `SELECT 
+           start_date,
+           start_time,
+           end_time,
+           title,
+           notes
+         FROM team_schedule_events
+         WHERE employee_id = $1
+           AND tenant_id = $2
+           AND start_date >= $3::date
+           AND start_date <= $4::date
+         ORDER BY start_date, start_time NULLS LAST`,
+        [employeeId, tenantId, monthStartStr, monthEndStr]
+      );
+
+      teamEventsResult.rows.forEach(event => {
+        const date = event.start_date instanceof Date 
+          ? event.start_date.toISOString().split('T')[0] 
+          : String(event.start_date).split('T')[0];
+        if (!eventsByDate.has(date)) {
+          eventsByDate.set(date, []);
+        }
+        const timeStr = event.start_time && event.end_time 
+          ? `${event.start_time.substring(0, 5)}-${event.end_time.substring(0, 5)}`
+          : event.start_time 
+          ? event.start_time.substring(0, 5)
+          : '';
+        let taskText = timeStr ? `${event.title} (${timeStr})` : event.title;
+        // Include notes/description if available
+        if (event.notes) {
+          taskText += ` - ${event.notes}`;
+        }
+        eventsByDate.get(date).push(taskText);
+      });
+    } catch (error) {
+      console.warn('team_schedule_events table not available:', error.message);
+    }
+
+    // 1b. Get personal calendar events (from "Add to My calendar")
+    try {
+      const personalEventsResult = await query(
+        `SELECT 
+           event_date,
+           start_time,
+           end_time,
+           title,
+           description
+         FROM personal_calendar_events
+         WHERE employee_id = $1
+           AND tenant_id = $2
+           AND event_date >= $3::date
+           AND event_date <= $4::date
+         ORDER BY event_date, start_time NULLS LAST`,
+        [employeeId, tenantId, monthStartStr, monthEndStr]
+      );
+
+      personalEventsResult.rows.forEach(event => {
+        const date = event.event_date instanceof Date 
+          ? event.event_date.toISOString().split('T')[0] 
+          : String(event.event_date).split('T')[0];
+        if (!eventsByDate.has(date)) {
+          eventsByDate.set(date, []);
+        }
+        const timeStr = event.start_time && event.end_time 
+          ? `${event.start_time.substring(0, 5)}-${event.end_time.substring(0, 5)}`
+          : event.start_time 
+          ? event.start_time.substring(0, 5)
+          : '';
+        let taskText = timeStr ? `${event.title} (${timeStr})` : event.title;
+        // Include description/notes if available
+        if (event.description) {
+          taskText += ` - ${event.description}`;
+        }
+        eventsByDate.get(date).push(taskText);
+      });
+    } catch (error) {
+      // Try to create table if it doesn't exist
+      try {
+        await query(`
+          CREATE TABLE IF NOT EXISTS personal_calendar_events (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            tenant_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            description TEXT,
+            event_date DATE NOT NULL,
+            start_time TIME,
+            end_time TIME,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          );
+        `);
+        // Retry query after creating table
+        const retryResult = await query(
+          `SELECT event_date, start_time, end_time, title, description
+           FROM personal_calendar_events
+           WHERE employee_id = $1 AND tenant_id = $2
+             AND event_date >= $3::date AND event_date <= $4::date
+           ORDER BY event_date, start_time NULLS LAST`,
+          [employeeId, tenantId, monthStartStr, monthEndStr]
+        );
+        retryResult.rows.forEach(event => {
+          const date = event.event_date instanceof Date 
+            ? event.event_date.toISOString().split('T')[0] 
+            : String(event.event_date).split('T')[0];
+          if (!eventsByDate.has(date)) {
+            eventsByDate.set(date, []);
+          }
+          const timeStr = event.start_time && event.end_time 
+            ? `${event.start_time.substring(0, 5)}-${event.end_time.substring(0, 5)}`
+            : event.start_time 
+            ? event.start_time.substring(0, 5)
+            : '';
+          let taskText = timeStr ? `${event.title} (${timeStr})` : event.title;
+          if (event.description) {
+            taskText += ` - ${event.description}`;
+          }
+          eventsByDate.get(date).push(taskText);
+        });
+      } catch (retryError) {
+        console.error('Error creating/fetching personal_calendar_events:', retryError.message);
+      }
+    }
+
+    // 2. Get schedule assignments (shifts) for the employee
+    try {
+      const shiftsResult = await query(
+        `SELECT 
+           sa.shift_date,
+           sa.start_time,
+           sa.end_time,
+           t.name as template_name,
+           t.shift_type
+         FROM schedule_assignments sa
+         JOIN shift_templates t ON t.id = sa.shift_template_id
+         JOIN generated_schedules gs ON gs.id = sa.schedule_id
+         WHERE sa.employee_id = $1
+           AND sa.tenant_id = $2
+           AND sa.shift_date >= $3::date
+           AND sa.shift_date <= $4::date
+           AND gs.status NOT IN ('archived', 'rejected')
+         ORDER BY sa.shift_date, sa.start_time`,
+        [employeeId, tenantId, monthStartStr, monthEndStr]
+      );
+
+      shiftsResult.rows.forEach(shift => {
+        const date = shift.shift_date instanceof Date 
+          ? shift.shift_date.toISOString().split('T')[0] 
+          : String(shift.shift_date).split('T')[0];
+        if (!eventsByDate.has(date)) {
+          eventsByDate.set(date, []);
+        }
+        const timeStr = shift.start_time && shift.end_time 
+          ? `${shift.start_time.substring(0, 5)}-${shift.end_time.substring(0, 5)}`
+          : shift.start_time 
+          ? shift.start_time.substring(0, 5)
+          : '';
+        const shiftText = timeStr ? `${shift.template_name} (${timeStr})` : shift.template_name;
+        eventsByDate.get(date).push(shiftText);
+      });
+    } catch (error) {
+      console.warn('schedule_assignments not available:', error.message);
+    }
+
+    // 3. Get project assignments/allocations for the employee
+    try {
+      const projectAssignmentsResult = await query(
+        `SELECT 
+           pa.start_date,
+           pa.end_date,
+           p.name as project_name,
+           pa.role_on_project as role
+         FROM project_allocations pa
+         JOIN projects p ON p.id = pa.project_id
+         WHERE pa.employee_id = $1
+           AND pa.org_id = $2
+           AND (pa.start_date <= $4::date AND (pa.end_date IS NULL OR pa.end_date >= $3::date))
+         ORDER BY pa.start_date`,
+        [employeeId, tenantId, monthStartStr, monthEndStr]
+      );
+
+      // Add project assignments to each day in the range
+      projectAssignmentsResult.rows.forEach(assignment => {
+        const startDate = assignment.start_date instanceof Date 
+          ? assignment.start_date.toISOString().split('T')[0] 
+          : String(assignment.start_date).split('T')[0];
+        const endDate = assignment.end_date instanceof Date 
+          ? assignment.end_date.toISOString().split('T')[0] 
+          : (assignment.end_date ? String(assignment.end_date).split('T')[0] : monthEndStr);
+        
+        const currentDate = new Date(startDate);
+        const endDateObj = new Date(endDate);
+        
+        while (currentDate <= endDateObj && currentDate <= new Date(monthEndStr)) {
+          const dateStr = currentDate.toISOString().split('T')[0];
+          if (dateStr >= monthStartStr && dateStr <= monthEndStr) {
+            if (!eventsByDate.has(dateStr)) {
+              eventsByDate.set(dateStr, []);
+            }
+            const projectText = assignment.role 
+              ? `${assignment.project_name} - ${assignment.role}`
+              : assignment.project_name;
+            // Only add if not already present
+            if (!eventsByDate.get(dateStr).includes(projectText)) {
+              eventsByDate.get(dateStr).push(projectText);
+            }
+          }
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      });
+    } catch (error) {
+      console.warn('project_allocations not available:', error.message);
+    }
+
+    // Get holidays for the month
+    const holidaysResult = await query(
+      `SELECT h.date, h.name
+       FROM holidays h
+       JOIN holiday_lists hl ON hl.id = h.list_id
+       WHERE hl.org_id = $1
+         AND hl.published = true
+         AND h.date >= $2::date
+         AND h.date <= $3::date
+       ORDER BY h.date`,
+      [tenantId, monthStartStr, monthEndStr]
+    );
+    const holidayDates = new Set(holidaysResult.rows.map(h => {
+      if (h.date instanceof Date) {
+        return h.date.toISOString().split('T')[0];
+      }
+      return String(h.date).split('T')[0];
+    }));
+
+    // Get employee birthday
+    let birthdayDate = null;
+    if (employee.date_of_birth) {
+      const dob = employee.date_of_birth instanceof Date 
+        ? employee.date_of_birth 
+        : new Date(employee.date_of_birth);
+      birthdayDate = new Date(year, dob.getMonth(), dob.getDate()).toISOString().split('T')[0];
+    }
+
+    // Build day summaries - generate all days in month
+    const daySummaries = [];
+    const currentDate = new Date(monthStart);
+    const fullDayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    // monthNames already declared at top of function
+    
+    while (currentDate <= monthEnd) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const dayOfWeek = currentDate.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday = 0, Saturday = 6
+      const isHoliday = holidayDates.has(dateStr);
+      const isBirthday = birthdayDate === dateStr;
+      
+      // For now, announcements don't have date/is_non_working, so skip that check
+      const isNonWorkingAnnouncement = false;
+      
+      const isWorkingDay = !isWeekend && !isHoliday && !isBirthday && !isNonWorkingAnnouncement;
+      
+      const attendance = attendanceMap.get(dateStr) || { login: null, logout: null };
+      const tasks = eventsByDate.get(dateStr) || [];
+      // Include all tasks (personal events, team events, shifts, projects) - exclude only weekends
+      // Holidays and birthdays should NOT appear in task description, but personal events on those days should still show
+      const tasksText = isWeekend ? '' : tasks.join('; ');
+
+      daySummaries.push({
+        date: dateStr,
+        dayOfWeek: fullDayNames[dayOfWeek],
+        dayNumber: currentDate.getDate(),
+        isWeekend,
+        isHoliday,
+        isBirthday,
+        isNonWorkingAnnouncement,
+        isWorkingDay,
+        loginTime: attendance.login ? attendance.login.substring(0, 5) : null,
+        logoutTime: attendance.logout ? attendance.logout.substring(0, 5) : null,
+        tasksText,
+        label: isHoliday ? 'Holiday' : isBirthday ? 'Birthday' : isWeekend ? 'WeekOff' : '',
+      });
+
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    const billableDays = daySummaries.filter(d => d.isWorkingDay).length;
+
+    // Get project manager name if available
+    let projectManagerName = 'N/A';
+    if (project.id) {
+      try {
+        const pmResult = await query(
+          `SELECT p.first_name || ' ' || p.last_name as manager_name
+           FROM projects pr
+           JOIN employees pm_emp ON pm_emp.id = pr.project_manager_id
+           JOIN profiles p ON p.id = pm_emp.user_id
+           WHERE pr.id = $1`,
+          [project.id]
+        );
+        if (pmResult.rows.length > 0) {
+          projectManagerName = pmResult.rows[0].manager_name;
+        }
+      } catch (error) {
+        // Ignore error, use default
+      }
+    }
+
+    // Create Excel workbook
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Timesheet');
+
+    // Define colors
+    const lightBlueColor = { argb: 'FFADD8E6' }; // Light blue for headers
+    const lightGreenColor = { argb: 'FF90EE90' }; // Light green for weekends
+
+    // Set column widths to match template - wider to prevent truncation
+    worksheet.columns = [
+      { width: 18 }, // A: Date
+      { width: 15 }, // B: Day
+      { width: 25 }, // C: Task Description (part 1 of merged)
+      { width: 25 }, // D: Task Description (part 2 of merged)
+      { width: 25 }, // E: Task Description (part 3 of merged)
+      { width: 15 }, // F: Login Time
+      { width: 15 }, // G: Logout Time
+      { width: 15 }, // H: Hours worked
+    ];
+
+    // Title row: "Timesheet for the Month of {Month} {Year}" - merge across all columns
+    worksheet.mergeCells('A1:H1');
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = `Timesheet for the Month of ${monthNames[monthNum - 1]} ${year}`;
+    titleCell.font = { bold: true, size: 16, name: 'Calibri' };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
+    titleCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFFFFF' }, // White background
+    };
+    worksheet.getRow(1).height = 30;
+
+    // Header section - Row 2-4: Labels and values
+    // Left side labels: Employee Name, Vendor Name, Project Manager/Lead
+    const labelCells = [
+      { cell: 'A2', value: 'Employee Name:' },
+      { cell: 'A3', value: 'Vendor Name:' },
+      { cell: 'A4', value: 'Project Manager/Lead:' },
+      { cell: 'D2', value: 'Emp. ID.' },
+      { cell: 'D3', value: 'Billable Days' },
+      { cell: 'D4', value: 'Project Name' },
+    ];
+
+    labelCells.forEach(({ cell, value }) => {
+      const cellObj = worksheet.getCell(cell);
+      cellObj.value = value;
+      cellObj.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: lightBlueColor,
+      };
+      cellObj.font = { bold: true };
+      cellObj.border = {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } },
+      };
+      cellObj.alignment = { horizontal: 'left', vertical: 'middle' };
+    });
+
+    // Header section - Row 2-4: Values (next to labels)
+    worksheet.getCell('B2').value = `${employee.first_name} ${employee.last_name}`;
+    worksheet.getCell('B3').value = ''; // Vendor Name - empty for now
+    worksheet.getCell('B4').value = projectManagerName;
+    
+    worksheet.getCell('E2').value = employee.employee_id || 'N/A';
+    worksheet.getCell('E3').value = billableDays;
+    worksheet.getCell('E4').value = project.name;
+
+    // Add borders to value cells
+    const valueCells = ['B2', 'B3', 'B4', 'E2', 'E3', 'E4'];
+    valueCells.forEach(cellRef => {
+      const cell = worksheet.getCell(cellRef);
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } },
+      };
+      cell.alignment = { horizontal: 'left', vertical: 'middle' };
+    });
+
+    // Empty row
+    worksheet.addRow([]);
+
+    // Column headers row - row 6 (after title + 3 header rows + 1 empty row)
+    const headerRowNum = 6;
+    
+    // Set header values BEFORE merging
+    worksheet.getCell('A6').value = 'Date';
+    worksheet.getCell('B6').value = 'Day';
+    worksheet.getCell('C6').value = 'Give description of the Task performed';
+    worksheet.getCell('F6').value = 'Login Time';
+    worksheet.getCell('G6').value = 'Logout Time';
+    worksheet.getCell('H6').value = 'Hours worked';
+    
+    // Merge C6, D6, E6 for task description column
+    worksheet.mergeCells('C6:E6');
+
+    // Style column headers with light blue background
+    const headerCells = ['A6', 'B6', 'C6', 'F6', 'G6', 'H6'];
+    headerCells.forEach(cellRef => {
+      const cell = worksheet.getCell(cellRef);
+      cell.font = { bold: true };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: lightBlueColor,
+      };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } },
+      };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    
+    // Set row height for header row
+    worksheet.getRow(headerRowNum).height = 20;
+
+    // Add data rows starting from row 7
+    let currentRowNum = 7;
+    daySummaries.forEach(day => {
+      const dayName = day.dayOfWeek; // Already has full day name
+      
+      // Format date to ensure full year is displayed (DD-MM-YYYY)
+      const dateObj = new Date(day.date);
+      const formattedDate = `${String(dateObj.getDate()).padStart(2, '0')}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${dateObj.getFullYear()}`;
+      
+      // Calculate hours worked
+      let hoursWorked = '';
+      if (day.loginTime && day.logoutTime) {
+        const loginParts = day.loginTime.split(':');
+        const logoutParts = day.logoutTime.split(':');
+        const loginMinutes = parseInt(loginParts[0]) * 60 + parseInt(loginParts[1]);
+        const logoutMinutes = parseInt(logoutParts[0]) * 60 + parseInt(logoutParts[1]);
+        const totalMinutes = logoutMinutes - loginMinutes;
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        hoursWorked = `${hours}.${String(Math.round(minutes / 60 * 100)).padStart(2, '0')}`;
+      }
+
+      // Task description: "WeekOff" for weekends, otherwise show tasks (personal events, team events, etc.)
+      // Exclude holidays and birthdays from task description - they should be empty or show only actual tasks
+      let taskDescription = '';
+      if (day.isWeekend) {
+        taskDescription = 'WeekOff';
+      } else {
+        // Show tasks (personal calendar events, team events, shifts, projects)
+        // Holidays and birthdays are excluded - they don't appear in task description
+        taskDescription = day.tasksText || '';
+      }
+      
+      // Set values in individual cells - use text format for date to prevent truncation
+      const dateCell = worksheet.getCell(`A${currentRowNum}`);
+      dateCell.value = formattedDate;
+      dateCell.numFmt = '@'; // Text format to ensure full date displays
+      
+      worksheet.getCell(`B${currentRowNum}`).value = dayName;
+      worksheet.getCell(`C${currentRowNum}`).value = taskDescription;
+      worksheet.getCell(`F${currentRowNum}`).value = day.loginTime || '';
+      worksheet.getCell(`G${currentRowNum}`).value = day.logoutTime || '';
+      worksheet.getCell(`H${currentRowNum}`).value = hoursWorked;
+      
+      // Merge C, D, E for task description column
+      worksheet.mergeCells(`C${currentRowNum}:E${currentRowNum}`);
+
+      // Style weekends with light green background AFTER merging
+      if (day.isWeekend) {
+        // Apply to non-merged cells
+        ['A', 'B', 'F', 'G', 'H'].forEach(col => {
+          const cell = worksheet.getCell(`${col}${currentRowNum}`);
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: lightGreenColor,
+          };
+        });
+        // Apply to merged cell (C-E)
+        const mergedCell = worksheet.getCell(`C${currentRowNum}`);
+        mergedCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: lightGreenColor,
+        };
+      }
+
+      // Add borders to all cells (A, B, C-E merged, F, G, H)
+      const borderStyle = {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } },
+      };
+      
+      ['A', 'B', 'C', 'F', 'G', 'H'].forEach(col => {
+        const cell = worksheet.getCell(`${col}${currentRowNum}`);
+        cell.border = borderStyle;
+        cell.alignment = { horizontal: 'left', vertical: 'middle' };
+      });
+      
+      // Set alignment for merged cell (C-E)
+      const mergedCell = worksheet.getCell(`C${currentRowNum}`);
+      mergedCell.border = borderStyle;
+      mergedCell.alignment = { horizontal: 'left', vertical: 'middle' };
+      
+      currentRowNum++;
+    });
+
+    // Generate filename
+    const employeeName = `${employee.first_name}_${employee.last_name}`.replace(/\s+/g, '_');
+    // monthNames already declared at top of function
+    const monthName = monthNames[monthNum - 1];
+    const filename = `${employeeName}-Timesheet-${monthName}-${year}.xlsx`;
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Write workbook to buffer to ensure all formatting is preserved
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error exporting timesheet:', error);
+    res.status(500).json({ error: error.message || 'Failed to export timesheet' });
+  }
+});
+
+// Timesheet Submission
+// POST /api/timesheets/:employeeId/submit
+router.post('/:employeeId/submit', authenticateToken, async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { month, clientName, notes } = req.body;
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM' });
+    }
+
+    const tenantId = await getTenantIdForUser(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Check permissions - fetch user role from database
+    const roleResult = await query(
+      `SELECT role FROM user_roles WHERE user_id = $1
+       ORDER BY CASE role
+         WHEN 'admin' THEN 0
+         WHEN 'ceo' THEN 1
+         WHEN 'director' THEN 2
+         WHEN 'hr' THEN 3
+         WHEN 'manager' THEN 4
+         WHEN 'employee' THEN 5
+         ELSE 6
+       END
+       LIMIT 1`,
+      [req.user.id]
+    );
+    const userRole = roleResult.rows[0]?.role || 'employee';
+    const isPrivileged = ['hr', 'director', 'ceo', 'admin', 'manager'].includes(userRole);
+    
+    const empResult = await query(
+      'SELECT id, user_id FROM employees WHERE id = $1 AND tenant_id = $2',
+      [employeeId, tenantId]
+    );
+
+    if (empResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    if (!isPrivileged && empResult.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ error: 'You can only submit your own timesheet' });
+    }
+
+    // Create submission record (create table if needed)
+    await query(`
+      CREATE TABLE IF NOT EXISTS timesheet_submissions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        employee_id UUID REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
+        tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+        month TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        client_name TEXT,
+        notes TEXT,
+        submitted_by UUID REFERENCES profiles(id) NOT NULL,
+        submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'approved', 'rejected'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_timesheet_submissions_employee ON timesheet_submissions(employee_id);
+      CREATE INDEX IF NOT EXISTS idx_timesheet_submissions_month ON timesheet_submissions(month, year);
+    `);
+
+    const [year, monthNum] = month.split('-').map(Number);
+    const result = await query(
+      `INSERT INTO timesheet_submissions (employee_id, tenant_id, month, year, client_name, notes, submitted_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [employeeId, tenantId, month, year, clientName || null, notes || null, req.user.id]
+    );
+
+    res.status(201).json({ success: true, submission: result.rows[0] });
+  } catch (error) {
+    console.error('Error submitting timesheet:', error);
+    res.status(500).json({ error: error.message || 'Failed to submit timesheet' });
   }
 });
 
