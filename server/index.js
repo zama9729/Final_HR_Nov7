@@ -58,6 +58,8 @@ import reportsRoutes from './routes/reports.js';
 import announcementsRoutes from './routes/announcements.js';
 import teamScheduleEventsRoutes from './routes/team-schedule-events.js';
 import personalCalendarEventsRoutes from './routes/personal-calendar-events.js';
+import smartMemoRoutes from './routes/smart-memo.js';
+import remindersRoutes from './routes/reminders.js';
 import setupRoutes from './routes/setup.js';
 import branchesRoutes from './routes/branches.js';
 import superRoutes from './routes/super.js';
@@ -71,6 +73,7 @@ import backgroundCheckRoutes from './routes/background-check.js';
 import employeeHistoryRoutes from './routes/employee-history.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders } from './services/cron.js';
+import { scheduleReminderChecks } from './services/reminder-cron.js';
 import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
 import { scheduleAutoLogout } from './services/attendance-auto-logout.js';
@@ -218,6 +221,8 @@ app.use('/api/reports', authenticateToken, reportsRoutes);
 app.use('/api/announcements', authenticateToken, announcementsRoutes);
 app.use('/api/team-schedule/events', teamScheduleEventsRoutes);
 app.use('/api/personal-calendar-events', authenticateToken, setTenantContext, personalCalendarEventsRoutes);
+app.use('/api/calendar', smartMemoRoutes);
+app.use('/api/reminders', remindersRoutes);
 
 // Tenant info endpoint for payroll service compatibility
 app.get('/api/tenant', authenticateToken, async (req, res) => {
@@ -519,6 +524,7 @@ createPool().then(async () => {
   await scheduleProbationJobs();
   await scheduleTimesheetReminders();
   schedulePromotionApplication();
+  scheduleReminderChecks();
   console.log('✅ Cron jobs scheduled');
 
   // SSL/HTTPS Configuration

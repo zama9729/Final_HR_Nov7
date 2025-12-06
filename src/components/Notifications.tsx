@@ -49,8 +49,10 @@ export function Notifications() {
 
     try {
       const data = await api.getNotifications();
-      setNotifications(data || []);
-      setUnreadCount(data?.filter((n) => !n.read).length || 0);
+      // Filter out read notifications to prevent them from reappearing
+      const unreadNotifications = (data || []).filter((n) => !n.read);
+      setNotifications(unreadNotifications);
+      setUnreadCount(unreadNotifications.length);
     } catch (error) {
       console.error('Error fetching notifications:', error);
     }
@@ -59,12 +61,13 @@ export function Notifications() {
   const markAsRead = async (notificationId: string) => {
     try {
       await api.markNotificationRead(notificationId);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
-      );
+      // Immediately remove from UI instead of just marking as read
+      setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (error) {
       console.error('Error marking notification as read:', error);
+      // On error, refresh to get accurate state
+      await fetchNotifications();
     }
   };
 
@@ -78,8 +81,9 @@ export function Notifications() {
   const handleClearAll = async () => {
     try {
       await api.clearAllNotifications();
-      // Refresh notifications to get updated state from server
-      await fetchNotifications();
+      // Immediately clear UI instead of waiting for refresh
+      setNotifications([]);
+      setUnreadCount(0);
       toast({
         title: "Notifications cleared",
         description: "All notifications have been marked as read.",
@@ -91,6 +95,8 @@ export function Notifications() {
         description: "Failed to clear notifications",
         variant: "destructive",
       });
+      // On error, refresh to get accurate state
+      await fetchNotifications();
     }
   };
 

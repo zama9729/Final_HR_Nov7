@@ -163,6 +163,24 @@ class ApiClient {
     return result;
   }
 
+  async checkEmail(email: string) {
+    return this.request('/api/auth/check-email', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async firstTimeSetup(email: string, password: string) {
+    const result = await this.request('/api/auth/first-time-setup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    if (result.token) {
+      this.setToken(result.token);
+    }
+    return result;
+  }
+
   async login(email: string, password: string) {
     const result = await this.request('/api/auth/login', {
       method: 'POST',
@@ -372,6 +390,25 @@ class ApiClient {
 
   async clearAllNotifications() {
     return this.request('/api/notifications/clear', {
+      method: 'POST',
+    });
+  }
+
+  // Smart Memo
+  async saveSmartMemo(data: { memoText: string; baseDate: string }) {
+    return this.request('/api/calendar/smart-memo', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Reminders
+  async getActiveReminders() {
+    return this.request('/api/reminders/active');
+  }
+
+  async cancelReminder(reminderId: string) {
+    return this.request(`/api/reminders/${reminderId}/cancel`, {
       method: 'POST',
     });
   }

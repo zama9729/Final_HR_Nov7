@@ -27,6 +27,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Notifications } from "@/components/Notifications";
+import { ReminderCountdown } from "@/components/ReminderCountdown";
 import { useNavigate } from "react-router-dom";
 import { getMenuItemsForProfile, type NavItem, type NavGroup } from "@/config/navigation";
 
@@ -383,6 +384,9 @@ export function TopNavBar() {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-2 shrink-0">
+            <div className="relative">
+              <ReminderCountdown />
+            </div>
             <div className="relative">
               <Notifications />
             </div>
