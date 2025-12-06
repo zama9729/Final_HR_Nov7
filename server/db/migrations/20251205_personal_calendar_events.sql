@@ -20,3 +20,5 @@ CREATE INDEX IF NOT EXISTS idx_personal_calendar_events_employee ON personal_cal
 CREATE INDEX IF NOT EXISTS idx_personal_calendar_events_user ON personal_calendar_events(user_id);
 CREATE INDEX IF NOT EXISTS idx_personal_calendar_events_date ON personal_calendar_events(event_date);
 
+
+

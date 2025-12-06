@@ -541,6 +541,13 @@ All colors MUST be HSL.
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.12),
                 inset 0 1px 0 rgba(255, 255, 255, 0.5),
                 inset 0 -1px 0 rgba(255, 255, 255, 0.15);
+    /* Hide scrollbar */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+  }
+
+  .liquid-glass-dropdown::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
   }
 
   /* Liquid glass dropdown item */
@@ -634,6 +641,8 @@ All colors MUST be HSL.
 
   [data-radix-select-item][data-highlighted]::before,
   [data-radix-dropdown-menu-item][data-highlighted]::before,
+  [data-radix-select-item]:hover::before,
+  [data-radix-dropdown-menu-item]:hover::before,
   [data-radix-select-item]:focus::before,
   [data-radix-dropdown-menu-item]:focus::before,
   [data-radix-select-item]:focus-visible::before,
@@ -649,6 +658,8 @@ All colors MUST be HSL.
 
   [data-radix-select-item][data-highlighted],
   [data-radix-dropdown-menu-item][data-highlighted],
+  [data-radix-select-item]:hover,
+  [data-radix-dropdown-menu-item]:hover,
   [data-radix-select-item]:focus,
   [data-radix-dropdown-menu-item]:focus,
   [data-radix-select-item]:focus-visible,

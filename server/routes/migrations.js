@@ -112,5 +112,47 @@ router.post('/fix-assignments-updated-at', async (req, res) => {
   }
 });
 
+// Run migration to add missing columns to timesheets
+router.post('/add-submitted-by-to-timesheets', async (req, res) => {
+  try {
+    await query('BEGIN');
+    
+    try {
+      // Add submitted_by column
+      await query(`
+        ALTER TABLE timesheets
+        ADD COLUMN IF NOT EXISTS submitted_by UUID REFERENCES profiles(id)
+      `);
+      
+      // Add approvals column
+      await query(`
+        ALTER TABLE timesheets
+        ADD COLUMN IF NOT EXISTS approvals JSONB DEFAULT '[]'::jsonb
+      `);
+      
+      // Add audit_snapshot column
+      await query(`
+        ALTER TABLE timesheets
+        ADD COLUMN IF NOT EXISTS audit_snapshot JSONB
+      `);
+      
+      // Create index for better query performance
+      await query(`
+        CREATE INDEX IF NOT EXISTS idx_timesheets_submitted_by ON timesheets(submitted_by)
+      `);
+      
+      await query('COMMIT');
+      
+      res.json({ success: true, message: 'Migration completed successfully: added submitted_by, approvals, and audit_snapshot columns to timesheets' });
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
 

@@ -10,6 +10,9 @@ import {
   addDays,
   isSameMonth,
   isToday,
+  parseISO,
+  eachDayOfInterval,
+  isWithinInterval,
 } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -189,48 +192,67 @@ export function CalendarPanel() {
         });
         if (!isMounted) return;
 
-        const mergedRaw: CalendarEvent[] = (response.events || [])
-          .map((event: any, idx: number) => {
-            const resourceType = event?.resource?.type;
-            const normalizedType: CalendarEvent['type'] =
-              resourceType === 'shift'
-                ? 'shift'
-                : resourceType === 'assignment'
-                  ? 'project'
-                  : resourceType === 'holiday'
-                    ? 'holiday'
-                    : resourceType === 'birthday'
-                      ? 'birthday'
-                      : resourceType === 'leave'
-                        ? 'leave'
-                        : resourceType === 'team_event'
-                          ? 'team_event'
-                          : 'announcement';
+        // Get month boundaries for filtering expanded events
+        const monthStart = startOfMonth(currentMonth);
+        const monthEnd = endOfMonth(currentMonth);
 
-            const rawISO =
-              (typeof event?.resource?.shift_date === 'string' && event.resource.shift_date) ||
-              (typeof event?.resource?.start === 'string' && event.resource.start) ||
-              (typeof event?.start === 'string' && event.start) ||
-              (typeof event?.date === 'string' && event.date) ||
-              '';
-            if (!rawISO) {
-              return null;
-            }
+        // Expand events with date ranges into individual day events
+        const expandedEvents: CalendarEvent[] = [];
+        
+        (response.events || []).forEach((event: any, idx: number) => {
+          const resourceType = event?.resource?.type;
+          const normalizedType: CalendarEvent['type'] =
+            resourceType === 'shift'
+              ? 'shift'
+              : resourceType === 'assignment'
+                ? 'project'
+                : resourceType === 'holiday'
+                  ? 'holiday'
+                  : resourceType === 'birthday'
+                    ? 'birthday'
+                    : resourceType === 'leave'
+                      ? 'leave'
+                      : resourceType === 'team_event'
+                        ? 'team_event'
+                        : 'announcement';
 
-            let dateOnly = '';
-            try {
-              const parsed = new Date(rawISO);
-              if (!isNaN(parsed.getTime())) {
-                dateOnly = format(parsed, 'yyyy-MM-dd');
-              }
-            } catch {
-              dateOnly = rawISO.split('T')[0] || rawISO;
-            }
-            if (!dateOnly) {
-              dateOnly = rawISO.split('T')[0] || rawISO;
-            }
+          // Get start date
+          const rawStartISO =
+            (typeof event?.resource?.shift_date === 'string' && event.resource.shift_date) ||
+            (typeof event?.resource?.start === 'string' && event.resource.start) ||
+            (typeof event?.start === 'string' && event.start) ||
+            (typeof event?.date === 'string' && event.date) ||
+            '';
+          
+          // Get end date (for date ranges)
+          const rawEndISO =
+            (typeof event?.resource?.end_date === 'string' && event.resource.end_date) ||
+            (typeof event?.end === 'string' && event.end) ||
+            rawStartISO; // Default to start if no end date
 
-            // Derive a human-readable time range if available.
+          if (!rawStartISO) {
+            return;
+          }
+
+          let startDate: Date;
+          let endDate: Date;
+          
+          try {
+            startDate = parseISO(rawStartISO.split('T')[0]);
+            endDate = parseISO(rawEndISO.split('T')[0]);
+            
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+              return;
+            }
+          } catch {
+            return;
+          }
+
+          // Only derive time for shift events - projects, leaves, and other events don't need time display
+          let time: string | undefined = undefined;
+          
+          if (normalizedType === 'shift') {
+            // Derive a human-readable time range if available for shifts only
             let startTime: string | undefined =
               typeof event?.resource?.start_time === 'string' && event.resource.start_time
                 ? event.resource.start_time
@@ -262,52 +284,92 @@ export function CalendarPanel() {
               }
             }
 
-            const time =
+            time =
               startTime && endTime
                 ? `${startTime} - ${endTime}`
                 : startTime
                   ? startTime
                   : undefined;
+          }
 
-            const shiftSubtype: CalendarEvent['shiftSubtype'] =
-              normalizedType === 'shift'
-                ? event?.resource?.shift_type === 'night'
-                  ? 'night'
-                  : 'day'
-                : undefined;
+          const shiftSubtype: CalendarEvent['shiftSubtype'] =
+            normalizedType === 'shift'
+              ? event?.resource?.shift_type === 'night'
+                ? 'night'
+                : 'day'
+              : undefined;
 
-            const employeeNameFromResource =
-              typeof event?.resource?.employee_name === 'string'
-                ? event.resource.employee_name
-                : undefined;
+          const employeeNameFromResource =
+            typeof event?.resource?.employee_name === 'string'
+              ? event.resource.employee_name
+              : undefined;
 
-            const isSelfBirthdayEvent =
-              normalizedType === 'birthday' &&
-              !!selfName &&
-              normalizeName(employeeNameFromResource) === selfName;
+          const isSelfBirthdayEvent =
+            normalizedType === 'birthday' &&
+            !!selfName &&
+            normalizeName(employeeNameFromResource) === selfName;
 
-            const title =
-              isSelfBirthdayEvent
-                ? 'Your birthday'
-                : event.title || event?.resource?.template_name || 'Event';
+          const title =
+            isSelfBirthdayEvent
+              ? 'Your birthday'
+              : event.title || event?.resource?.template_name || 'Event';
 
-            const description = isSelfBirthdayEvent
-              ? undefined
-              : employeeNameFromResource ||
-                event?.resource?.project_name ||
-                event?.resource?.name;
+          const description = isSelfBirthdayEvent
+            ? undefined
+            : employeeNameFromResource ||
+              event?.resource?.project_name ||
+              event?.resource?.name;
 
-            return {
-              id: event.id || `event-${idx}`,
-              type: normalizedType,
-              title,
-              date: dateOnly,
-              time,
-              description,
-              shiftSubtype,
-            } as CalendarEvent;
-          })
-          .filter((item): item is CalendarEvent => Boolean(item));
+          // Determine if this event type should be expanded across date ranges
+          // Expand: leaves, projects/assignments, team events
+          // Don't expand: shifts (single day), birthdays (single day), holidays (single day)
+          const shouldExpand = normalizedType === 'leave' || 
+                              normalizedType === 'project' || 
+                              normalizedType === 'team_event';
+
+          // Compare dates (ignoring time component)
+          const startDateStr = format(startDate, 'yyyy-MM-dd');
+          const endDateStr = format(endDate, 'yyyy-MM-dd');
+          const isDateRange = startDateStr !== endDateStr;
+
+          if (shouldExpand && isDateRange) {
+            // Expand date range: create an event for each day
+            const dateRange = eachDayOfInterval({ start: startDate, end: endDate });
+            
+            dateRange.forEach((day) => {
+              // Only include days within the current month view
+              if (isWithinInterval(day, { start: monthStart, end: monthEnd })) {
+                expandedEvents.push({
+                  id: `${event.id || `event-${idx}`}-${format(day, 'yyyy-MM-dd')}`,
+                  type: normalizedType,
+                  title,
+                  date: format(day, 'yyyy-MM-dd'),
+                  time,
+                  description,
+                  shiftSubtype,
+                } as CalendarEvent);
+              }
+            });
+          } else {
+            // Single day event or event type that shouldn't be expanded
+            const dateOnly = format(startDate, 'yyyy-MM-dd');
+            
+            // Only include if within current month view
+            if (isWithinInterval(startDate, { start: monthStart, end: monthEnd })) {
+              expandedEvents.push({
+                id: event.id || `event-${idx}`,
+                type: normalizedType,
+                title,
+                date: dateOnly,
+                time,
+                description,
+                shiftSubtype,
+              } as CalendarEvent);
+            }
+          }
+        });
+
+        const mergedRaw: CalendarEvent[] = expandedEvents;
 
         // For HR/CEO/Admin in organization view, aggregate day/night shift counts per day
         const RoleForAggregation = new Set(['hr', 'ceo', 'admin']);
@@ -627,7 +689,7 @@ export function CalendarPanel() {
                               <span className={`h-2 w-2 rounded-full ${styles.dot} flex-shrink-0`} />
                               <div className="flex-1 min-w-0">
                                 <div className="font-semibold truncate">{event.title}</div>
-                                {event.time && (
+                                {event.time && event.type === 'shift' && (
                                   <div className="text-[10px] text-gray-600 mt-0.5">{event.time}</div>
                                 )}
                                 {event.description && (
@@ -639,7 +701,7 @@ export function CalendarPanel() {
                           <TooltipContent side="right" className="max-w-xs">
                             <div className="space-y-1">
                               <p className="font-semibold">{event.title}</p>
-                              {event.time && <p className="text-xs text-gray-400">Time: {event.time}</p>}
+                              {event.time && event.type === 'shift' && <p className="text-xs text-gray-400">Time: {event.time}</p>}
                               {event.description && <p className="text-xs text-gray-400">{event.description}</p>}
                               {event.location && <p className="text-xs text-gray-400">Location: {event.location}</p>}
                             </div>
@@ -665,7 +727,7 @@ export function CalendarPanel() {
                                     <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
                                     <p className="font-semibold text-sm">{event.title}</p>
                                   </div>
-                                  {event.time && <p className="text-xs text-gray-400 ml-4">Time: {event.time}</p>}
+                                  {event.time && event.type === 'shift' && <p className="text-xs text-gray-400 ml-4">Time: {event.time}</p>}
                                   {event.description && <p className="text-xs text-gray-400 ml-4">{event.description}</p>}
                                 </div>
                               );

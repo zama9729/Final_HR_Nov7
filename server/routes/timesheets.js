@@ -1027,19 +1027,79 @@ router.post('/:id/submit', authenticateToken, async (req, res) => {
       entries,
     };
 
-    const updated = await query(
-      `UPDATE timesheets
-       SET status = 'pending_approval',
-           total_hours = $1,
-           submitted_at = COALESCE(submitted_at, now()),
-           submitted_by = COALESCE(submitted_by, $2),
-           approvals = $3::jsonb,
-           audit_snapshot = $4::jsonb,
-           updated_at = now()
-       WHERE id = $5
-       RETURNING *`,
-      [totalHours, req.user.id, JSON.stringify(approvals), JSON.stringify(snapshot), id]
-    );
+    // Check which columns exist in the timesheets table
+    let hasSubmittedByColumn = false;
+    let hasApprovalsColumn = false;
+    let hasAuditSnapshotColumn = false;
+    
+    try {
+      const columnCheck = await query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public'
+        AND table_name = 'timesheets'
+        AND column_name IN ('submitted_by', 'approvals', 'audit_snapshot')
+      `);
+      const existingColumns = new Set(columnCheck.rows.map(r => r.column_name));
+      hasSubmittedByColumn = existingColumns.has('submitted_by');
+      hasApprovalsColumn = existingColumns.has('approvals');
+      hasAuditSnapshotColumn = existingColumns.has('audit_snapshot');
+      
+      console.log('Column check results:', {
+        hasSubmittedByColumn,
+        hasApprovalsColumn,
+        hasAuditSnapshotColumn,
+        foundColumns: Array.from(existingColumns)
+      });
+    } catch (err) {
+      // If check fails, assume columns don't exist
+      console.warn('Could not check for timesheet columns:', err.message);
+    }
+
+    // Build UPDATE query dynamically based on column existence
+    const setClauses = [
+      "status = 'pending_approval'",
+      'total_hours = $1',
+      'submitted_at = COALESCE(submitted_at, now())',
+      'updated_at = now()'
+    ];
+    const queryParams = [totalHours];
+    let paramIndex = 2;
+
+    if (hasSubmittedByColumn) {
+      setClauses.push(`submitted_by = COALESCE(submitted_by, $${paramIndex})`);
+      queryParams.push(req.user.id);
+      paramIndex++;
+    }
+
+    if (hasApprovalsColumn) {
+      setClauses.push(`approvals = $${paramIndex}::jsonb`);
+      queryParams.push(JSON.stringify(approvals));
+      paramIndex++;
+    }
+
+    if (hasAuditSnapshotColumn) {
+      setClauses.push(`audit_snapshot = $${paramIndex}::jsonb`);
+      queryParams.push(JSON.stringify(snapshot));
+      paramIndex++;
+    }
+
+    queryParams.push(id); // For the WHERE clause
+
+    // Build RETURNING clause - only return columns that exist
+    const returningColumns = ['id', 'employee_id', 'week_start_date', 'week_end_date', 'total_hours', 'status', 'submitted_at', 'updated_at'];
+    if (hasSubmittedByColumn) returningColumns.push('submitted_by');
+    if (hasApprovalsColumn) returningColumns.push('approvals');
+    if (hasAuditSnapshotColumn) returningColumns.push('audit_snapshot');
+
+    const updateQuery = `
+      UPDATE timesheets
+      SET ${setClauses.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING ${returningColumns.join(', ')}
+    `;
+
+    const updated = await query(updateQuery, queryParams);
 
     res.json(updated.rows[0]);
   } catch (error) {
