@@ -63,6 +63,7 @@ import remindersRoutes from './routes/reminders.js';
 import setupRoutes from './routes/setup.js';
 import branchesRoutes from './routes/branches.js';
 import superRoutes from './routes/super.js';
+import orgOnboardingRoutes from './routes/org-onboarding.js';
 import auditLogsRoutes from './routes/audit-logs.js';
 import schedulingRoutes from './routes/scheduling.js';
 import rosterRoutes from './routes/roster.js';
@@ -203,6 +204,7 @@ app.use('/api/probation-policies', authenticateToken, setTenantContext, probatio
 app.use('/api/setup', setupRoutes);
 app.use('/api/branches', branchesRoutes);
 app.use('/api/super', superRoutes);
+app.use('/api/org-onboarding', authenticateToken, orgOnboardingRoutes);
 // Multi-tenant routes
 app.use('/api/orgs', organizationsRoutes);
 app.use('/api/policies', authenticateToken, setTenantContext, policiesRoutes);

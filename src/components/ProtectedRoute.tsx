@@ -61,10 +61,11 @@ export function ProtectedRoute({
   }, [user, userRole, isLoading, location.pathname, requireOnboarding]);
 
   const isSetupRoute = location.pathname.startsWith("/setup");
+  const isOnboardingRoute = location.pathname === "/onboarding";
   const requiresSetupGate = shouldGate && !!setupStatus && !setupStatus.isCompleted;
 
   // Show initial loading while auth/setup state resolves
-  if (isLoading || (shouldGate && setupLoading && !isSetupRoute)) {
+  if (isLoading || (shouldGate && setupLoading && !isSetupRoute && !isOnboardingRoute)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-pulse">Loading...</div>
@@ -77,11 +78,18 @@ export function ProtectedRoute({
     return <Navigate to="/auth/login" replace />;
   }
 
-  if (requiresSetupGate && !isSetupRoute) {
-    return <Navigate to="/setup" replace />;
+  // Redirect to new onboarding wizard instead of old setup
+  if (requiresSetupGate && !isOnboardingRoute && !isSetupRoute) {
+    return <Navigate to="/onboarding" replace />;
   }
 
-  if (isSetupRoute && (!shouldGate || setupStatus?.isCompleted)) {
+  // Redirect old setup route to new onboarding wizard
+  if (isSetupRoute) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  // If setup is completed and user is on onboarding page, redirect to dashboard
+  if (isOnboardingRoute && shouldGate && setupStatus?.isCompleted) {
     return <Navigate to="/dashboard" replace />;
   }
 

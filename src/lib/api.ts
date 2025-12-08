@@ -425,6 +425,18 @@ class ApiClient {
     });
   }
 
+  // Organization onboarding
+  async completeOnboarding(data: Record<string, any>) {
+    return this.request('/api/org-onboarding/complete', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getOnboardingData() {
+    return this.request('/api/org-onboarding/data');
+  }
+
   // Attendance settings
   async getAttendanceSettings() {
     return this.request('/api/attendance-settings');
@@ -445,7 +457,15 @@ class ApiClient {
   }
 
   async getClockStatus() {
-    return this.request('/api/v1/attendance/punch/status');
+    try {
+      return await this.request('/api/v1/attendance/punch/status');
+    } catch (err: any) {
+      // Gracefully handle environments where attendance service or employee record is absent
+      if (err?.message?.includes('not found') || err?.message?.includes('Employee record not found')) {
+        return { status: 'not_found' };
+      }
+      throw err;
+    }
   }
 
   async clockPunch(payload: { type: 'IN' | 'OUT'; timestamp?: string; location?: any; metadata?: any }) {

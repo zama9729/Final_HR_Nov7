@@ -180,6 +180,8 @@ const teamCache = new Map();
       employee_id: nm.employeeid || nm.employee_id,
       department: nm.department,
       role: nm.role,
+      designation: nm.designation || nm.position,
+      grade: nm.grade,
       manager_email: nm.manageremail || nm.manager_email,
       join_date: nm.joindate || nm.join_date,
       work_location: nm.worklocation || nm.work_location,
@@ -205,6 +207,13 @@ const teamCache = new Map();
     const batch = rows.slice(i, i + batchSize);
     console.log(`Processing batch ${Math.floor(i/batchSize) + 1}: rows ${i + 2} to ${i + batch.length + 1}`);
     
+    // Track manager references within this batch (by lowercase email)
+    const managerRefs = new Set();
+    batch.forEach((row) => {
+      const m = mapping.manager_email && row[mapping.manager_email];
+      if (m) managerRefs.add(String(m).trim().toLowerCase());
+    });
+
     try {
       await query('BEGIN');
       for (let j = 0; j < batch.length; j++) {
@@ -219,13 +228,15 @@ const teamCache = new Map();
           employeeId: row[mapping.employee_id],
           department: row[mapping.department] ? String(row[mapping.department]).trim() : null,
           role: row[mapping.role] || 'employee',
+          designation: row[mapping.designation] ? String(row[mapping.designation]).trim() : null,
+          grade: row[mapping.grade] ? String(row[mapping.grade]).trim() : null,
           workLocation: row[mapping.work_location] || null,
           joinDate: row[mapping.join_date] || null,
-        managerEmail: row[mapping.manager_email] || null,
-        branchName: row[mapping.branch_name] || null,
-        branchCode: row[mapping.branch_code] || null,
-        departmentCode: row[mapping.department_code] ? String(row[mapping.department_code]).trim() : null,
-        teamName: row[mapping.team_name] ? String(row[mapping.team_name]).trim() : null
+          managerEmail: row[mapping.manager_email] || null,
+          branchName: row[mapping.branch_name] || null,
+          branchCode: row[mapping.branch_code] || null,
+          departmentCode: row[mapping.department_code] ? String(row[mapping.department_code]).trim() : null,
+          teamName: row[mapping.team_name] ? String(row[mapping.team_name]).trim() : null
         };
           
           console.log(`Processing row ${rowNum}:`, { firstName: rec.firstName, lastName: rec.lastName, email: rec.email, employeeId: rec.employeeId });
@@ -241,23 +252,10 @@ const teamCache = new Map();
           continue;
         }
         
-        // Normalize role (case-insensitive, default to 'employee')
-        if (!rec.role || String(rec.role).trim() === '') {
-          rec.role = 'employee';
-        }
-        const roleValue = String(rec.role).trim().toLowerCase();
-        const roleMapping = {
-          'employee': 'employee',
-          'hr': 'hr',
-          'ceo': 'ceo',
-          'director': 'director',
-          'manager': 'manager',
-          'admin': 'admin'
-        };
-        rec.role = roleMapping[roleValue] || 'employee';
-        if (roleValue && !roleMapping[roleValue]) {
-          console.log(`Row ${rowNum}: Invalid role '${rec.role}', defaulting to 'employee'`);
-        }
+        // Normalize role: keep canonical profiles (employee/manager/hr/admin/ceo/director)
+        const permittedRoles = new Set(['employee','manager','hr','admin','ceo','director']);
+        const roleValue = String(rec.role || '').trim().toLowerCase();
+        rec.role = permittedRoles.has(roleValue) ? roleValue : 'employee';
         
         if (!/^([^@\s]+)@([^@\s]+)\.[^@\s]+$/.test(rec.email)) {
           const errorMsg = `Row ${rowNum}: Invalid email format: "${rec.email}"`;
@@ -304,10 +302,12 @@ const teamCache = new Map();
         }
         // Resolve manager (RLS: only within same tenant)
         let reportingManagerId = null;
+        let managerUserIdForPromotion = null;
         if (rec.managerEmail) {
-          const mgr = await query('SELECT e.id FROM employees e JOIN profiles p ON p.id = e.user_id WHERE lower(p.email)=lower($1) AND e.tenant_id=$2', [rec.managerEmail, tenantId]);
+          const mgr = await query('SELECT e.id, e.user_id FROM employees e JOIN profiles p ON p.id = e.user_id WHERE lower(p.email)=lower($1) AND e.tenant_id=$2', [rec.managerEmail, tenantId]);
           if (mgr.rows.length) {
             reportingManagerId = mgr.rows[0].id;
+            managerUserIdForPromotion = mgr.rows[0].user_id;
             console.log(`Row ${rowNum}: Found manager ${rec.managerEmail} (ID: ${reportingManagerId}) in same organization`);
           } else {
             console.log(`Row ${rowNum}: Manager ${rec.managerEmail} not found in organization ${tenantId} (will be set to null)`);
@@ -355,14 +355,35 @@ const teamCache = new Map();
           }
         }
         
+          const positionValue = rec.designation || rec.grade || rec.role || null;
           const employeeInsert = await query(
             `INSERT INTO employees (user_id, employee_id, department, position, work_location, join_date, reporting_manager_id, tenant_id, must_change_password, onboarding_status)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,'not_started')
              RETURNING id`,
-            [userId, rec.employeeId, rec.department, null, rec.workLocation, normalizedJoinDate, reportingManagerId, tenantId]
+            [userId, rec.employeeId, rec.department, positionValue, rec.workLocation, normalizedJoinDate, reportingManagerId, tenantId]
           );
           const employeeDbId = employeeInsert.rows[0]?.id;
           await query('INSERT INTO user_roles (user_id, role, tenant_id) VALUES ($1,$2,$3)', [userId, rec.role, tenantId]);
+
+          // If this employee is referenced as a manager by others in this batch or existing data, promote to manager profile
+          if (managerUserIdForPromotion) {
+            await query(
+              `UPDATE user_roles SET role = 'manager'
+               WHERE user_id = $1 AND tenant_id = $2 AND role = 'employee'`,
+              [managerUserIdForPromotion, tenantId]
+            );
+          }
+
+          // If this newly created employee is referenced as manager within this batch, promote
+          const lowerEmail = String(rec.email || '').trim().toLowerCase();
+          if (managerRefs.has(lowerEmail)) {
+            await query(
+              `UPDATE user_roles SET role = 'manager'
+               WHERE user_id = $1 AND tenant_id = $2 AND role = 'employee'`,
+              [userId, tenantId]
+            );
+          }
+
           const branchMatch = findBranch(rec);
           let departmentMatch = findDepartment(rec, branchMatch?.id || null);
           if (!departmentMatch && rec.department) {

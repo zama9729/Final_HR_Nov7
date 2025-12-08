@@ -16,11 +16,12 @@ const employeeSchema = z.object({
   email: z.string().trim().email("Invalid email").max(255),
   employeeId: z.string().trim().min(1, "Employee ID is required").max(50),
   department: z.string().trim().min(1, "Department is required"),
-  position: z.string().trim().min(1, "Position is required"),
+  position: z.string().trim().min(1, "Designation is required"),
+  grade: z.string().trim().optional(),
   workLocation: z.string().trim().min(1, "Work location is required"),
   joinDate: z.string().min(1, "Join date is required"),
   reportingManagerId: z.string().optional(),
-  role: z.enum(['employee', 'manager', 'hr', 'director', 'ceo']),
+  role: z.string().trim().min(1, "Role is required"),
 });
 
 export default function AddEmployee() {
@@ -28,6 +29,11 @@ export default function AddEmployee() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [managers, setManagers] = useState<Array<{ id: string; name: string }>>([]);
+  const [orgDesignations, setOrgDesignations] = useState<string[]>([]);
+  const [orgRoles, setOrgRoles] = useState<string[]>([]);
+  const [orgDepartments, setOrgDepartments] = useState<string[]>([]);
+  const [orgWorkLocations, setOrgWorkLocations] = useState<string[]>([]);
+  const [orgGrades, setOrgGrades] = useState<string[]>([]);
   
   const [formData, setFormData] = useState({
     firstName: "",
@@ -36,15 +42,31 @@ export default function AddEmployee() {
     employeeId: "",
     department: "",
     position: "",
+    grade: "",
     workLocation: "",
     joinDate: "",
     reportingManagerId: "",
-    role: "employee" as const,
+    role: "",
   });
 
   useEffect(() => {
     fetchManagers();
+    loadOrgLists();
   }, []);
+
+  const loadOrgLists = async () => {
+    try {
+      const data = await api.getOnboardingData();
+      setOrgDesignations((data?.designations || []).map((d: any) => d.name).filter(Boolean));
+      setOrgGrades((data?.grades || []).map((g: any) => g.name).filter(Boolean));
+      // Roles are fixed to canonical profile roles
+      setOrgRoles(['employee','manager','hr','admin','ceo']);
+      setOrgDepartments((data?.departments || []).map((d: any) => d.name).filter(Boolean));
+      setOrgWorkLocations((data?.workLocations || []).filter(Boolean));
+    } catch (err) {
+      console.warn("Unable to load org lists for employee form", err);
+    }
+  };
 
   const fetchManagers = async () => {
     try {
@@ -80,7 +102,13 @@ export default function AddEmployee() {
       setLoading(true);
 
       // Call API to create employee
-      const result = await api.createEmployee(validated);
+      const result = await api.createEmployee({
+        ...validated,
+        // Persist grade alongside designation for clarity
+        position: validated.grade
+          ? `${validated.position} (${validated.grade})`
+          : validated.position,
+      });
 
       if (result.error) {
         throw new Error(result.error);
@@ -169,33 +197,114 @@ export default function AddEmployee() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="department">Department *</Label>
-                  <Input
-                    id="department"
-                    value={formData.department}
-                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                    required
-                  />
+                  {orgDepartments.length ? (
+                    <Select
+                      value={formData.department}
+                      onValueChange={(value) => setFormData({ ...formData, department: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {orgDepartments.map((dept) => (
+                          <SelectItem key={dept} value={dept}>
+                            {dept}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id="department"
+                      value={formData.department}
+                      onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                      required
+                    />
+                  )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="position">Position *</Label>
-                  <Input
-                    id="position"
-                    value={formData.position}
-                    onChange={(e) => setFormData({ ...formData, position: e.target.value })}
-                    required
-                  />
+                  <Label htmlFor="position">Designation *</Label>
+                  {orgDesignations.length ? (
+                    <Select
+                      value={formData.position}
+                      onValueChange={(value) => setFormData({ ...formData, position: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select designation" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[...orgDesignations, ...orgGrades].map((des) => (
+                          <SelectItem key={des} value={des}>
+                            {des}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id="position"
+                      value={formData.position}
+                      onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                      required
+                    />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="grade">Grade</Label>
+                  {orgGrades.length ? (
+                    <Select
+                      value={formData.grade}
+                      onValueChange={(value) => setFormData({ ...formData, grade: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select grade" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {orgGrades.map((grade) => (
+                          <SelectItem key={grade} value={grade}>
+                            {grade}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id="grade"
+                      value={formData.grade}
+                      onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
+                      placeholder="Grade (e.g., A4, A5, B1)"
+                    />
+                  )}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="workLocation">Work Location *</Label>
-                  <Input
-                    id="workLocation"
-                    value={formData.workLocation}
-                    onChange={(e) => setFormData({ ...formData, workLocation: e.target.value })}
-                    required
-                  />
+                  {orgWorkLocations.length ? (
+                    <Select
+                      value={formData.workLocation}
+                      onValueChange={(value) => setFormData({ ...formData, workLocation: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select work location" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {orgWorkLocations.map((loc) => (
+                          <SelectItem key={loc} value={loc}>
+                            {loc}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id="workLocation"
+                      value={formData.workLocation}
+                      onChange={(e) => setFormData({ ...formData, workLocation: e.target.value })}
+                      required
+                    />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="joinDate">Join Date *</Label>
@@ -238,11 +347,11 @@ export default function AddEmployee() {
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="employee">Employee</SelectItem>
-                      <SelectItem value="manager">Manager</SelectItem>
-                      <SelectItem value="hr">HR</SelectItem>
-                      <SelectItem value="director">Director</SelectItem>
                       <SelectItem value="ceo">CEO</SelectItem>
+                      <SelectItem value="hr">HR</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="employee">Employee</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

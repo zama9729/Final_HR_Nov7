@@ -375,7 +375,13 @@ export default function OrganizationSetup() {
   }
 
   const renderLinkOut = (label: string, link: string) => (
-    <Button variant="outline" onClick={() => navigate(link)} className="w-full sm:w-auto">
+    <Button 
+      variant="outline" 
+      onClick={() => {
+        navigate(link);
+      }} 
+      className="w-full sm:w-auto"
+    >
       {label}
     </Button>
   );
@@ -716,8 +722,20 @@ export default function OrganizationSetup() {
               filings and branded communication.
             </p>
             <div className="flex flex-wrap gap-3">
-              {renderLinkOut("Open Organization Settings", "/settings?tab=organization")}
-              {renderLinkOut("Manage Contact Info", "/settings")}
+              <Button 
+                variant="outline" 
+                onClick={() => navigate("/settings/organization-setup")} 
+                className="w-full sm:w-auto"
+              >
+                Open Organization Settings
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => navigate("/settings")} 
+                className="w-full sm:w-auto"
+              >
+                Manage Contact Info
+              </Button>
             </div>
           </div>
         );
@@ -1057,16 +1075,37 @@ export default function OrganizationSetup() {
             <div className="flex gap-2">
               <Button
                 variant="ghost"
-                onClick={() => {
-                  const draftPayload =
-                    activeStep === "branches"
-                      ? { draftBranch: branchForm }
-                      : activeStep === "departments"
-                      ? { draftDepartment: departmentForm, draftTeam: teamForm }
-                      : {};
-                  persistDraft(activeStep, draftPayload);
-                  toast({ title: "Draft saved", description: "You can resume anytime." });
+                onClick={async () => {
+                  try {
+                    let draftPayload: any = {};
+                    
+                    if (activeStep === "branches") {
+                      draftPayload = { draftBranch: branchForm };
+                    } else if (activeStep === "departments") {
+                      draftPayload = { draftDepartment: departmentForm, draftTeam: teamForm };
+                    } else if (activeStep === "org-details") {
+                      // For org-details, we can mark it as having been viewed/started
+                      draftPayload = { viewed: true, lastViewedAt: new Date().toISOString() };
+                    } else if (activeStep === "policies") {
+                      draftPayload = { selectedTemplate: selectedTemplate?.id || null, policyVariables };
+                    } else if (activeStep === "attendance") {
+                      draftPayload = { attendanceSettings };
+                    }
+                    
+                    await persistDraft(activeStep, draftPayload);
+                    toast({ 
+                      title: "Draft saved", 
+                      description: "You can resume anytime." 
+                    });
+                  } catch (error: any) {
+                    toast({
+                      title: "Failed to save draft",
+                      description: error.message || "Please try again",
+                      variant: "destructive",
+                    });
+                  }
                 }}
+                disabled={savingStep}
               >
                 Save & continue later
               </Button>

@@ -22,7 +22,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             <p className="text-sm font-semibold text-amber-900">Finish organization setup</p>
             <p className="text-sm text-amber-800">Complete the guided wizard to unlock the dashboard.</p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => navigate("/setup")}>
+          <Button variant="outline" size="sm" onClick={() => navigate("/onboarding")}>
             Resume setup
           </Button>
         </div>

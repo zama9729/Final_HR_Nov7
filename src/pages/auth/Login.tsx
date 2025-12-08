@@ -184,38 +184,38 @@ export default function Login() {
         {/* Step 1: Email Only */}
         {step === "email" && (
           <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-            <CardHeader className="space-y-4 text-center">
-              <div className="mx-auto h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
-                <Building2 className="h-7 w-7 text-primary-foreground" />
-              </div>
-              <div>
-                <CardTitle className="text-2xl">Company Login</CardTitle>
-                <CardDescription>Sign in to your HR platform account</CardDescription>
-              </div>
-            </CardHeader>
+        <CardHeader className="space-y-4 text-center">
+          <div className="mx-auto h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
+            <Building2 className="h-7 w-7 text-primary-foreground" />
+          </div>
+          <div>
+            <CardTitle className="text-2xl">Company Login</CardTitle>
+            <CardDescription>Sign in to your HR platform account</CardDescription>
+          </div>
+        </CardHeader>
             <form onSubmit={handleEmailSubmit}>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="you@company.com"
-                    value={email}
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@company.com"
+                value={email}
                     onChange={(e) => {
                       setEmail(e.target.value);
                       setEmailError("");
                     }}
-                    required
+                required
                     disabled={isCheckingEmail}
                     className={emailError ? "border-destructive" : ""}
                   />
                   {emailError && (
                     <p className="text-sm text-destructive">{emailError}</p>
                   )}
-                </div>
-              </CardContent>
-              <CardFooter className="flex flex-col gap-4">
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-4">
                 <Button 
                   type="submit" 
                   className="w-full red-glass-button" 
@@ -229,25 +229,25 @@ export default function Login() {
                   ) : (
                     "Continue"
                   )}
-                </Button>
+            </Button>
                 {emailError && emailError.includes("couldn't find") && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
+            <Button 
+              type="button" 
+              variant="outline" 
+              className="w-full"
                     onClick={handleSignUpWithEmail}
-                  >
+            >
                     Sign up with this email
-                  </Button>
+            </Button>
                 )}
-                <div className="text-sm text-center text-muted-foreground">
-                  Don't have an account?{" "}
-                  <Link to="/auth/signup" className="text-primary hover:underline font-medium">
-                    Sign up
-                  </Link>
-                </div>
-              </CardFooter>
-            </form>
+            <div className="text-sm text-center text-muted-foreground">
+              Don't have an account?{" "}
+              <Link to="/auth/signup" className="text-primary hover:underline font-medium">
+                Sign up
+              </Link>
+            </div>
+          </CardFooter>
+        </form>
           </div>
         )}
 

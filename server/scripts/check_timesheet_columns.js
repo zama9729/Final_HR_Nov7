@@ -49,3 +49,6 @@ async function checkColumns() {
 
 checkColumns();
 
+
+
+

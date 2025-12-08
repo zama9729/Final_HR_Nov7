@@ -35,3 +35,6 @@ CREATE POLICY team_schedule_events_delete ON team_schedule_events
   FOR DELETE
   USING (tenant_id = current_setting('app.org_id', true)::uuid);
 
+
+
+

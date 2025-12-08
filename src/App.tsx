@@ -83,6 +83,8 @@ import Form16 from "./pages/Form16";
 import OrganizationSetup from "./pages/OrganizationSetup";
 import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 import AuditLogs from "./pages/AuditLogs";
+import OnboardingWizardPage from "./pages/OnboardingWizardPage";
+import OrganizationSetupEdit from "./pages/OrganizationSetupEdit";
 
 const queryClient = new QueryClient();
 
@@ -153,7 +155,9 @@ const App = () => (
             <Route path="/auth/first-time-login" element={<FirstTimeLogin />} />
             <Route path="/auth/first-login" element={<FirstLoginWithToken />} />
             <Route path="/setup-password" element={<SetupPassword />} />
-            <Route path="/setup" element={<ProtectedRoute allowedRoles={['hr','ceo','admin']}><OrganizationSetup /></ProtectedRoute>} />
+            <Route path="/onboarding" element={<ProtectedRoute><OnboardingWizardPage /></ProtectedRoute>} />
+            {/* Old setup route - redirects to new onboarding wizard */}
+            <Route path="/setup" element={<ProtectedRoute><OnboardingWizardPage /></ProtectedRoute>} />
             <Route path="/super/dashboard" element={<ProtectedRoute allowedRoles={['super_user']}><SuperAdminDashboard /></ProtectedRoute>} />
             
             {/* Protected routes */}
@@ -196,6 +200,7 @@ const App = () => (
             <Route path="/onboarding/next-step" element={<ProtectedRoute><OnboardingNextStep /></ProtectedRoute>} />
             <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/settings/organization-setup" element={<ProtectedRoute allowedRoles={['hr','ceo','admin']}><OrganizationSetupEdit /></ProtectedRoute>} />
             <Route path="/appraisals" element={<ProtectedRoute allowedRoles={['manager', 'hr', 'director', 'ceo', 'admin']}><Appraisals /></ProtectedRoute>} />
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
             <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><ShiftManagement /></ProtectedRoute>} />
