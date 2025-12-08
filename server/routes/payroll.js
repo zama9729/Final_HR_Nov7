@@ -715,15 +715,18 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
       });
     }
 
+    const isOffCycleRun = run.run_type === 'off_cycle';
+
     // Process each employee (simplified - would need actual rate calculation)
     let totalAmount = 0;
     let totalEmployees = 0;
 
     for (const ts of timesheetsResult.rows) {
-      // Get employee rate (placeholder - would come from employee compensation table)
-      const rateCents = 5000 * 100; // $50/hour placeholder
-      const hours = parseFloat(ts.total_hours) || 0;
-      const baseGrossPayCents = Math.round(hours * rateCents);
+      // For off-cycle runs, skip base component calculations entirely.
+      // Start with zero gross so only adjustments contribute to payouts.
+      const rateCents = isOffCycleRun ? 0 : 5000 * 100; // $50/hour placeholder
+      const hours = isOffCycleRun ? 0 : (parseFloat(ts.total_hours) || 0);
+      const baseGrossPayCents = isOffCycleRun ? 0 : Math.round(hours * rateCents);
 
       const adjustments = adjustmentsByEmployee[ts.employee_id] || [];
       let taxableAdjustmentCents = 0;
@@ -737,36 +740,45 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
         }
       }
 
-      const grossPayCents = baseGrossPayCents + taxableAdjustmentCents;
+      const grossPayCents = isOffCycleRun
+        ? taxableAdjustmentCents // only adjustments contribute to income
+        : baseGrossPayCents + taxableAdjustmentCents;
 
-      const components = await getPayrollComponents(ts.employee_id, run.tenant_id);
+      // Standard components are skipped for off-cycle runs
+      let pfCents = 0;
+      let tdsCents = 0;
+      let otherDeductionsCents = 0;
 
-      // Find component with name containing "Basic" (case-insensitive)
-      const basicComponent = components.find(c => c.name && c.name.toLowerCase().includes('basic'));
+      if (!isOffCycleRun) {
+        const components = await getPayrollComponents(ts.employee_id, run.tenant_id);
 
-      const basicSalary= basicComponent ? Number(basicComponent.amount||0) : 0;
-      // Apply pf rule to basic salary
-      // If Basic <= 15000, PF = 12% of Basic
-      // If Basic > 15000,  PF = 12% of 15000
-      const pfWageCeiling = 15000;
-      const pfBasis = (basicSalary <= pfWageCeiling) ? basicSalary : pfWageCeiling;
-      const pfAmount = pfBasis*0.12;
+        // Find component with name containing "Basic" (case-insensitive)
+        const basicComponent = components.find(c => c.name && c.name.toLowerCase().includes('basic'));
 
-      const pfCents = Math.round(pfAmount*100);
+        const basicSalary = basicComponent ? Number(basicComponent.amount || 0) : 0;
+        // Apply pf rule to basic salary
+        // If Basic <= 15000, PF = 12% of Basic
+        // If Basic > 15000,  PF = 12% of 15000
+        const pfWageCeiling = 15000;
+        const pfBasis = (basicSalary <= pfWageCeiling) ? basicSalary : pfWageCeiling;
+        const pfAmount = pfBasis * 0.12;
+
+        pfCents = Math.round(pfAmount * 100);
 
       // NOTE: Reimbursements are now processed separately via reimbursement_runs
       // They are no longer included in payroll calculations
 
-      let tdsCents = 0;
-      try {
-        const financialYear = getFinancialYearForDate(run.pay_date);
-        const tdsResult = await calculateMonthlyTDS(ts.employee_id, run.tenant_id, financialYear);
-        tdsCents = Math.round(tdsResult.monthlyTds * 100);
-      } catch (tdsError) {
-        console.warn('Failed to calculate TDS for employee', ts.employee_id, tdsError);
+        try {
+          const financialYear = getFinancialYearForDate(run.pay_date);
+          const tdsResult = await calculateMonthlyTDS(ts.employee_id, run.tenant_id, financialYear);
+          tdsCents = Math.round(tdsResult.monthlyTds * 100);
+        } catch (tdsError) {
+          console.warn('Failed to calculate TDS for employee', ts.employee_id, tdsError);
+        }
+
+        otherDeductionsCents = Math.round(grossPayCents * 0.1); // placeholder for other deductions
       }
 
-      const otherDeductionsCents = Math.round(grossPayCents * 0.1); // placeholder for other deductions
       const totalDeductionsCents = tdsCents + pfCents + otherDeductionsCents;
       
       // Step C: Calculate base net pay

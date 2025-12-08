@@ -312,6 +312,12 @@ export const api = {
         amount,
       }),
     
+    addAdjustment: (runId: string, payload: { employee_id: string; component_name: string; amount: number; is_taxable?: boolean; notes?: string }) =>
+      client.post(`/api/payroll/runs/${runId}/adjustments`, {
+        ...payload,
+        is_taxable: payload.is_taxable ?? true,
+      }),
+    
     getCyclePayslips: (cycleId) =>
       client.get(`/api/payroll-cycles/${cycleId}/payslips`),
     

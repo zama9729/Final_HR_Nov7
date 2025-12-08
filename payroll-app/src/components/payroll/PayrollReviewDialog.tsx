@@ -23,6 +23,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Loader2, Edit2, Check, X, Ban, RotateCcw, Search } from "lucide-react";
@@ -82,6 +88,10 @@ export const PayrollReviewDialog = ({
   const [activeIncentiveIndex, setActiveIncentiveIndex] = useState<number | null>(null);
   const [incentiveDraft, setIncentiveDraft] = useState<string>("");
   const [savingIncentive, setSavingIncentive] = useState(false);
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkAmount, setBulkAmount] = useState<string>("");
+  const [bulkComponentName, setBulkComponentName] = useState<string>("Partial Salary Release");
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [heldEmployeeIds, setHeldEmployeeIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState<string>("");
   const queryClient = useQueryClient();
@@ -113,6 +123,9 @@ export const PayrollReviewDialog = ({
       setConfirmOpen(false);
       setHeldEmployeeIds(new Set());
       setSearchQuery("");
+      setBulkDialogOpen(false);
+      setBulkAmount("");
+      setBulkComponentName("Partial Salary Release");
     }
   }, [open]);
 
@@ -282,6 +295,57 @@ export const PayrollReviewDialog = ({
       toast.error(error.message || "Failed to process payroll");
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleUniformPayout = async () => {
+    const amountValue = Number(bulkAmount);
+    if (Number.isNaN(amountValue) || amountValue <= 0) {
+      toast.error("Please enter a valid payout amount greater than zero.");
+      return;
+    }
+    const componentName = (bulkComponentName || "").trim() || "Partial Salary Release";
+    const targets = activePayrollItems;
+    if (targets.length === 0) {
+      toast.error("No active employees available for bulk payout.");
+      return;
+    }
+
+    setBulkSaving(true);
+    try {
+      const results = await Promise.allSettled(
+        targets.map((emp) =>
+          api.payroll.addAdjustment(cycleId, {
+            employee_id: emp.employee_id,
+            component_name: componentName,
+            amount: amountValue,
+            is_taxable: true,
+          })
+        )
+      );
+
+      const failures = results.filter((r) => r.status === "rejected");
+      const successCount = results.length - failures.length;
+
+      if (successCount > 0) {
+        toast.success(`Added payout for ${successCount} employee${successCount === 1 ? "" : "s"}.`);
+      }
+      if (failures.length > 0) {
+        toast.error(`Failed for ${failures.length} employee${failures.length === 1 ? "" : "s"}.`);
+        console.error("Bulk payout errors:", failures);
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["payroll-preview", cycleId] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-cycles"] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-runs"] });
+      await refetch();
+
+      setBulkDialogOpen(false);
+      setBulkAmount("");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to apply uniform payout");
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -752,60 +816,126 @@ export const PayrollReviewDialog = ({
           </>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={processing}>
-            Cancel
-          </Button>
-          {mode === 'edit' ? (
-            <Button
-              disabled={!canModify || processing || activePayrollItems.length === 0}
-              onClick={saveChanges}
-            >
-              {processing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                "Save Changes"
-              )}
+        <DialogFooter className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2">
+            {mode !== 'edit' && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" disabled={!canModify || processing || activePayrollItems.length === 0}>
+                    Bulk Actions
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => setBulkDialogOpen(true)}>
+                    Set Uniform Payout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={processing}>
+              Cancel
             </Button>
-          ) : (
-            <AlertDialog open={confirmOpen} onOpenChange={(open) => !processing && setConfirmOpen(open)}>
-              <AlertDialogTrigger asChild>
-                <Button
-                  disabled={!canModify || processing || activePayrollItems.length === 0}
-                >
-                  {processing ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    "Process Payroll"
-                  )}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Process payroll?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Are you sure you want to process the payrolls?
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
-                  <AlertDialogAction
-                    disabled={processing}
-                    onClick={() => processPayroll()}
+            {mode === 'edit' ? (
+              <Button
+                disabled={!canModify || processing || activePayrollItems.length === 0}
+                onClick={saveChanges}
+              >
+                {processing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Changes"
+                )}
+              </Button>
+            ) : (
+              <AlertDialog open={confirmOpen} onOpenChange={(open) => !processing && setConfirmOpen(open)}>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    disabled={!canModify || processing || activePayrollItems.length === 0}
                   >
-                    Yes, Process
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
+                    {processing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      "Process Payroll"
+                    )}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Process payroll?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to process the payrolls?
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={processing}
+                      onClick={() => processPayroll()}
+                    >
+                      Yes, Process
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
         </DialogFooter>
+
+        <Dialog open={bulkDialogOpen} onOpenChange={(open) => !bulkSaving && setBulkDialogOpen(open)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Set Uniform Payout</DialogTitle>
+              <DialogDescription>
+                Apply the same taxable payout to all visible employees in this run.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="bulk-amount">Amount (INR)</Label>
+                <Input
+                  id="bulk-amount"
+                  type="number"
+                  min={0}
+                  value={bulkAmount}
+                  onChange={(e) => setBulkAmount(e.target.value)}
+                  placeholder="30000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bulk-component">Component Name</Label>
+                <Input
+                  id="bulk-component"
+                  value={bulkComponentName}
+                  onChange={(e) => setBulkComponentName(e.target.value)}
+                  placeholder="Partial Salary Release"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkDialogOpen(false)} disabled={bulkSaving}>
+                Cancel
+              </Button>
+              <Button onClick={handleUniformPayout} disabled={bulkSaving}>
+                {bulkSaving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Applying...
+                  </>
+                ) : (
+                  "Apply to All"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );
