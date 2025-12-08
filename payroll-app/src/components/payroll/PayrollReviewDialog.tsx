@@ -402,9 +402,12 @@ export const PayrollReviewDialog = ({
     item => !heldEmployeeIds.has(item.employee_id)
   );
   
-  const totalGross = activePayrollItems.reduce((sum, item) => sum + item.gross_salary, 0);
-  const totalDeductions = activePayrollItems.reduce((sum, item) => sum + item.deductions, 0);
-  const totalNet = totalGross - totalDeductions;
+  const isPartialRun = runType === "partial_payment";
+  const totalGross = activePayrollItems.reduce((sum, item) => sum + (isPartialRun ? 0 : item.gross_salary), 0);
+  const totalDeductions = activePayrollItems.reduce((sum, item) => sum + (isPartialRun ? 0 : item.deductions), 0);
+  const totalNet = isPartialRun
+    ? activePayrollItems.reduce((sum, item) => sum + item.net_salary, 0)
+    : totalGross - totalDeductions;
 
   const getMonthName = (month: number) => {
     return new Date(2000, month - 1).toLocaleString("default", { month: "long" });
@@ -456,6 +459,107 @@ export const PayrollReviewDialog = ({
                 </p>
               )}
             </div>
+            {isPartialRun && (
+              <div className="border rounded-lg overflow-x-auto mb-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="sticky left-0 bg-background z-10">Employee</TableHead>
+                      <TableHead className="text-right">Partial Payout Amount</TableHead>
+                      <TableHead className="text-right font-semibold text-primary">Net Pay</TableHead>
+                      <TableHead className="sticky right-0 bg-background z-10">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredPayrollItems.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                          No employees found matching your search.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredPayrollItems.map((item) => {
+                        const originalIndex = payrollItems.findIndex(p => p.employee_id === item.employee_id);
+                        const isHeld = heldEmployeeIds.has(item.employee_id);
+                        return (
+                          <TableRow key={item.employee_id} className={isHeld ? "opacity-50 bg-muted/30" : ""}>
+                            <TableCell className="sticky left-0 bg-background z-10">
+                              <div className="space-y-1">
+                                <div className="font-medium flex items-center gap-2">
+                                  {item.employee_name}
+                                  {heldEmployeeIds.has(item.employee_id) && (
+                                    <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">
+                                      HELD
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground">{item.employee_code}</div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number"
+                                value={item.net_salary}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value || 0);
+                                  const updated = [...payrollItems];
+                                  updated[originalIndex] = {
+                                    ...updated[originalIndex],
+                                    net_salary: val,
+                                    gross_salary: val,
+                                    deductions: 0,
+                                    basic_salary: 0,
+                                    hra: 0,
+                                    special_allowance: 0,
+                                    da: 0,
+                                    lta: 0,
+                                    bonus: 0,
+                                    incentive_amount: 0,
+                                    pf_deduction: 0,
+                                    esi_deduction: 0,
+                                    pt_deduction: 0,
+                                    tds_deduction: 0,
+                                    other_deductions: 0,
+                                  };
+                                  setPayrollItems(updated);
+                                }}
+                                className="w-32"
+                                disabled={!canModify}
+                              />
+                            </TableCell>
+                            <TableCell className="text-right font-semibold text-primary">
+                              {formatCurrency(item.net_salary)}
+                            </TableCell>
+                            <TableCell className="sticky right-0 bg-background z-10">
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleHoldEmployee(item.employee_id)}
+                                >
+                                  {heldEmployeeIds.has(item.employee_id) ? (
+                                    <>
+                                      <RotateCcw className="h-4 w-4 mr-1" />
+                                      Unhold
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Ban className="h-4 w-4 mr-1" />
+                                      Hold
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            {!isPartialRun && (
             <div className="border rounded-lg overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -792,6 +896,7 @@ export const PayrollReviewDialog = ({
                 </TableBody>
               </Table>
             </div>
+            )}
 
             <Card>
               <CardContent className="pt-6">

@@ -592,8 +592,8 @@ router.post('/runs', authenticateToken, requireCapability(CAPABILITIES.PAYROLL_R
     }
 
     // Validate run_type
-    if (run_type && !['regular', 'off_cycle'].includes(run_type)) {
-      return res.status(400).json({ error: 'run_type must be either "regular" or "off_cycle"' });
+    if (run_type && !['regular', 'off_cycle', 'partial_payment'].includes(run_type)) {
+      return res.status(400).json({ error: 'run_type must be one of "regular", "off_cycle", or "partial_payment"' });
     }
 
     const tenantId = await getTenantIdForUser(req.user.id);
@@ -689,8 +689,8 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
       return acc;
     }, {});
 
-    // Step A: Fetch all completed off_cycle runs within the same pay period
-    // Only for regular runs - off_cycle runs don't need to check previous payments
+    // Step A: Fetch all completed partial_payment runs within the same pay period
+    // Only for regular runs - partial_payment runs are interim payouts deducted later
     const alreadyPaidByEmployee = new Map();
     if (run.run_type === 'regular') {
       const previousRunsResult = await query(
@@ -701,7 +701,7 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
          JOIN payroll_run_employees pre ON pre.payroll_run_id = pr.id
          WHERE pr.tenant_id = $1
            AND pr.id != $2
-           AND pr.run_type = 'off_cycle'
+           AND pr.run_type = 'partial_payment'
            AND pr.status = 'completed'
            AND pr.pay_period_start >= $3
            AND pr.pay_period_end <= $4
@@ -716,17 +716,18 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
     }
 
     const isOffCycleRun = run.run_type === 'off_cycle';
+    const isPartialPayment = run.run_type === 'partial_payment';
 
     // Process each employee (simplified - would need actual rate calculation)
     let totalAmount = 0;
     let totalEmployees = 0;
 
     for (const ts of timesheetsResult.rows) {
-      // For off-cycle runs, skip base component calculations entirely.
+      // For off-cycle or partial runs, skip base component calculations entirely.
       // Start with zero gross so only adjustments contribute to payouts.
-      const rateCents = isOffCycleRun ? 0 : 5000 * 100; // $50/hour placeholder
-      const hours = isOffCycleRun ? 0 : (parseFloat(ts.total_hours) || 0);
-      const baseGrossPayCents = isOffCycleRun ? 0 : Math.round(hours * rateCents);
+      const rateCents = (isOffCycleRun || isPartialPayment) ? 0 : 5000 * 100; // $50/hour placeholder
+      const hours = (isOffCycleRun || isPartialPayment) ? 0 : (parseFloat(ts.total_hours) || 0);
+      const baseGrossPayCents = (isOffCycleRun || isPartialPayment) ? 0 : Math.round(hours * rateCents);
 
       const adjustments = adjustmentsByEmployee[ts.employee_id] || [];
       let taxableAdjustmentCents = 0;
@@ -740,16 +741,16 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
         }
       }
 
-      const grossPayCents = isOffCycleRun
+      const grossPayCents = (isOffCycleRun || isPartialPayment)
         ? taxableAdjustmentCents // only adjustments contribute to income
         : baseGrossPayCents + taxableAdjustmentCents;
 
-      // Standard components are skipped for off-cycle runs
+      // Standard components are skipped for off-cycle and partial payment runs
       let pfCents = 0;
       let tdsCents = 0;
       let otherDeductionsCents = 0;
 
-      if (!isOffCycleRun) {
+      if (!isOffCycleRun && !isPartialPayment) {
         const components = await getPayrollComponents(ts.employee_id, run.tenant_id);
 
         // Find component with name containing "Basic" (case-insensitive)
@@ -785,7 +786,7 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
       // NOTE: Reimbursements are no longer included in payroll net pay calculation
       let baseNetPayCents = grossPayCents - totalDeductionsCents + nonTaxableAdjustmentCents;
       
-      // Step C: For regular runs, deduct already paid amount from previous off_cycle runs
+      // Step C: For regular runs, deduct already paid amount from previous partial_payment runs
       const previousPaidCents = alreadyPaidByEmployee.get(ts.employee_id) || 0;
       let finalNetPayCents = baseNetPayCents;
       
@@ -813,6 +814,7 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
         pf_cents: pfCents,
         non_taxable_adjustments_cents: nonTaxableAdjustmentCents,
         already_paid_cents: previousPaidCents,
+        interim_payment_cents: previousPaidCents,
       };
 
       await query(

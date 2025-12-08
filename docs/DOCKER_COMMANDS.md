@@ -4,7 +4,7 @@
 
 Since the `payroll-app` service has volumes mounted (`./payroll-app:/app`), your changes should already be reflected. If not, restart the container:
 
-```bash
+```bash 
 # Restart just the payroll frontend container
 docker-compose restart payroll-app
 
