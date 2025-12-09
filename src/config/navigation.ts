@@ -86,7 +86,10 @@ export const roleNavItems: Record<string, NavGroup[]> = {
     {
       id: "employee-org",
       label: "Company",
-      items: [{ title: "Org Chart", url: "/org-chart", icon: Network }],
+      items: [
+        { title: "Org Chart", url: "/org-chart", icon: Network },
+        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
+      ],
     },
   ],
   admin: [
@@ -109,7 +112,10 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Projects", url: "/projects", icon: Briefcase },
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
+        { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
+        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
+        { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
@@ -171,7 +177,10 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Projects", url: "/projects", icon: Briefcase },
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
+        { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
+        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
+        { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
@@ -236,7 +245,10 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Projects", url: "/projects", icon: Briefcase },
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
+        { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
+        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
+        { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
@@ -364,7 +376,7 @@ export interface NavigationConfig {
 
 export const getMenuItemsForProfile = (config: NavigationConfig): NavGroup[] => {
   const { userRole, payrollIntegrationEnabled, isClockMode, isTimesheetMode } = config;
-  
+
   const resolvedRoleKey = resolveRoleKey(userRole);
   const navigationGroups = roleNavItems[resolvedRoleKey] || roleNavItems.employee;
 

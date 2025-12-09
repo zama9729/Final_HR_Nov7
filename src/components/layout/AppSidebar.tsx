@@ -85,6 +85,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
+        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
@@ -143,6 +144,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
+        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
@@ -204,6 +206,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
         { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
+        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
         { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
         { title: "Policy Management", url: "/policies/management", icon: FileText },
         { title: "New Project", url: "/projects/new", icon: Building2 },
@@ -500,10 +503,9 @@ export function AppSidebar() {
           <NavLink
             to={item.url}
             className={({ isActive }) =>
-              `flex items-center gap-3 py-2.5 rounded-lg text-sm ${minimal ? "justify-center px-2" : "px-3"} ${
-                isActive
-                  ? activeStyles
-                  : `text-slate-700 dark:text-slate-200 ${baseHover}`
+              `flex items-center gap-3 py-2.5 rounded-lg text-sm ${minimal ? "justify-center px-2" : "px-3"} ${isActive
+                ? activeStyles
+                : `text-slate-700 dark:text-slate-200 ${baseHover}`
               }`
             }
           >

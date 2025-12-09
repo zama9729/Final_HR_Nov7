@@ -58,6 +58,7 @@ import announcementsRoutes from './routes/announcements.js';
 import teamScheduleEventsRoutes from './routes/team-schedule-events.js';
 import setupRoutes from './routes/setup.js';
 import branchesRoutes from './routes/branches.js';
+import designationsRoutes from './routes/designations.js';
 import superRoutes from './routes/super.js';
 import auditLogsRoutes from './routes/audit-logs.js';
 import schedulingRoutes from './routes/scheduling.js';
@@ -93,13 +94,13 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 const corsOptions = {
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
     // Allow all origins in dev; restrict via FRONTEND_URL in production as needed
     callback(null, true);
   },
   credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','X-Requested-With','content-type','authorization']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'content-type', 'authorization']
 };
 
 app.use(cors(corsOptions));
@@ -214,6 +215,7 @@ app.use('/api/v1/reimbursements', reimbursementRoutes);
 app.use('/api/reports', authenticateToken, reportsRoutes);
 app.use('/api/announcements', authenticateToken, announcementsRoutes);
 app.use('/api/team-schedule/events', teamScheduleEventsRoutes);
+app.use('/api/designations', authenticateToken, setTenantContext, designationsRoutes);
 
 // Tenant info endpoint for payroll service compatibility
 app.get('/api/tenant', authenticateToken, async (req, res) => {
@@ -286,7 +288,7 @@ app.get('/discovery', (req, res, next) => {
 // Initialize database pool
 createPool().then(async () => {
   console.log('✅ Database connection pool created');
-  
+
   // Ensure admin role exists in app_role enum
   try {
     await ensureAdminRole();
@@ -294,7 +296,7 @@ createPool().then(async () => {
     console.error('Error ensuring admin role:', error);
     console.warn('⚠️  Please manually run: ALTER TYPE app_role ADD VALUE IF NOT EXISTS \'admin\';');
   }
-  
+
   // Ensure onboarding_data table has all required columns
   try {
     await ensureOnboardingColumns();
@@ -302,19 +304,19 @@ createPool().then(async () => {
     console.error('Error ensuring onboarding columns:', error);
     console.warn('⚠️  Please manually run the migration to add onboarding columns');
   }
-  
+
   // Ensure anyone with direct reports is at least a manager
   try {
     await ensureManagerRoles();
   } catch (error) {
     console.error('Error ensuring manager roles:', error);
   }
-  
+
   // Initialize MinIO buckets
   try {
     const { ensureBucketExists, getStorageProvider, getOnboardingBucket, isS3Available } = await import('./services/storage.js');
     const storageProvider = getStorageProvider();
-    
+
     if (storageProvider === 's3' && isS3Available()) {
       const bucketName = getOnboardingBucket();
       console.log(`\n[MinIO] Initializing bucket: ${bucketName}`);
@@ -345,7 +347,7 @@ createPool().then(async () => {
         AND table_name = 'attendance_events'
       );
     `);
-    
+
     if (!tableCheck.rows[0]?.exists) {
       console.log('⚠️  Attendance tables not found. Creating tables...');
       await createAttendanceTables();
@@ -367,9 +369,9 @@ createPool().then(async () => {
         (SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'scheduling_rule_sets')) as has_rule_sets,
         (SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'generated_schedules')) as has_schedules;
     `);
-    
+
     const { has_templates, has_rule_sets, has_schedules } = tableCheck.rows[0];
-    
+
     if (!has_templates || !has_rule_sets || !has_schedules) {
       console.log('⚠️  Scheduling tables missing. Creating tables...');
       await createSchedulingTables();
@@ -498,7 +500,7 @@ createPool().then(async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
-  
+
   // Error handling middleware (should be last)
   app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);
@@ -519,12 +521,12 @@ createPool().then(async () => {
 
   // SSL/HTTPS Configuration
   const SSL_ENABLED = process.env.SSL_ENABLED === 'true' || process.env.HTTPS_ENABLED === 'true';
-  
+
   if (SSL_ENABLED) {
     try {
       const { createHTTPSServer } = await import('./utils/ssl-config.js');
       const httpsServer = createHTTPSServer(app, PORT);
-      
+
       if (!httpsServer) {
         // Fallback to HTTP if SSL setup fails
         console.warn('[SSL] Falling back to HTTP server');
