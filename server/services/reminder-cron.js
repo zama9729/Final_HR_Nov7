@@ -7,6 +7,20 @@ import { query } from '../db/pool.js';
  */
 async function checkDueReminders() {
   try {
+    // Check if reminders table exists
+    const tableCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'reminders'
+      );
+    `);
+    
+    if (!tableCheck.rows[0]?.exists) {
+      // Table doesn't exist yet, skip silently (will be created when smart-memo is first used)
+      return;
+    }
+    
     const now = new Date();
     
     // Find reminders that are due (remind_at <= now) and not yet processed
