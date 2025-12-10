@@ -25,6 +25,7 @@ import {
   GitBranch,
   ArrowUpCircle,
   ShieldAlert,
+  Download,
 } from "lucide-react";
 
 export type NavItem = {
@@ -62,6 +63,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "My Shifts", url: "/my/profile?tab=shifts", icon: CalendarClock },
         { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
+        { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
         { title: "Leave Requests", url: "/leaves", icon: Calendar },
         { title: "Request Resignation", url: "/offboarding/new", icon: LogOut },
         { title: "Documents", url: "/documents", icon: Inbox },
@@ -134,6 +136,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
+        { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
@@ -265,6 +268,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
+        { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
@@ -319,6 +323,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
+        { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
       ],

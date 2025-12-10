@@ -318,6 +318,142 @@ router.post('/change-password', authenticateToken, async (req, res) => {
   }
 });
 
+// Check email - Step 1 of two-step login
+router.post('/check-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if user exists
+    const userResult = await query(
+      `SELECT p.id, p.tenant_id, o.name as company_name, o.logo_url as company_logo_url
+       FROM profiles p
+       LEFT JOIN organizations o ON o.id = p.tenant_id
+       WHERE p.email = $1`,
+      [normalizedEmail]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.json({
+        exists: false
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Check if user has password set (has row in user_auth with password_hash)
+    const authResult = await query(
+      `SELECT password_hash FROM user_auth WHERE user_id = $1`,
+      [user.id]
+    );
+
+    const hasPassword = authResult.rows.length > 0 && authResult.rows[0].password_hash;
+
+    return res.json({
+      exists: true,
+      firstLogin: !hasPassword,
+      companyName: user.company_name || 'Company',
+      companyLogoUrl: user.company_logo_url || null
+    });
+  } catch (error) {
+    console.error('Check email error:', error);
+    res.status(500).json({ error: error.message || 'Failed to check email' });
+  }
+});
+
+// First-time password setup
+router.post('/first-time-setup', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Validate password strength
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Get user
+    const userResult = await query(
+      `SELECT p.id, p.email, p.first_name, p.last_name, p.tenant_id
+       FROM profiles p
+       WHERE p.email = $1`,
+      [normalizedEmail]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Check if password already set
+    const authCheck = await query(
+      `SELECT password_hash FROM user_auth WHERE user_id = $1`,
+      [user.id]
+    );
+
+    if (authCheck.rows.length > 0 && authCheck.rows[0].password_hash) {
+      return res.status(400).json({ error: 'Password already set. Please use regular login.' });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Insert or update user_auth
+    await query(
+      `INSERT INTO user_auth (user_id, password_hash, created_at, updated_at)
+       VALUES ($1, $2, now(), now())
+       ON CONFLICT (user_id) 
+       DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = now()`,
+      [user.id, hashedPassword]
+    );
+
+    // Get user role and org_id
+    const roleResult = await query(
+      `SELECT ur.role, p.tenant_id as org_id
+       FROM user_roles ur
+       JOIN profiles p ON p.id = ur.user_id
+       WHERE ur.user_id = $1
+       LIMIT 1`,
+      [user.id]
+    );
+    const role = roleResult.rows[0]?.role || 'employee';
+    const orgId = roleResult.rows[0]?.org_id;
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role, org_id: orgId },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        role
+      }
+    });
+  } catch (error) {
+    console.error('First-time setup error:', error);
+    res.status(500).json({ error: error.message || 'Failed to set up password' });
+  }
+});
+
 // Login
 router.post('/login', async (req, res) => {
   try {

@@ -29,7 +29,7 @@ interface PayrollCycle {
   created_at: string;
   approved_at?: string;
   payday?: string;
-  run_type?: "regular" | "off_cycle";
+  run_type?: "regular" | "off_cycle" | "partial_payment";
 }
 
 interface PayrollCycleListProps {
@@ -192,10 +192,14 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
                   <span>{getMonthName(cycle.month)} {cycle.year}</span>
                   {cycle.run_type && (
                     <Badge 
-                      variant={cycle.run_type === "off_cycle" ? "outline" : "secondary"}
+                      variant={cycle.run_type === "off_cycle" ? "outline" : cycle.run_type === "partial_payment" ? "destructive" : "secondary"}
                       className="text-xs w-fit"
                     >
-                      {cycle.run_type === "off_cycle" ? "Off-Cycle" : "Regular"}
+                      {cycle.run_type === "off_cycle"
+                        ? "Off-Cycle / Bonus"
+                        : cycle.run_type === "partial_payment"
+                        ? "Partial Salary Release"
+                        : "Regular"}
                     </Badge>
                   )}
                 </div>
@@ -285,6 +289,7 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
           cycleId={selectedCycle.id}
           cycleMonth={selectedCycle.month}
           cycleYear={selectedCycle.year}
+          runType={selectedCycle.run_type as "regular" | "off_cycle" | "partial_payment" | undefined}
           onProcessed={handleProcessed}
           canModify={isCycleEditable(selectedCycle.status)}
           mode="edit"
@@ -295,6 +300,7 @@ export const PayrollCycleList = ({ cycles, onRefresh }: PayrollCycleListProps) =
           cycleId={selectedCycle.id}
           cycleMonth={selectedCycle.month}
           cycleYear={selectedCycle.year}
+          runType={selectedCycle.run_type as "regular" | "off_cycle" | "partial_payment" | undefined}
         />
         <BankTransferPreviewDialog
           open={bankTransferPreviewOpen}

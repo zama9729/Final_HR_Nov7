@@ -10,6 +10,9 @@ import {
   addDays,
   isSameMonth,
   isToday,
+  parseISO,
+  eachDayOfInterval,
+  isWithinInterval,
 } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -81,6 +84,8 @@ export function CalendarPanel() {
   const [addDate, setAddDate] = useState<string | null>(null);
   const [addTitle, setAddTitle] = useState('');
   const [addNotes, setAddNotes] = useState('');
+  const [addStartTime, setAddStartTime] = useState('');
+  const [addEndTime, setAddEndTime] = useState('');
 
   const normalizeName = (name: string | undefined | null) =>
     (name || '')
@@ -92,41 +97,79 @@ export function CalendarPanel() {
     [user?.firstName, user?.lastName].filter(Boolean).join(' '),
   );
 
-  // Load any saved personal notes/tasks for this user
+  // Load personal events from backend and localStorage (for migration)
   useEffect(() => {
     if (!user?.id) return;
-    try {
-      const raw = localStorage.getItem(`teamCalendarPersonal:${user.id}`);
-      if (raw) {
-        const parsed = JSON.parse(raw) as CalendarEvent[];
-        setPersonalEvents(
-          Array.isArray(parsed)
-            ? parsed.map((evt) => ({ ...evt, type: 'personal', isPersonal: true }))
-            : [],
-        );
+    const loadPersonalEvents = async () => {
+      try {
+        // Try to load from backend first
+        const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
+        const monthEnd = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
+        const response = await api.getPersonalCalendarEvents({ start_date: monthStart, end_date: monthEnd });
+        const backendEvents = (response?.events || []).map((evt: any) => {
+          // Normalize date to YYYY-MM-DD format
+          let eventDate = evt.event_date;
+          if (eventDate instanceof Date) {
+            eventDate = format(eventDate, 'yyyy-MM-dd');
+          } else if (typeof eventDate === 'string') {
+            eventDate = eventDate.split('T')[0]; // Extract YYYY-MM-DD from ISO string
+          }
+          
+          return {
+            id: evt.id,
+            type: 'personal' as const,
+            title: evt.title,
+            date: eventDate,
+            time: evt.start_time && evt.end_time 
+              ? `${evt.start_time.substring(0, 5)}-${evt.end_time.substring(0, 5)}`
+              : evt.start_time 
+              ? evt.start_time.substring(0, 5)
+              : undefined,
+            description: evt.description,
+            isPersonal: true,
+          };
+        });
+        
+        console.log('Loaded personal events from backend:', backendEvents);
+        
+        // Also check localStorage for any events not yet migrated
+        try {
+          const raw = localStorage.getItem(`teamCalendarPersonal:${user.id}`);
+          if (raw) {
+            const parsed = JSON.parse(raw) as CalendarEvent[];
+            const localEvents = parsed.map((evt) => ({ ...evt, type: 'personal' as const, isPersonal: true }));
+            // Merge and deduplicate
+            const allEvents = [...backendEvents, ...localEvents];
+            const uniqueEvents = Array.from(new Map(allEvents.map(e => [e.id, e])).values());
+            setPersonalEvents(uniqueEvents);
+            // Clear localStorage after migration
+            localStorage.removeItem(`teamCalendarPersonal:${user.id}`);
+          } else {
+            setPersonalEvents(backendEvents);
+          }
+        } catch {
+          setPersonalEvents(backendEvents);
+        }
+      } catch (error) {
+        console.error('Failed to load personal events:', error);
+        // Fallback to localStorage
+        try {
+          const raw = localStorage.getItem(`teamCalendarPersonal:${user.id}`);
+          if (raw) {
+            const parsed = JSON.parse(raw) as CalendarEvent[];
+            setPersonalEvents(
+              Array.isArray(parsed)
+                ? parsed.map((evt) => ({ ...evt, type: 'personal', isPersonal: true }))
+                : [],
+            );
+          }
+        } catch {
+          // ignore parse errors
+        }
       }
-    } catch {
-      // ignore parse errors
-    }
-  }, [user?.id]);
-
-  // Persist personal events
-  useEffect(() => {
-    if (!user?.id) return;
-    try {
-      const payload = personalEvents.map(({ id, date, title, description }) => ({
-        id,
-        date,
-        title,
-        description,
-        type: 'personal',
-        isPersonal: true,
-      }));
-      localStorage.setItem(`teamCalendarPersonal:${user.id}`, JSON.stringify(payload));
-    } catch {
-      // ignore storage errors
-    }
-  }, [personalEvents, user?.id]);
+    };
+    loadPersonalEvents();
+  }, [user?.id, currentMonth]);
 
   useEffect(() => {
     if (!privilegedRoles.has(userRole || '') && viewLevel !== 'employee') {
@@ -149,48 +192,67 @@ export function CalendarPanel() {
         });
         if (!isMounted) return;
 
-        const mergedRaw: CalendarEvent[] = (response.events || [])
-          .map((event: any, idx: number) => {
-            const resourceType = event?.resource?.type;
-            const normalizedType: CalendarEvent['type'] =
-              resourceType === 'shift'
-                ? 'shift'
-                : resourceType === 'assignment'
-                  ? 'project'
-                  : resourceType === 'holiday'
-                    ? 'holiday'
-                    : resourceType === 'birthday'
-                      ? 'birthday'
-                      : resourceType === 'leave'
-                        ? 'leave'
-                        : resourceType === 'team_event'
-                          ? 'team_event'
-                          : 'announcement';
+        // Get month boundaries for filtering expanded events
+        const monthStart = startOfMonth(currentMonth);
+        const monthEnd = endOfMonth(currentMonth);
 
-            const rawISO =
-              (typeof event?.resource?.shift_date === 'string' && event.resource.shift_date) ||
-              (typeof event?.resource?.start === 'string' && event.resource.start) ||
-              (typeof event?.start === 'string' && event.start) ||
-              (typeof event?.date === 'string' && event.date) ||
-              '';
-            if (!rawISO) {
-              return null;
-            }
+        // Expand events with date ranges into individual day events
+        const expandedEvents: CalendarEvent[] = [];
+        
+        (response.events || []).forEach((event: any, idx: number) => {
+          const resourceType = event?.resource?.type;
+          const normalizedType: CalendarEvent['type'] =
+            resourceType === 'shift'
+              ? 'shift'
+              : resourceType === 'assignment'
+                ? 'project'
+                : resourceType === 'holiday'
+                  ? 'holiday'
+                  : resourceType === 'birthday'
+                    ? 'birthday'
+                    : resourceType === 'leave'
+                      ? 'leave'
+                      : resourceType === 'team_event'
+                        ? 'team_event'
+                        : 'announcement';
 
-            let dateOnly = '';
-            try {
-              const parsed = new Date(rawISO);
-              if (!isNaN(parsed.getTime())) {
-                dateOnly = format(parsed, 'yyyy-MM-dd');
-              }
-            } catch {
-              dateOnly = rawISO.split('T')[0] || rawISO;
-            }
-            if (!dateOnly) {
-              dateOnly = rawISO.split('T')[0] || rawISO;
-            }
+          // Get start date
+          const rawStartISO =
+            (typeof event?.resource?.shift_date === 'string' && event.resource.shift_date) ||
+            (typeof event?.resource?.start === 'string' && event.resource.start) ||
+            (typeof event?.start === 'string' && event.start) ||
+            (typeof event?.date === 'string' && event.date) ||
+            '';
+          
+          // Get end date (for date ranges)
+          const rawEndISO =
+            (typeof event?.resource?.end_date === 'string' && event.resource.end_date) ||
+            (typeof event?.end === 'string' && event.end) ||
+            rawStartISO; // Default to start if no end date
 
-            // Derive a human-readable time range if available.
+          if (!rawStartISO) {
+            return;
+          }
+
+          let startDate: Date;
+          let endDate: Date;
+          
+          try {
+            startDate = parseISO(rawStartISO.split('T')[0]);
+            endDate = parseISO(rawEndISO.split('T')[0]);
+            
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+              return;
+            }
+          } catch {
+            return;
+          }
+
+          // Only derive time for shift events - projects, leaves, and other events don't need time display
+          let time: string | undefined = undefined;
+          
+          if (normalizedType === 'shift') {
+            // Derive a human-readable time range if available for shifts only
             let startTime: string | undefined =
               typeof event?.resource?.start_time === 'string' && event.resource.start_time
                 ? event.resource.start_time
@@ -222,52 +284,92 @@ export function CalendarPanel() {
               }
             }
 
-            const time =
+            time =
               startTime && endTime
                 ? `${startTime} - ${endTime}`
                 : startTime
                   ? startTime
                   : undefined;
+          }
 
-            const shiftSubtype: CalendarEvent['shiftSubtype'] =
-              normalizedType === 'shift'
-                ? event?.resource?.shift_type === 'night'
-                  ? 'night'
-                  : 'day'
-                : undefined;
+          const shiftSubtype: CalendarEvent['shiftSubtype'] =
+            normalizedType === 'shift'
+              ? event?.resource?.shift_type === 'night'
+                ? 'night'
+                : 'day'
+              : undefined;
 
-            const employeeNameFromResource =
-              typeof event?.resource?.employee_name === 'string'
-                ? event.resource.employee_name
-                : undefined;
+          const employeeNameFromResource =
+            typeof event?.resource?.employee_name === 'string'
+              ? event.resource.employee_name
+              : undefined;
 
-            const isSelfBirthdayEvent =
-              normalizedType === 'birthday' &&
-              !!selfName &&
-              normalizeName(employeeNameFromResource) === selfName;
+          const isSelfBirthdayEvent =
+            normalizedType === 'birthday' &&
+            !!selfName &&
+            normalizeName(employeeNameFromResource) === selfName;
 
-            const title =
-              isSelfBirthdayEvent
-                ? 'Your birthday'
-                : event.title || event?.resource?.template_name || 'Event';
+          const title =
+            isSelfBirthdayEvent
+              ? 'Your birthday'
+              : event.title || event?.resource?.template_name || 'Event';
 
-            const description = isSelfBirthdayEvent
-              ? undefined
-              : employeeNameFromResource ||
-                event?.resource?.project_name ||
-                event?.resource?.name;
+          const description = isSelfBirthdayEvent
+            ? undefined
+            : employeeNameFromResource ||
+              event?.resource?.project_name ||
+              event?.resource?.name;
 
-            return {
-              id: event.id || `event-${idx}`,
-              type: normalizedType,
-              title,
-              date: dateOnly,
-              time,
-              description,
-              shiftSubtype,
-            } as CalendarEvent;
-          })
-          .filter((item): item is CalendarEvent => Boolean(item));
+          // Determine if this event type should be expanded across date ranges
+          // Expand: leaves, projects/assignments, team events
+          // Don't expand: shifts (single day), birthdays (single day), holidays (single day)
+          const shouldExpand = normalizedType === 'leave' || 
+                              normalizedType === 'project' || 
+                              normalizedType === 'team_event';
+
+          // Compare dates (ignoring time component)
+          const startDateStr = format(startDate, 'yyyy-MM-dd');
+          const endDateStr = format(endDate, 'yyyy-MM-dd');
+          const isDateRange = startDateStr !== endDateStr;
+
+          if (shouldExpand && isDateRange) {
+            // Expand date range: create an event for each day
+            const dateRange = eachDayOfInterval({ start: startDate, end: endDate });
+            
+            dateRange.forEach((day) => {
+              // Only include days within the current month view
+              if (isWithinInterval(day, { start: monthStart, end: monthEnd })) {
+                expandedEvents.push({
+                  id: `${event.id || `event-${idx}`}-${format(day, 'yyyy-MM-dd')}`,
+                  type: normalizedType,
+                  title,
+                  date: format(day, 'yyyy-MM-dd'),
+                  time,
+                  description,
+                  shiftSubtype,
+                } as CalendarEvent);
+              }
+            });
+          } else {
+            // Single day event or event type that shouldn't be expanded
+            const dateOnly = format(startDate, 'yyyy-MM-dd');
+            
+            // Only include if within current month view
+            if (isWithinInterval(startDate, { start: monthStart, end: monthEnd })) {
+              expandedEvents.push({
+                id: event.id || `event-${idx}`,
+                type: normalizedType,
+                title,
+                date: dateOnly,
+                time,
+                description,
+                shiftSubtype,
+              } as CalendarEvent);
+            }
+          }
+        });
+
+        const mergedRaw: CalendarEvent[] = expandedEvents;
 
         // For HR/CEO/Admin in organization view, aggregate day/night shift counts per day
         const RoleForAggregation = new Set(['hr', 'ceo', 'admin']);
@@ -331,12 +433,27 @@ export function CalendarPanel() {
 
   const eventsByDate = useMemo(() => {
     const allEvents = [...events, ...personalEvents];
-    return allEvents.reduce<Record<string, CalendarEvent[]>>((acc, event) => {
-      const key = event.date;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(event);
+    const grouped = allEvents.reduce<Record<string, CalendarEvent[]>>((acc, event) => {
+      // Normalize date to YYYY-MM-DD format for consistent key matching
+      let dateKey = event.date;
+      if (dateKey instanceof Date) {
+        dateKey = format(dateKey, 'yyyy-MM-dd');
+      } else if (typeof dateKey === 'string') {
+        dateKey = dateKey.split('T')[0]; // Extract YYYY-MM-DD from ISO string
+      }
+      
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(event);
       return acc;
     }, {});
+    
+    // Debug logging
+    if (personalEvents.length > 0) {
+      console.log('Personal events in state:', personalEvents);
+      console.log('Events grouped by date:', grouped);
+    }
+    
+    return grouped;
   }, [events, personalEvents]);
 
   const openAddForDate = (date: Date) => {
@@ -345,27 +462,119 @@ export function CalendarPanel() {
     setAddDate(key);
     setAddTitle('');
     setAddNotes('');
+    setAddStartTime('');
+    setAddEndTime('');
+    setError(null);
     setAddDialogOpen(true);
   };
 
-  const handleSavePersonal = () => {
+  const handleSavePersonal = async () => {
     if (!addDate || !addTitle.trim()) {
       setError('Please add a title for your note or task.');
       return;
     }
-    const newEvent: CalendarEvent = {
-      id: `personal-${addDate}-${Date.now()}`,
-      type: 'personal',
-      title: addTitle.trim(),
-      date: addDate,
-      description: addNotes || undefined,
-      isPersonal: true,
-    };
-    setPersonalEvents((prev) => [...prev, newEvent]);
-    setAddDialogOpen(false);
-    setAddTitle('');
-    setAddNotes('');
-    setError(null);
+    
+    // Validate time: end time should be after start time
+    if (addStartTime && addEndTime && addEndTime <= addStartTime) {
+      setError('End time must be after start time.');
+      return;
+    }
+    
+    setError(null); // Clear any previous errors
+    
+    try {
+      // Format time strings properly (HH:mm format)
+      const formattedStartTime = addStartTime ? `${addStartTime}:00` : undefined;
+      const formattedEndTime = addEndTime ? `${addEndTime}:00` : undefined;
+      
+      // Save to backend
+      const savedEvent = await api.createPersonalCalendarEvent({
+        title: addTitle.trim(),
+        description: addNotes?.trim() || undefined,
+        event_date: addDate,
+        start_time: formattedStartTime,
+        end_time: formattedEndTime,
+      });
+
+      if (!savedEvent || !savedEvent.id) {
+        throw new Error('Failed to save event - no response from server');
+      }
+
+      // Format time string for display: "HH:mm - HH:mm" or just "HH:mm" if only start time
+      let timeString: string | undefined;
+      if (addStartTime) {
+        if (addEndTime) {
+          timeString = `${addStartTime} - ${addEndTime}`;
+        } else {
+          timeString = addStartTime;
+        }
+      }
+      
+      const newEvent: CalendarEvent = {
+        id: savedEvent.id,
+        type: 'personal',
+        title: addTitle.trim(),
+        date: addDate,
+        time: timeString,
+        description: addNotes?.trim() || undefined,
+        isPersonal: true,
+      };
+      
+      // Add to local state
+      setPersonalEvents((prev) => {
+        // Remove any existing event with same id (if updating)
+        const filtered = prev.filter(e => e.id !== newEvent.id);
+        return [...filtered, newEvent];
+      });
+      
+      // Close dialog and reset form
+      setAddDialogOpen(false);
+      setAddTitle('');
+      setAddNotes('');
+      setAddStartTime('');
+      setAddEndTime('');
+      setError(null);
+      
+      // Reload events from backend to ensure sync
+      try {
+        const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
+        const monthEnd = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
+        const response = await api.getPersonalCalendarEvents({ start_date: monthStart, end_date: monthEnd });
+        const backendEvents = (response?.events || []).map((evt: any) => {
+          // Ensure date is in YYYY-MM-DD format
+          let eventDate = evt.event_date;
+          if (eventDate instanceof Date) {
+            eventDate = format(eventDate, 'yyyy-MM-dd');
+          } else if (typeof eventDate === 'string') {
+            // Normalize date string to YYYY-MM-DD
+            eventDate = eventDate.split('T')[0];
+          }
+          
+          return {
+            id: evt.id,
+            type: 'personal' as const,
+            title: evt.title,
+            date: eventDate,
+            time: evt.start_time && evt.end_time 
+              ? `${evt.start_time.substring(0, 5)}-${evt.end_time.substring(0, 5)}`
+              : evt.start_time 
+              ? evt.start_time.substring(0, 5)
+              : undefined,
+            description: evt.description,
+            isPersonal: true,
+          };
+        });
+        console.log('Reloaded personal events:', backendEvents);
+        setPersonalEvents(backendEvents);
+      } catch (reloadError) {
+        console.error('Failed to reload personal events:', reloadError);
+        // Don't show error to user, local state is already updated
+      }
+    } catch (error: any) {
+      console.error('Failed to save personal event:', error);
+      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to save event. Please try again.';
+      setError(errorMessage);
+    }
   };
 
   return (
@@ -480,7 +689,7 @@ export function CalendarPanel() {
                               <span className={`h-2 w-2 rounded-full ${styles.dot} flex-shrink-0`} />
                               <div className="flex-1 min-w-0">
                                 <div className="font-semibold truncate">{event.title}</div>
-                                {event.time && (
+                                {event.time && event.type === 'shift' && (
                                   <div className="text-[10px] text-gray-600 mt-0.5">{event.time}</div>
                                 )}
                                 {event.description && (
@@ -492,7 +701,7 @@ export function CalendarPanel() {
                           <TooltipContent side="right" className="max-w-xs">
                             <div className="space-y-1">
                               <p className="font-semibold">{event.title}</p>
-                              {event.time && <p className="text-xs text-gray-400">Time: {event.time}</p>}
+                              {event.time && event.type === 'shift' && <p className="text-xs text-gray-400">Time: {event.time}</p>}
                               {event.description && <p className="text-xs text-gray-400">{event.description}</p>}
                               {event.location && <p className="text-xs text-gray-400">Location: {event.location}</p>}
                             </div>
@@ -518,7 +727,7 @@ export function CalendarPanel() {
                                     <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
                                     <p className="font-semibold text-sm">{event.title}</p>
                                   </div>
-                                  {event.time && <p className="text-xs text-gray-400 ml-4">Time: {event.time}</p>}
+                                  {event.time && event.type === 'shift' && <p className="text-xs text-gray-400 ml-4">Time: {event.time}</p>}
                                   {event.description && <p className="text-xs text-gray-400 ml-4">{event.description}</p>}
                                 </div>
                               );
@@ -564,11 +773,15 @@ export function CalendarPanel() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 px-1 py-2">
-            {addDate && (
-              <p className="text-xs text-gray-500">
-                Date: <span className="font-medium">{addDate}</span>
-              </p>
-            )}
+            <div className="space-y-1">
+              <Label htmlFor="personal-date">Date</Label>
+              <Input
+                id="personal-date"
+                type="date"
+                value={addDate || ''}
+                onChange={(e) => setAddDate(e.target.value)}
+              />
+            </div>
             <div className="space-y-1">
               <Label htmlFor="personal-title">Title</Label>
               <Input
@@ -577,6 +790,26 @@ export function CalendarPanel() {
                 onChange={(e) => setAddTitle(e.target.value)}
                 placeholder="e.g. 1:1 with manager, prepare deck, follow-ups"
               />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="personal-start-time">Start time (optional)</Label>
+                <Input
+                  id="personal-start-time"
+                  type="time"
+                  value={addStartTime}
+                  onChange={(e) => setAddStartTime(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="personal-end-time">End time (optional)</Label>
+                <Input
+                  id="personal-end-time"
+                  type="time"
+                  value={addEndTime}
+                  onChange={(e) => setAddEndTime(e.target.value)}
+                />
+              </div>
             </div>
             <div className="space-y-1">
               <Label htmlFor="personal-notes">Notes (optional)</Label>
@@ -588,6 +821,11 @@ export function CalendarPanel() {
                 placeholder="Add details, checklist items, or meeting links…"
               />
             </div>
+            {error && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                {error}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddDialogOpen(false)}>

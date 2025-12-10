@@ -50,8 +50,7 @@ export function PayrollTopNavBar() {
         <div className="flex items-center gap-3 shrink-0">
           <NavLink
             to="/dashboard"
-            className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center relative group"
-            title={companyName}
+            className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center relative"
           >
             {logoLoaded && companyLogo ? (
               <img
@@ -64,12 +63,6 @@ export function PayrollTopNavBar() {
               <span className="px-2 text-base font-semibold bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
                 {companyName.substring(0, 2).toUpperCase()}
               </span>
-            )}
-            {companyName && (
-              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg">
-                {companyName}
-                <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900"></div>
-              </div>
             )}
           </NavLink>
         </div>

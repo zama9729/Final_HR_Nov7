@@ -151,76 +151,113 @@ router.get('/', authenticateToken, async (req, res) => {
     const myEmployeeId = empRes.rows.length > 0 ? empRes.rows[0].id : null;
     
     // If employee role or employee view, they can only see their own data
+    // Use generic alias 'alloc' that works for both project_allocations and assignments
     let employeeFilter = '';
     const params = [tenantId];
     let paramIndex = 1;
     
     if (isEmployeeView && myEmployeeId) {
       // Employee view: only show current user's project assignments
-      employeeFilter = `AND a.employee_id = $${++paramIndex}`;
+      employeeFilter = `AND alloc.employee_id = $${++paramIndex}`;
       params.push(myEmployeeId);
     } else if (!isEmployeeView && isManager && myEmployeeId) {
       // Manager organization view: own assignments + direct reports
-      employeeFilter = `AND (a.employee_id = $${++paramIndex} OR e.reporting_manager_id = $${paramIndex})`;
+      employeeFilter = `AND (alloc.employee_id = $${++paramIndex} OR e.reporting_manager_id = $${paramIndex})`;
       params.push(myEmployeeId);
     } else if (isPrivilegedRole && employee_id) {
       // Organization view with specific employee filter
-      employeeFilter = `AND a.employee_id = $${++paramIndex}`;
+      employeeFilter = `AND alloc.employee_id = $${++paramIndex}`;
       params.push(employee_id);
     }
 
     // Date range filter
     let dateFilter = '';
     if (rangeStart) {
-      dateFilter += ` AND (a.end_date IS NULL OR a.end_date >= $${++paramIndex}::date)`;
+      dateFilter += ` AND (alloc.end_date IS NULL OR alloc.end_date >= $${++paramIndex}::date)`;
       params.push(rangeStart);
     }
     if (rangeEnd) {
-      dateFilter += ` AND (a.start_date IS NULL OR a.start_date <= $${++paramIndex}::date)`;
+      dateFilter += ` AND (alloc.start_date IS NULL OR alloc.start_date <= $${++paramIndex}::date)`;
       params.push(rangeEnd);
     }
 
     // Project filter
     let projectFilter = '';
     if (project_id) {
-      projectFilter = `AND a.project_id = $${++paramIndex}`;
+      projectFilter = `AND alloc.project_id = $${++paramIndex}`;
       params.push(project_id);
     }
 
-    // Get assignments with project and employee details
-    const assignmentsQuery = `
-      SELECT 
-        a.id,
-        a.project_id,
-        a.employee_id,
-        a.role,
-        a.allocation_percent,
-        a.start_date,
-        a.end_date,
-        a.override,
-        a.override_reason,
-        p.name as project_name,
-        p.start_date as project_start_date,
-        p.end_date as project_end_date,
-        p.status as project_status,
-        e.employee_id as employee_code,
-        pr.first_name,
-        pr.last_name,
-        pr.email
-      FROM assignments a
-      JOIN projects p ON p.id = a.project_id
-      JOIN employees e ON e.id = a.employee_id
-      JOIN profiles pr ON pr.id = e.user_id
-      WHERE p.org_id = $1 ${employeeFilter} ${projectFilter} ${dateFilter}
-      ORDER BY a.start_date ASC, a.created_at ASC
-    `;
-
-    const assignmentsRes = await query(assignmentsQuery, params);
+    // Get project allocations (preferred) or assignments (fallback) with project and employee details
+    let assignmentEvents = [];
+    let assignmentsRes;
+    
+    // Try project_allocations first, then fallback to assignments table
+    try {
+      const projectAllocationsQuery = `
+        SELECT 
+          alloc.id,
+          alloc.project_id,
+          alloc.employee_id,
+          alloc.role_on_project as role,
+          alloc.percent_allocation as allocation_percent,
+          alloc.start_date,
+          alloc.end_date,
+          NULL as override,
+          NULL as override_reason,
+          p.name as project_name,
+          p.start_date as project_start_date,
+          p.end_date as project_end_date,
+          p.status as project_status,
+          e.employee_id as employee_code,
+          pr.first_name,
+          pr.last_name,
+          pr.email
+        FROM project_allocations alloc
+        JOIN projects p ON p.id = alloc.project_id
+        JOIN employees e ON e.id = alloc.employee_id
+        JOIN profiles pr ON pr.id = e.user_id
+        WHERE alloc.org_id = $1 ${employeeFilter} ${projectFilter} ${dateFilter}
+        ORDER BY alloc.start_date ASC, alloc.created_at ASC
+      `;
+      
+      assignmentsRes = await query(projectAllocationsQuery, params);
+    } catch (error) {
+      // Fallback to assignments table if project_allocations not available
+      console.warn('project_allocations not available, falling back to assignments:', error.message);
+      const assignmentsQuery = `
+        SELECT 
+          alloc.id,
+          alloc.project_id,
+          alloc.employee_id,
+          alloc.role,
+          alloc.allocation_percent,
+          alloc.start_date,
+          alloc.end_date,
+          alloc.override,
+          alloc.override_reason,
+          p.name as project_name,
+          p.start_date as project_start_date,
+          p.end_date as project_end_date,
+          p.status as project_status,
+          e.employee_id as employee_code,
+          pr.first_name,
+          pr.last_name,
+          pr.email
+        FROM assignments alloc
+        JOIN projects p ON p.id = alloc.project_id
+        JOIN employees e ON e.id = alloc.employee_id
+        JOIN profiles pr ON pr.id = e.user_id
+        WHERE p.org_id = $1 ${employeeFilter} ${projectFilter} ${dateFilter}
+        ORDER BY alloc.start_date ASC, alloc.created_at ASC
+      `;
+      assignmentsRes = await query(assignmentsQuery, params);
+    }
     
     // Format project assignments as calendar events
-    const assignmentEvents = assignmentsRes.rows.map(assign => ({
+    assignmentEvents = assignmentsRes.rows.map(assign => ({
       id: `assignment_${assign.id}`,
-      title: `${assign.project_name} - ${assign.first_name} ${assign.last_name} (${assign.allocation_percent}%)`,
+      title: `${assign.project_name} - ${assign.first_name} ${assign.last_name} (${assign.allocation_percent || 0}%)`,
       start: assign.start_date || assign.project_start_date,
       end: assign.end_date || assign.project_end_date || null,
       allDay: true,

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Building2 } from "lucide-react";
 
 export default function Signup() {
+  const [searchParams] = useSearchParams();
   const [formData, setFormData] = useState({
     orgName: "",
     domain: "",
@@ -26,6 +27,14 @@ export default function Signup() {
   const { signup } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  // Pre-fill email from query param if provided
+  useEffect(() => {
+    const emailParam = searchParams.get("email");
+    if (emailParam) {
+      setFormData((prev) => ({ ...prev, adminEmail: emailParam }));
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,7 +78,7 @@ export default function Signup() {
         title: "Account created!",
         description: "Welcome to your HR platform.",
       });
-      navigate("/dashboard");
+      navigate("/onboarding");
     } catch (error: any) {
       toast({
         title: "Signup failed",

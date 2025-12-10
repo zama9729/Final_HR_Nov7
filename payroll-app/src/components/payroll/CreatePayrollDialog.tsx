@@ -34,7 +34,7 @@ export const CreatePayrollDialog = ({ onSuccess }: CreatePayrollDialogProps) => 
   const [month, setMonth] = useState("");
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [payday, setPayday] = useState("");
-  const [runType, setRunType] = useState<"regular" | "off_cycle">("regular");
+  const [runType, setRunType] = useState<"regular" | "off_cycle" | "partial_payment">("regular");
   
   // Employee data state
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -225,7 +225,7 @@ export const CreatePayrollDialog = ({ onSuccess }: CreatePayrollDialogProps) => 
             </div>
             <div className="grid gap-2">
               <Label>Run Type</Label>
-              <RadioGroup value={runType} onValueChange={(value) => setRunType(value as "regular" | "off_cycle")}>
+              <RadioGroup value={runType} onValueChange={(value) => setRunType(value as "regular" | "off_cycle" | "partial_payment")}>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="regular" id="run-type-regular" />
                   <Label htmlFor="run-type-regular" className="font-normal cursor-pointer">
@@ -235,14 +235,22 @@ export const CreatePayrollDialog = ({ onSuccess }: CreatePayrollDialogProps) => 
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="off_cycle" id="run-type-off-cycle" />
                   <Label htmlFor="run-type-off-cycle" className="font-normal cursor-pointer">
-                    Off-Cycle / Advance
+                    Off-Cycle / Bonus
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="partial_payment" id="run-type-partial" />
+                  <Label htmlFor="run-type-partial" className="font-normal cursor-pointer">
+                    Partial Salary Release
                   </Label>
                 </div>
               </RadioGroup>
               <p className="text-xs text-muted-foreground">
                 {runType === "regular" 
-                  ? "Regular payroll run. Previous off-cycle payments in this period will be automatically deducted."
-                  : "Off-cycle run for advances or partial payments. Will be deducted from the regular run."}
+                  ? "Regular payroll run. Previous partial salary releases in this period will be automatically deducted."
+                  : runType === "off_cycle"
+                  ? "Off-cycle run for bonuses/adhoc payments (tax/deductions as per components)."
+                  : "Partial Salary Release: pay a flat net amount now; will be deducted from the final settlement."}
               </p>
             </div>
 

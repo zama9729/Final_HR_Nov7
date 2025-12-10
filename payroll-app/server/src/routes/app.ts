@@ -8,6 +8,7 @@ import path from "path";
 import XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import reimbursementsRouter from "./reimbursements.js";
+import reimbursementRunsRouter from "./reimbursement-runs.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 const PROOFS_DIRECTORY =
@@ -760,7 +761,7 @@ appRouter.get("/payroll-cycles", requireAuth, async (req, res) => {
     [tenantId, currentYear, currentMonth]
   );
   
-  // Get cycles with recalculated employee counts from payroll_items
+  // Get cycles with recalculated employee counts and total amounts from payroll_items
   const rows = await query(
     `SELECT 
       pc.id, 
@@ -774,20 +775,31 @@ appRouter.get("/payroll-cycles", requireAuth, async (req, res) => {
          FROM payroll_items 
          WHERE payroll_cycle_id = pc.id AND tenant_id = $1), 
         pc.total_employees
-      ) as total_employees
+      ) as total_employees,
+      COALESCE(
+        (SELECT SUM(net_salary) 
+         FROM payroll_items 
+         WHERE payroll_cycle_id = pc.id AND tenant_id = $1), 
+        NULL
+      ) as calculated_total_amount
     FROM payroll_cycles pc 
     WHERE pc.tenant_id = $1 
     ORDER BY pc.year DESC, pc.month DESC`,
     [tenantId]
   );
   
-  // Update any cycles that have incorrect employee counts
+  // Update any cycles that have incorrect employee counts or total amounts
   for (const cycle of rows.rows) {
     const itemCount = await query<{ count: string }>(
       "SELECT COUNT(DISTINCT employee_id)::text as count FROM payroll_items WHERE payroll_cycle_id = $1 AND tenant_id = $2",
       [cycle.id, tenantId]
     );
     const correctCount = parseInt(itemCount.rows[0]?.count || "0", 10);
+    
+    // Recalculate total_amount from payroll_items.net_salary if items exist
+    const calculatedTotal = Number((cycle as any).calculated_total_amount || 0);
+    const storedTotal = Number(cycle.total_amount || 0);
+    
     // Update if count is different (and we have items)
     if (correctCount !== Number(cycle.total_employees) && correctCount > 0) {
       await query(
@@ -795,6 +807,19 @@ appRouter.get("/payroll-cycles", requireAuth, async (req, res) => {
         [correctCount, cycle.id, tenantId]
       );
       (cycle as any).total_employees = correctCount; // Update in response
+    }
+    
+    // Update total_amount if we have payroll items and the calculated total differs
+    // This ensures old cycles (processed before the fix) show correct net salary
+    if (calculatedTotal > 0 && Math.abs(calculatedTotal - storedTotal) > 0.01) {
+      await query(
+        "UPDATE payroll_cycles SET total_amount = $1 WHERE id = $2 AND tenant_id = $3",
+        [calculatedTotal, cycle.id, tenantId]
+      );
+      (cycle as any).total_amount = calculatedTotal; // Update in response
+    } else if (calculatedTotal > 0) {
+      // Use calculated total in response even if not updated in DB yet
+      (cycle as any).total_amount = calculatedTotal;
     }
   }
   
@@ -3264,7 +3289,38 @@ async function getPayrollItemsForBankTransfer(cycleId: string, tenantId: string,
       tdsDeduction = (excessAmount * 5) / 100 / 12;
     }
 
-    const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
+    // Check for active advance salary EMI deductions
+    let advanceEmiDeduction = 0;
+    const advanceResult = await query(
+      `SELECT id, monthly_emi, paid_amount, total_amount, start_month
+       FROM salary_advances
+       WHERE employee_id = $1 
+         AND tenant_id = $2 
+         AND status = 'active'
+         AND start_month <= $3`,
+      [employee.employee_id, tenantId, new Date(payrollYear, payrollMonth, 1).toISOString()]
+    );
+
+    if (advanceResult.rows.length > 0) {
+      const advance = advanceResult.rows[0];
+      const remainingAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+      
+      if (remainingAmount > 0) {
+        // Calculate EMI for this month
+        let emiAmount = Number(advance.monthly_emi);
+        
+        // Boundary check: ensure paid_amount + emiAmount doesn't exceed total_amount
+        if (Number(advance.paid_amount) + emiAmount > Number(advance.total_amount)) {
+          emiAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+        }
+        
+        if (emiAmount > 0) {
+          advanceEmiDeduction = emiAmount;
+        }
+      }
+    }
+
+    const totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction + advanceEmiDeduction;
     const netSalary = grossWithIncentive - totalDeductions;
 
     if (netSalary <= 0) continue;
@@ -3602,6 +3658,23 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
           // Ignore metadata parsing errors
         }
 
+        // Extract additional fields from metadata
+        let da = 0;
+        let lta = 0;
+        let bonus = 0;
+        let otherDeductions = 0;
+        try {
+          if (row.metadata) {
+            const metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+            da = Number(metadata.da || 0);
+            lta = Number(metadata.lta || 0);
+            bonus = Number(metadata.bonus || 0);
+            otherDeductions = Number(metadata.other_deductions || 0);
+          }
+        } catch (e) {
+          // Ignore metadata parsing errors
+        }
+
         return {
           employee_id: row.employee_id,
           employee_code: row.employee_id,
@@ -3614,14 +3687,15 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
             row.incentive_amount !== null && row.incentive_amount !== undefined
               ? Number(row.incentive_amount)
               : incentiveMap.get(row.employee_id) || 0,
-          da: 0,
-          lta: 0,
-          bonus: 0,
+          da: da,
+          lta: lta,
+          bonus: bonus,
           gross_salary: Number(row.gross_salary || 0),
           pf_deduction: Number(row.pf_deduction || 0),
           esi_deduction: Number(row.esi_deduction || 0),
           pt_deduction: Number(row.pt_deduction || 0),
           tds_deduction: Number(row.tds_deduction || 0),
+          other_deductions: otherDeductions,
           advance_deduction: advanceDeduction,
           deductions: Number(row.deductions || 0),
           net_salary: Number(row.net_salary || 0),
@@ -3821,6 +3895,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
         esi_deduction: esiDeduction,
         pt_deduction: ptDeduction,
         tds_deduction: tdsDeduction,
+        other_deductions: 0, // Default to 0, can be edited later
         advance_deduction: advanceEmiDeduction,
         deductions: totalDeductions,
         net_salary: netSalary,
@@ -4240,6 +4315,11 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
         da = 0,
         lta = 0,
         bonus = 0,
+        pf_deduction,
+        esi_deduction,
+        pt_deduction,
+        tds_deduction,
+        other_deductions = 0,
         lop_days,
         paid_days,
         total_working_days,
@@ -4265,23 +4345,75 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
       const incentiveAmount = Number(item.incentive_amount ?? incentiveMap.get(employee_id) ?? 0);
       const editedGrossSalary = Number(basic_salary) + Number(hra) + Number(special_allowance) + Number(da) + Number(lta) + Number(bonus) + incentiveAmount;
 
-      // Recalculate deductions based on edited values
-      const pfWageCeiling = 15000;
-      const editedBasic = Number(basic_salary);
-      const editedPfBasis = editedBasic <= pfWageCeiling ? editedBasic : pfWageCeiling;
-      const editedPfDeduction = (editedPfBasis * Number(settings.pf_rate)) / 100;
-      const editedEsiDeduction = editedGrossSalary <= 21000 ? (editedGrossSalary * 0.75) / 100 : 0;
-      const editedPtDeduction = Number(settings.pt_rate) || 200;
+      // Use deduction values from frontend (or calculate if not provided for backward compatibility)
+      const editedPfDeduction = pf_deduction !== undefined ? Number(pf_deduction) : (() => {
+        const pfWageCeiling = 15000;
+        const editedBasic = Number(basic_salary);
+        const editedPfBasis = editedBasic <= pfWageCeiling ? editedBasic : pfWageCeiling;
+        return (editedPfBasis * Number(settings.pf_rate)) / 100;
+      })();
       
-      const annualIncome = editedGrossSalary * 12;
-      let editedTdsDeduction = 0;
-      if (annualIncome > Number(settings.tds_threshold)) {
-        const excessAmount = annualIncome - Number(settings.tds_threshold);
-        editedTdsDeduction = (excessAmount * 5) / 100 / 12;
+      const editedEsiDeduction = esi_deduction !== undefined ? Number(esi_deduction) : (editedGrossSalary <= 21000 ? (editedGrossSalary * 0.75) / 100 : 0);
+      const editedPtDeduction = pt_deduction !== undefined ? Number(pt_deduction) : (Number(settings.pt_rate) || 200);
+      
+      const editedTdsDeduction = tds_deduction !== undefined ? Number(tds_deduction) : (() => {
+        const annualIncome = editedGrossSalary * 12;
+        if (annualIncome > Number(settings.tds_threshold)) {
+          const excessAmount = annualIncome - Number(settings.tds_threshold);
+          return (excessAmount * 5) / 100 / 12;
+        }
+        return 0;
+      })();
+
+      const editedOtherDeductions = Number(other_deductions || 0);
+      const calculatedDeductions = editedPfDeduction + editedEsiDeduction + editedPtDeduction + editedTdsDeduction + editedOtherDeductions;
+
+      // Check for active advance salary EMI deductions
+      let advanceEmiDeduction = 0;
+      const advanceResult = await query(
+        `SELECT id, monthly_emi, paid_amount, total_amount, start_month
+         FROM salary_advances
+         WHERE employee_id = $1 
+           AND tenant_id = $2 
+           AND status = 'active'
+           AND start_month <= $3`,
+        [employee_id, tenantId, new Date(payrollYear, payrollMonth, 1).toISOString()]
+      );
+
+      if (advanceResult.rows.length > 0) {
+        const advance = advanceResult.rows[0];
+        const remainingAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+        
+        if (remainingAmount > 0) {
+          // Calculate EMI for this month
+          let emiAmount = Number(advance.monthly_emi);
+          
+          // Boundary check: ensure paid_amount + emiAmount doesn't exceed total_amount
+          if (Number(advance.paid_amount) + emiAmount > Number(advance.total_amount)) {
+            emiAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+          }
+          
+          if (emiAmount > 0) {
+            advanceEmiDeduction = emiAmount;
+          }
+        }
       }
 
-      const calculatedDeductions = editedPfDeduction + editedEsiDeduction + editedPtDeduction + editedTdsDeduction;
-      const netSalary = editedGrossSalary - calculatedDeductions;
+      // Add advance EMI to total deductions
+      const finalCalculatedDeductions = calculatedDeductions + advanceEmiDeduction;
+      const netSalary = editedGrossSalary - finalCalculatedDeductions;
+
+      // Store additional fields in metadata for payslip display
+      const metadata: any = {
+        da: Number(da),
+        lta: Number(lta),
+        bonus: Number(bonus),
+        other_deductions: editedOtherDeductions,
+      };
+      if (advanceEmiDeduction > 0) {
+        metadata.advance_deduction = advanceEmiDeduction;
+        metadata.advance_id = advanceResult.rows[0]?.id;
+      }
 
       // Insert or update payroll item
       await query(
@@ -4291,8 +4423,9 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
           basic_salary, hra, special_allowance,
           incentive_amount,
           pf_deduction, esi_deduction, tds_deduction, pt_deduction,
-          lop_days, paid_days, total_working_days
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          lop_days, paid_days, total_working_days,
+          metadata
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
           gross_salary = EXCLUDED.gross_salary,
           deductions = EXCLUDED.deductions,
@@ -4308,13 +4441,14 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
           lop_days = EXCLUDED.lop_days,
           paid_days = EXCLUDED.paid_days,
           total_working_days = EXCLUDED.total_working_days,
+          metadata = EXCLUDED.metadata,
           updated_at = NOW()`,
         [
           tenantId,
           cycleId,
           employee_id,
           editedGrossSalary,
-          calculatedDeductions,
+          finalCalculatedDeductions,
           netSalary,
           Number(basic_salary),
           Number(hra),
@@ -4327,6 +4461,7 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
           finalLopDays,
           finalPaidDays,
           finalTotalWorkingDays,
+          JSON.stringify(metadata),
         ]
       );
 
@@ -4350,7 +4485,7 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
       incentiveMap.set(employee_id, incentiveAmount);
       savedCount++;
       totalGrossSalary += editedGrossSalary;
-      totalDeductions += calculatedDeductions;
+      totalDeductions += finalCalculatedDeductions;
     }
 
     // Calculate total net salary from stored payroll_items
@@ -4482,6 +4617,18 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
             const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
             const processedCount = Number(totalNetSalaryResult.rows[0]?.employee_count || 0);
 
+            // Calculate gross and deductions totals for response
+            const totalsResult = await query(
+              `SELECT 
+                COALESCE(SUM(gross_salary), 0) as total_gross_salary,
+                COALESCE(SUM(deductions), 0) as total_deductions
+               FROM payroll_items
+               WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+              [cycleId, tenantId]
+            );
+            const totalGrossSalary = Number(totalsResult.rows[0]?.total_gross_salary || 0);
+            const totalDeductions = Number(totalsResult.rows[0]?.total_deductions || 0);
+
             // Update cycle status to processing
             // Store NET salary in total_amount to match Review Dialog and Bank Export
             await query(
@@ -4499,7 +4646,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
               processedCount,
               totalGrossSalary,
               totalDeductions,
-              totalNetSalary: totalGrossSalary - totalDeductions,
+              totalNetSalary,
             });
           }
         }
@@ -4807,9 +4954,18 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       );
       
       if (existingItemsResult.rows.length > 0 && parseInt(existingItemsResult.rows[0]?.count || '0', 10) > 0) {
-      const processedCount = parseInt(existingItemsResult.rows[0]?.count || '0', 10);
-      const totalGrossSalary = parseFloat(existingItemsResult.rows[0]?.total_gross || '0');
-      const totalDeductions = parseFloat(existingItemsResult.rows[0]?.total_deductions || '0');
+        const processedCount = parseInt(existingItemsResult.rows[0]?.count || '0', 10);
+        const totalGrossSalary = parseFloat(existingItemsResult.rows[0]?.total_gross || '0');
+        const totalDeductions = parseFloat(existingItemsResult.rows[0]?.total_deductions || '0');
+        
+        // Calculate total net salary from stored payroll_items
+        const totalNetSalaryResult = await query(
+          `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary
+           FROM payroll_items
+           WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+          [cycleId, tenantId]
+        );
+        const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
 
         await query(
           `UPDATE payroll_cycles
@@ -4818,7 +4974,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
                total_amount = $2,
                updated_at = NOW()
            WHERE id = $3 AND tenant_id = $4`,
-          [processedCount, totalGrossSalary, cycleId, tenantId]
+          [processedCount, totalNetSalary, cycleId, tenantId]
         );
 
         return res.status(200).json({
@@ -4826,7 +4982,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           processedCount,
           totalGrossSalary,
           totalDeductions,
-          totalNetSalary: totalGrossSalary - totalDeductions,
+          totalNetSalary,
         });
       }
     }
@@ -4909,7 +5065,38 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         tdsDeduction = (excessAmount * 5) / 100 / 12; // Monthly TDS
       }
 
-      const totalDeductionsForEmployee = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
+      // Check for active advance salary EMI deductions
+      let advanceEmiDeduction = 0;
+      const advanceResult = await query(
+        `SELECT id, monthly_emi, paid_amount, total_amount, start_month
+         FROM salary_advances
+         WHERE employee_id = $1 
+           AND tenant_id = $2 
+           AND status = 'active'
+           AND start_month <= $3`,
+        [employee.employee_id, tenantId, new Date(payrollYear, payrollMonth, 1).toISOString()]
+      );
+
+      if (advanceResult.rows.length > 0) {
+        const advance = advanceResult.rows[0];
+        const remainingAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+        
+        if (remainingAmount > 0) {
+          // Calculate EMI for this month
+          let emiAmount = Number(advance.monthly_emi);
+          
+          // Boundary check: ensure paid_amount + emiAmount doesn't exceed total_amount
+          if (Number(advance.paid_amount) + emiAmount > Number(advance.total_amount)) {
+            emiAmount = Number(advance.total_amount) - Number(advance.paid_amount);
+          }
+          
+          if (emiAmount > 0) {
+            advanceEmiDeduction = emiAmount;
+          }
+        }
+      }
+
+      const totalDeductionsForEmployee = pfDeduction + esiDeduction + ptDeduction + tdsDeduction + advanceEmiDeduction;
       const netSalary = finalGrossSalary - totalDeductionsForEmployee;
 
       // Insert payroll item
@@ -4920,6 +5107,13 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
         continue;
       }
 
+      // Store advance deduction in metadata for payslip display
+      const metadata: any = {};
+      if (advanceEmiDeduction > 0) {
+        metadata.advance_deduction = advanceEmiDeduction;
+        metadata.advance_id = advanceResult.rows[0]?.id;
+      }
+
       await query(
         `INSERT INTO payroll_items (
           tenant_id, payroll_cycle_id, employee_id,
@@ -4927,8 +5121,9 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           basic_salary, hra, special_allowance,
           incentive_amount,
           pf_deduction, esi_deduction, tds_deduction, pt_deduction,
-          lop_days, paid_days, total_working_days
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          lop_days, paid_days, total_working_days,
+          metadata
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         ON CONFLICT (payroll_cycle_id, employee_id) DO UPDATE SET
           gross_salary = EXCLUDED.gross_salary,
           deductions = EXCLUDED.deductions,
@@ -4944,6 +5139,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           lop_days = EXCLUDED.lop_days,
           paid_days = EXCLUDED.paid_days,
           total_working_days = EXCLUDED.total_working_days,
+          metadata = EXCLUDED.metadata,
           updated_at = NOW()`,
         [
           tenantId,
@@ -4963,6 +5159,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
           lopDays,
           paidDays,
           totalWorkingDays,
+          JSON.stringify(metadata),
         ]
       );
 
@@ -4988,7 +5185,17 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
       totalDeductions += totalDeductionsForEmployee;
     }
 
+    // Calculate total net salary from stored payroll_items
+    const totalNetSalaryResult = await query(
+      `SELECT COALESCE(SUM(net_salary), 0) as total_net_salary
+       FROM payroll_items
+       WHERE payroll_cycle_id = $1 AND tenant_id = $2`,
+      [cycleId, tenantId]
+    );
+    const totalNetSalary = Number(totalNetSalaryResult.rows[0]?.total_net_salary || 0);
+
     // Update payroll cycle with processed data
+    // Store NET salary in total_amount to match Review Dialog and Bank Export
     await query(
       `UPDATE payroll_cycles
        SET status = 'processing',
@@ -4996,7 +5203,7 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
            total_amount = $2,
            updated_at = NOW()
        WHERE id = $3 AND tenant_id = $4`,
-      [processedCount, totalGrossSalary, cycleId, tenantId]
+      [processedCount, totalNetSalary, cycleId, tenantId]
     );
 
     return res.status(200).json({
@@ -5383,6 +5590,7 @@ appRouter.get("/reports/payroll-register", requireAuth, async (req, res) => {
 
 // Reimbursement routes
 appRouter.use("/v1/reimbursements", requireAuth, reimbursementsRouter);
+appRouter.use("/v1/reimbursement-runs", requireAuth, reimbursementRunsRouter);
 
 // Statutory Reports Proxy - Forward requests to HR API with authentication
 appRouter.get("/reports/statutory/pf-ecr", requireAuth, async (req, res) => {

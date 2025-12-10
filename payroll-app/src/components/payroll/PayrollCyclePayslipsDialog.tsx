@@ -21,6 +21,7 @@ interface PayrollCyclePayslipsDialogProps {
   cycleId: string;
   cycleMonth: number;
   cycleYear: number;
+  runType?: "regular" | "off_cycle" | "partial_payment";
 }
 
 export const PayrollCyclePayslipsDialog = ({
@@ -29,6 +30,7 @@ export const PayrollCyclePayslipsDialog = ({
   cycleId,
   cycleMonth,
   cycleYear,
+  runType,
 }: PayrollCyclePayslipsDialogProps) => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["payroll-cycle-payslips", cycleId],
@@ -62,6 +64,7 @@ export const PayrollCyclePayslipsDialog = ({
   };
 
   const payslips = data || [];
+  const isPartial = runType === "partial_payment";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -76,7 +79,14 @@ export const PayrollCyclePayslipsDialog = ({
           </DialogDescription>
         </DialogHeader>
 
-        {isLoading ? (
+        {isPartial ? (
+          <div className="py-10 text-center space-y-3">
+            <p className="text-lg font-semibold">Payslips are not generated for Partial Salary Release runs.</p>
+            <p className="text-sm text-muted-foreground">
+              Use the bank file or payment advice for disbursement. Generate payslips in the final regular run.
+            </p>
+          </div>
+        ) : isLoading ? (
           <div className="flex justify-center items-center py-12">
             <Loader2 className="h-8 w-8 animate-spin" />
             <span className="ml-2">Loading payslips...</span>

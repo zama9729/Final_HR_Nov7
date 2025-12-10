@@ -230,6 +230,32 @@ export const api = {
     cycles: () =>
       client.get("/api/payroll-cycles"),
   },
+
+  // --- Audit Logs ---
+  auditLogs: {
+    get: (params?: { entity_type?: string; limit?: number; action?: string; from?: string; to?: string }) => {
+      const queryParams = new URLSearchParams();
+      if (params?.entity_type) queryParams.set("entity_type", params.entity_type);
+      if (params?.limit) queryParams.set("limit", params.limit.toString());
+      if (params?.action) queryParams.set("action", params.action);
+      if (params?.from) queryParams.set("from", params.from);
+      if (params?.to) queryParams.set("to", params.to);
+      const queryString = queryParams.toString();
+      return client.get<Array<{
+        id: string;
+        actor: { id: string; email: string; first_name: string; last_name: string } | null;
+        actor_role: string;
+        action: string;
+        entity_type: string;
+        entity_id: string | null;
+        reason: string | null;
+        details: any;
+        diff: any;
+        scope: string | null;
+        created_at: string;
+      }>>(`/api/audit-logs${queryString ? `?${queryString}` : ""}`);
+    },
+  },
   
   // --- Data Endpoints ---
   employees: {
@@ -284,6 +310,12 @@ export const api = {
       client.post(`/api/payroll-cycles/${cycleId}/incentives`, {
         employee_id: employeeId,
         amount,
+      }),
+    
+    addAdjustment: (runId: string, payload: { employee_id: string; component_name: string; amount: number; is_taxable?: boolean; notes?: string }) =>
+      client.post(`/api/payroll/runs/${runId}/adjustments`, {
+        ...payload,
+        is_taxable: payload.is_taxable ?? true,
       }),
     
     getCyclePayslips: (cycleId) =>
@@ -590,6 +622,27 @@ export const api = {
     },
     approve: (id: string) => client.post(`/api/v1/reimbursements/${id}/approve`, {}),
     reject: (id: string) => client.post(`/api/v1/reimbursements/${id}/reject`, {}),
+  },
+
+  reimbursementRuns: {
+    list: () => client.get<{ runs: any[] }>("/api/v1/reimbursement-runs"),
+    get: (id: string) => client.get<{ run: any; claims: any[] }>(`/api/v1/reimbursement-runs/${id}`),
+    create: (data: { run_date?: string; reference_note?: string }) =>
+      client.post<{ run: any; claims: any[]; summary: { total_claims: number; total_amount: number } }>(
+        "/api/v1/reimbursement-runs",
+        data
+      ),
+    process: (id: string) => client.post(`/api/v1/reimbursement-runs/${id}/process`, {}),
+    exportBankFile: (id: string) => {
+      const url = resolveEndpoint(`/api/v1/reimbursement-runs/${id}/export/bank-file`);
+      return fetch(url, {
+        method: "GET",
+        credentials: "include",
+      }).then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      });
+    },
   },
 };
 

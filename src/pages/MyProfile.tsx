@@ -13,7 +13,8 @@ import { Textarea } from '@/components/ui/textarea';
 import EmployeeSkillsEditor from '@/components/EmployeeSkillsEditor';
 import EmployeePastProjectsEditor from '@/components/EmployeePastProjectsEditor';
 import EmployeeHistoryTab from '@/components/EmployeeHistoryTab';
-import { CalendarDays, Clock, Camera, Upload } from 'lucide-react';
+import { CalendarDays, Clock, Camera, Upload, Download } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
 
 interface SimpleEmployee {
@@ -57,6 +58,7 @@ interface SimpleEmployee {
 export default function MyProfile() {
   const { userRole } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [employee, setEmployee] = useState<SimpleEmployee | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'personal' | 'skills' | 'projects' | 'certifications' | 'shifts' | 'history'>('personal');
@@ -304,6 +306,16 @@ export default function MyProfile() {
                 Manage your profile information and preferences
               </p>
             </div>
+            {employee?.id && (
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/timesheet-generator/${employee.id}?month=${new Date().toISOString().slice(0, 7)}`)}
+                className="flex items-center gap-2"
+              >
+                <Download className="h-4 w-4" />
+                Generate Timesheet
+              </Button>
+            )}
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[240px,minmax(0,1fr),260px]">

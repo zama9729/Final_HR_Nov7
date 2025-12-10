@@ -7,10 +7,11 @@ const router = express.Router();
 // Get user notifications
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    // Only return unread notifications to prevent cleared ones from reappearing
     const result = await query(
       `SELECT id, title, message, type, read, link, created_at
        FROM notifications
-       WHERE user_id = $1
+       WHERE user_id = $1 AND read = false
        ORDER BY created_at DESC
        LIMIT 10`,
       [req.user.id]

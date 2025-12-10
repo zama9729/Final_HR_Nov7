@@ -1,7 +1,7 @@
 // API Client - Replaces Supabase client
 
-const API_URL = (import.meta as any).env.VITE_API_URL || 'http://localhost:3001';
-const RAG_API_URL = (import.meta as any).env.VITE_RAG_API_URL || 'http://localhost:8001';
+const API_URL = (import.meta as any).env.VITE_API_URL || 'http://127.0.0.1:3001';
+const RAG_API_URL = (import.meta as any).env.VITE_RAG_API_URL || 'http://127.0.0.1:8001';
 
 class ApiClient {
   private baseURL: string;
@@ -69,6 +69,36 @@ class ApiClient {
     }
   }
 
+  // Convenience methods
+  async get(endpoint: string) {
+    return this.request(endpoint, { method: 'GET' });
+  }
+
+  async post(endpoint: string, data?: any) {
+    return this.request(endpoint, {
+      method: 'POST',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async put(endpoint: string, data?: any) {
+    return this.request(endpoint, {
+      method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async patch(endpoint: string, data?: any) {
+    return this.request(endpoint, {
+      method: 'PATCH',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async delete(endpoint: string) {
+    return this.request(endpoint, { method: 'DELETE' });
+  }
+
   private async ragRequest(endpoint: string, options: RequestInit = {}, isFormData = false) {
     const url = `${RAG_API_URL}${endpoint}`;
     const headers: HeadersInit = {
@@ -126,6 +156,24 @@ class ApiClient {
     const result = await this.request('/api/auth/signup', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+    if (result.token) {
+      this.setToken(result.token);
+    }
+    return result;
+  }
+
+  async checkEmail(email: string) {
+    return this.request('/api/auth/check-email', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async firstTimeSetup(email: string, password: string) {
+    const result = await this.request('/api/auth/first-time-setup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
     });
     if (result.token) {
       this.setToken(result.token);
@@ -346,6 +394,25 @@ class ApiClient {
     });
   }
 
+  // Smart Memo
+  async saveSmartMemo(data: { memoText: string; baseDate: string }) {
+    return this.request('/api/calendar/smart-memo', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Reminders
+  async getActiveReminders() {
+    return this.request('/api/reminders/active');
+  }
+
+  async cancelReminder(reminderId: string) {
+    return this.request(`/api/reminders/${reminderId}/cancel`, {
+      method: 'POST',
+    });
+  }
+
   // Organization setup
   async getSetupStatus() {
     return this.request('/api/setup/status');
@@ -356,6 +423,18 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload || {}),
     });
+  }
+
+  // Organization onboarding
+  async completeOnboarding(data: Record<string, any>) {
+    return this.request('/api/org-onboarding/complete', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getOnboardingData() {
+    return this.request('/api/org-onboarding/data');
   }
 
   // Attendance settings
@@ -378,7 +457,15 @@ class ApiClient {
   }
 
   async getClockStatus() {
-    return this.request('/api/v1/attendance/punch/status');
+    try {
+      return await this.request('/api/v1/attendance/punch/status');
+    } catch (err: any) {
+      // Gracefully handle environments where attendance service or employee record is absent
+      if (err?.message?.includes('not found') || err?.message?.includes('Employee record not found')) {
+        return { status: 'not_found' };
+      }
+      throw err;
+    }
   }
 
   async clockPunch(payload: { type: 'IN' | 'OUT'; timestamp?: string; location?: any; metadata?: any }) {
@@ -1115,6 +1202,32 @@ class ApiClient {
     return this.request('/api/team-schedule/events', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  async getPersonalCalendarEvents(params?: { start_date?: string; end_date?: string }) {
+    const suffix = params && (params.start_date || params.end_date)
+      ? `?${new URLSearchParams(params as any).toString()}`
+      : '';
+    return this.request(`/api/personal-calendar-events${suffix}`);
+  }
+
+  async createPersonalCalendarEvent(data: {
+    title: string;
+    description?: string;
+    event_date: string;
+    start_time?: string;
+    end_time?: string;
+  }) {
+    return this.request('/api/personal-calendar-events', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePersonalCalendarEvent(id: string) {
+    return this.request(`/api/personal-calendar-events/${id}`, {
+      method: 'DELETE',
     });
   }
 

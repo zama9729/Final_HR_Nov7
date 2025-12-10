@@ -36,7 +36,8 @@ import {
   FileText,
   UserCheck,
   Eye,
-  ArrowRight
+  ArrowRight,
+  Download
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -508,6 +509,10 @@ export default function EmployeeDetail() {
                 <DropdownMenuItem onClick={() => setIsEditing(!isEditing)}>
                   <Pencil className="mr-2 h-4 w-4" />
                   {isEditing ? 'Cancel Edit' : 'Edit Profile'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/timesheet-generator/${id}?month=${new Date().toISOString().slice(0, 7)}`)}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Generate Timesheet
                 </DropdownMenuItem>
                 <DropdownMenuItem>Export Profile</DropdownMenuItem>
                 <DropdownMenuItem>View Org Chart</DropdownMenuItem>

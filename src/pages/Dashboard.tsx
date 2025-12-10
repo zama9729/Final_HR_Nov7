@@ -12,6 +12,7 @@ import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, i
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ReferenceLine, Area, AreaChart } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
+import { SmartMemo } from "@/components/dashboard/SmartMemo";
 import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
 import { useClockResultToast } from "@/components/attendance/ClockResultToast";
 import confetti from "canvas-confetti";
@@ -1084,84 +1085,16 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-          {/* Attendance Trends */}
-          <Card className="shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Activity className="h-5 w-5 text-red-600" />
-                Attendance Trends
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingTrends ? (
-                <div className="h-[200px] flex items-center justify-center text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <div className="h-4 w-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-                    Loading trends...
-                  </div>
-                </div>
-              ) : attendanceTrends.length === 0 ? (
-                <div className="h-[200px] flex items-center justify-center text-muted-foreground">
-                  <p className="text-sm">No attendance data available</p>
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={attendanceTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#E41E26" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#E41E26" stopOpacity={0.05}/>
-                      </linearGradient>
-                    </defs>
-                    {/* Light background grid for subtle guidance */}
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" opacity={0.3} />
-                    {/* Hide axes and labels */}
-                    <XAxis dataKey="date" hide />
-                    <YAxis hide domain={[0, 'dataMax + 2']} />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'white', 
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                      }}
-                      formatter={(value: any) => [`${value} hrs`, 'Hours Worked']}
-                      labelFormatter={(label) => `${label}`}
-                    />
-                    {/* Threshold line at 8 hours */}
-                    <ReferenceLine
-                      y={8}
-                      stroke="#ef4444"
-                      strokeDasharray="4 4"
-                      strokeWidth={1.5}
-                      opacity={0.6}
-                      ifOverflow="extendDomain"
-                    />
-                    {/* Smooth area fill */}
-                    <Area
-                      type="basis"
-                      dataKey="hours"
-                      stroke="#E41E26"
-                      strokeWidth={2.5}
-                      fill="url(#colorHours)"
-                      fillOpacity={1}
-                    />
-                    {/* Smooth line overlay */}
-                    <Line 
-                      type="basis" 
-                      dataKey="hours" 
-                      stroke="#E41E26"
-                      strokeWidth={2.5}
-                      dot={false}
-                      activeDot={{ r: 4, fill: '#E41E26', strokeWidth: 2, stroke: '#fff' }}
-                      name="Hours Worked"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
+          {/* Smart Memo */}
+          <SmartMemo 
+            selectedDate={new Date()} 
+            onEventsCreated={() => {
+              // Refresh calendar if needed
+              if (window.location.pathname.includes('calendar')) {
+                window.location.reload();
+              }
+            }}
+          />
         </div>
 
         {/* Unified Team Calendar */}

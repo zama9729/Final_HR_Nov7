@@ -358,6 +358,25 @@ export default function Settings() {
         </div>
 
         <div className="grid gap-6">
+          {canEdit && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Organization Setup</CardTitle>
+                <CardDescription>
+                  Edit your organization's company information, structure, and settings
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  variant="outline"
+                  onClick={() => window.location.href = '/settings/organization-setup'}
+                >
+                  Edit Organization Setup
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle>Organization Branding</CardTitle>

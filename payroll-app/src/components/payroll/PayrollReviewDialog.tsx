@@ -23,6 +23,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Loader2, Edit2, Check, X, Ban, RotateCcw, Search } from "lucide-react";
@@ -45,6 +51,7 @@ interface PayrollItem {
   esi_deduction: number;
   pt_deduction: number;
   tds_deduction: number;
+  other_deductions?: number;
   advance_deduction?: number;
   deductions: number;
   net_salary: number;
@@ -81,6 +88,10 @@ export const PayrollReviewDialog = ({
   const [activeIncentiveIndex, setActiveIncentiveIndex] = useState<number | null>(null);
   const [incentiveDraft, setIncentiveDraft] = useState<string>("");
   const [savingIncentive, setSavingIncentive] = useState(false);
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkAmount, setBulkAmount] = useState<string>("");
+  const [bulkComponentName, setBulkComponentName] = useState<string>("Partial Salary Release");
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [heldEmployeeIds, setHeldEmployeeIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState<string>("");
   const queryClient = useQueryClient();
@@ -99,6 +110,7 @@ export const PayrollReviewDialog = ({
       const normalized = data.map((item) => ({
         ...item,
         incentive_amount: Number(item.incentive_amount || 0),
+        other_deductions: Number(item.other_deductions || 0),
       }));
       setPayrollItems(normalized);
       setActiveIncentiveIndex(null);
@@ -111,6 +123,9 @@ export const PayrollReviewDialog = ({
       setConfirmOpen(false);
       setHeldEmployeeIds(new Set());
       setSearchQuery("");
+      setBulkDialogOpen(false);
+      setBulkAmount("");
+      setBulkComponentName("Partial Salary Release");
     }
   }, [open]);
 
@@ -137,7 +152,7 @@ export const PayrollReviewDialog = ({
   const handleSaveEdit = (index: number) => {
     const item = payrollItems[index];
     
-    // Recalculate gross salary
+    // Recalculate gross salary from all earning components
     const grossSalary =
       item.basic_salary +
       item.hra +
@@ -147,30 +162,22 @@ export const PayrollReviewDialog = ({
       item.bonus +
       (item.incentive_amount || 0);
 
-    // Recalculate deductions (simplified - would need settings from backend)
-    // PF: 12% of basic, capped at ₹15,000
-    // If basic <= 15000, PF = 12% of basic; If basic > 15000, PF = 12% of 15000
-    const pfWageCeiling = 15000;
-    const pfBasis = item.basic_salary <= pfWageCeiling ? item.basic_salary : pfWageCeiling;
-    const pfDeduction = (pfBasis * 12) / 100; // 12% of basic (capped)
-    const esiDeduction = grossSalary <= 21000 ? (grossSalary * 0.75) / 100 : 0;
-    const ptDeduction = 200; // Fixed
-    const annualIncome = grossSalary * 12;
-    const tdsDeduction =
-      annualIncome > 250000 ? ((annualIncome - 250000) * 5) / 100 / 12 : 0;
+    // Calculate total deductions from all deduction components
+    const totalDeductions = 
+      item.pf_deduction +
+      item.esi_deduction +
+      item.pt_deduction +
+      item.tds_deduction +
+      (item.other_deductions || 0);
 
-    const deductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction;
-    const netSalary = grossSalary - deductions;
+    // Calculate net salary
+    const netSalary = grossSalary - totalDeductions;
 
     const updatedItems = [...payrollItems];
     updatedItems[index] = {
       ...item,
       gross_salary: grossSalary,
-      pf_deduction: pfDeduction,
-      esi_deduction: esiDeduction,
-      pt_deduction: ptDeduction,
-      tds_deduction: tdsDeduction,
-      deductions,
+      deductions: totalDeductions,
       net_salary: netSalary,
     };
     setPayrollItems(updatedItems);
@@ -179,10 +186,39 @@ export const PayrollReviewDialog = ({
 
   const handleFieldChange = (index: number, field: keyof PayrollItem, value: number) => {
     const updatedItems = [...payrollItems];
+    const item = updatedItems[index];
     updatedItems[index] = {
-      ...updatedItems[index],
+      ...item,
       [field]: value,
     };
+    
+    // Recalculate gross salary if any earning component changed
+    if (['basic_salary', 'hra', 'special_allowance', 'da', 'lta', 'bonus', 'incentive_amount'].includes(field)) {
+      const grossSalary =
+        updatedItems[index].basic_salary +
+        updatedItems[index].hra +
+        updatedItems[index].special_allowance +
+        updatedItems[index].da +
+        updatedItems[index].lta +
+        updatedItems[index].bonus +
+        (updatedItems[index].incentive_amount || 0);
+      updatedItems[index].gross_salary = grossSalary;
+    }
+    
+    // Recalculate deductions if any deduction component changed
+    if (['pf_deduction', 'esi_deduction', 'pt_deduction', 'tds_deduction', 'other_deductions'].includes(field)) {
+      const totalDeductions =
+        updatedItems[index].pf_deduction +
+        updatedItems[index].esi_deduction +
+        updatedItems[index].pt_deduction +
+        updatedItems[index].tds_deduction +
+        (updatedItems[index].other_deductions || 0);
+      updatedItems[index].deductions = totalDeductions;
+    }
+    
+    // Recalculate net salary
+    updatedItems[index].net_salary = updatedItems[index].gross_salary - updatedItems[index].deductions;
+    
     setPayrollItems(updatedItems);
   };
 
@@ -208,6 +244,11 @@ export const PayrollReviewDialog = ({
         lta: item.lta,
         bonus: item.bonus,
         incentive_amount: item.incentive_amount || 0,
+        pf_deduction: item.pf_deduction,
+        esi_deduction: item.esi_deduction,
+        pt_deduction: item.pt_deduction,
+        tds_deduction: item.tds_deduction,
+        other_deductions: item.other_deductions || 0,
         lop_days: item.lop_days,
         paid_days: item.paid_days,
         total_working_days: item.total_working_days,
@@ -254,6 +295,57 @@ export const PayrollReviewDialog = ({
       toast.error(error.message || "Failed to process payroll");
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleUniformPayout = async () => {
+    const amountValue = Number(bulkAmount);
+    if (Number.isNaN(amountValue) || amountValue <= 0) {
+      toast.error("Please enter a valid payout amount greater than zero.");
+      return;
+    }
+    const componentName = (bulkComponentName || "").trim() || "Partial Salary Release";
+    const targets = activePayrollItems;
+    if (targets.length === 0) {
+      toast.error("No active employees available for bulk payout.");
+      return;
+    }
+
+    setBulkSaving(true);
+    try {
+      const results = await Promise.allSettled(
+        targets.map((emp) =>
+          api.payroll.addAdjustment(cycleId, {
+            employee_id: emp.employee_id,
+            component_name: componentName,
+            amount: amountValue,
+            is_taxable: true,
+          })
+        )
+      );
+
+      const failures = results.filter((r) => r.status === "rejected");
+      const successCount = results.length - failures.length;
+
+      if (successCount > 0) {
+        toast.success(`Added payout for ${successCount} employee${successCount === 1 ? "" : "s"}.`);
+      }
+      if (failures.length > 0) {
+        toast.error(`Failed for ${failures.length} employee${failures.length === 1 ? "" : "s"}.`);
+        console.error("Bulk payout errors:", failures);
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["payroll-preview", cycleId] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-cycles"] });
+      await queryClient.invalidateQueries({ queryKey: ["payroll-runs"] });
+      await refetch();
+
+      setBulkDialogOpen(false);
+      setBulkAmount("");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to apply uniform payout");
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -310,9 +402,12 @@ export const PayrollReviewDialog = ({
     item => !heldEmployeeIds.has(item.employee_id)
   );
   
-  const totalGross = activePayrollItems.reduce((sum, item) => sum + item.gross_salary, 0);
-  const totalDeductions = activePayrollItems.reduce((sum, item) => sum + item.deductions, 0);
-  const totalNet = totalGross - totalDeductions;
+  const isPartialRun = runType === "partial_payment";
+  const totalGross = activePayrollItems.reduce((sum, item) => sum + (isPartialRun ? 0 : item.gross_salary), 0);
+  const totalDeductions = activePayrollItems.reduce((sum, item) => sum + (isPartialRun ? 0 : item.deductions), 0);
+  const totalNet = isPartialRun
+    ? activePayrollItems.reduce((sum, item) => sum + item.net_salary, 0)
+    : totalGross - totalDeductions;
 
   const getMonthName = (month: number) => {
     return new Date(2000, month - 1).toLocaleString("default", { month: "long" });
@@ -364,25 +459,134 @@ export const PayrollReviewDialog = ({
                 </p>
               )}
             </div>
-            <div className="border rounded-lg overflow-hidden">
+            {isPartialRun && (
+              <div className="border rounded-lg overflow-x-auto mb-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="sticky left-0 bg-background z-10">Employee</TableHead>
+                      <TableHead className="text-right">Partial Payout Amount</TableHead>
+                      <TableHead className="text-right font-semibold text-primary">Net Pay</TableHead>
+                      <TableHead className="sticky right-0 bg-background z-10">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredPayrollItems.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                          No employees found matching your search.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredPayrollItems.map((item) => {
+                        const originalIndex = payrollItems.findIndex(p => p.employee_id === item.employee_id);
+                        const isHeld = heldEmployeeIds.has(item.employee_id);
+                        return (
+                          <TableRow key={item.employee_id} className={isHeld ? "opacity-50 bg-muted/30" : ""}>
+                            <TableCell className="sticky left-0 bg-background z-10">
+                              <div className="space-y-1">
+                                <div className="font-medium flex items-center gap-2">
+                                  {item.employee_name}
+                                  {heldEmployeeIds.has(item.employee_id) && (
+                                    <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">
+                                      HELD
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground">{item.employee_code}</div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number"
+                                value={item.net_salary}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value || 0);
+                                  const updated = [...payrollItems];
+                                  updated[originalIndex] = {
+                                    ...updated[originalIndex],
+                                    net_salary: val,
+                                    gross_salary: val,
+                                    deductions: 0,
+                                    basic_salary: 0,
+                                    hra: 0,
+                                    special_allowance: 0,
+                                    da: 0,
+                                    lta: 0,
+                                    bonus: 0,
+                                    incentive_amount: 0,
+                                    pf_deduction: 0,
+                                    esi_deduction: 0,
+                                    pt_deduction: 0,
+                                    tds_deduction: 0,
+                                    other_deductions: 0,
+                                  };
+                                  setPayrollItems(updated);
+                                }}
+                                className="w-32"
+                                disabled={!canModify}
+                              />
+                            </TableCell>
+                            <TableCell className="text-right font-semibold text-primary">
+                              {formatCurrency(item.net_salary)}
+                            </TableCell>
+                            <TableCell className="sticky right-0 bg-background z-10">
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleHoldEmployee(item.employee_id)}
+                                >
+                                  {heldEmployeeIds.has(item.employee_id) ? (
+                                    <>
+                                      <RotateCcw className="h-4 w-4 mr-1" />
+                                      Unhold
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Ban className="h-4 w-4 mr-1" />
+                                      Hold
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            {!isPartialRun && (
+            <div className="border rounded-lg overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Employee</TableHead>
+                    <TableHead className="sticky left-0 bg-background z-10">Employee</TableHead>
                     <TableHead className="text-right">Basic</TableHead>
                     <TableHead className="text-right">HRA</TableHead>
                     <TableHead className="text-right">Special Allowance</TableHead>
+                    <TableHead className="text-right">DA</TableHead>
+                    <TableHead className="text-right">LTA</TableHead>
+                    <TableHead className="text-right">Bonus</TableHead>
                     <TableHead className="text-right">Incentive</TableHead>
-                    <TableHead className="text-right">Gross</TableHead>
-                    <TableHead className="text-right">Deductions</TableHead>
-                    <TableHead className="text-right">Net Salary</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead className="text-right font-semibold">Gross</TableHead>
+                    <TableHead className="text-right">PF</TableHead>
+                    <TableHead className="text-right">ESI</TableHead>
+                    <TableHead className="text-right">PT</TableHead>
+                    <TableHead className="text-right">TDS</TableHead>
+                    <TableHead className="text-right">Other Ded.</TableHead>
+                    <TableHead className="text-right font-semibold">Total Ded.</TableHead>
+                    <TableHead className="text-right font-semibold text-primary">Net Salary</TableHead>
+                    <TableHead className="sticky right-0 bg-background z-10">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredPayrollItems.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={17} className="text-center py-8 text-muted-foreground">
                         No employees found matching your search.
                       </TableCell>
                     </TableRow>
@@ -395,7 +599,7 @@ export const PayrollReviewDialog = ({
                       <TableRow key={item.employee_id} className={isHeld ? "opacity-50 bg-muted/30" : ""}>
                       {editingIndex === originalIndex ? (
                         <>
-                          <TableCell>
+                          <TableCell className="sticky left-0 bg-background z-10">
                             <div className="space-y-1">
                               <div className="font-medium flex items-center gap-2">
                                 {item.employee_name}
@@ -442,65 +646,109 @@ export const PayrollReviewDialog = ({
                               className="w-24"
                             />
                           </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.da}
+                              onChange={(e) =>
+                                handleFieldChange(originalIndex, "da", Number(e.target.value))
+                              }
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.lta}
+                              onChange={(e) =>
+                                handleFieldChange(originalIndex, "lta", Number(e.target.value))
+                              }
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.bonus}
+                              onChange={(e) =>
+                                handleFieldChange(originalIndex, "bonus", Number(e.target.value))
+                              }
+                              className="w-24"
+                            />
+                          </TableCell>
                           <TableCell className="text-right">
                             <div className="flex flex-col items-end gap-2">
-                              <span className="font-semibold">
-                                {formatCurrency(item.incentive_amount || 0)}
-                              </span>
-                              {canModify && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleOpenIncentive(originalIndex)}
-                                  >
-                                    {item.incentive_amount ? "Edit Incentive" : "Add Incentive"}
-                                  </Button>
-                                  {activeIncentiveIndex === originalIndex && (
-                                    <div className="flex items-center gap-2">
-                                      <Input
-                                        type="number"
-                                        value={incentiveDraft}
-                                        onChange={(e) => setIncentiveDraft(e.target.value)}
-                                        className="w-28"
-                                      />
-                                      <Button
-                                        size="sm"
-                                        onClick={handleSaveIncentive}
-                                        disabled={savingIncentive}
-                                      >
-                                        Save
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => setActiveIncentiveIndex(null)}
-                                      >
-                                        Cancel
-                                      </Button>
-                                    </div>
-                                  )}
-                                </>
-                              )}
+                              <Input
+                                type="number"
+                                value={item.incentive_amount || 0}
+                                onChange={(e) =>
+                                  handleFieldChange(originalIndex, "incentive_amount", Number(e.target.value))
+                                }
+                                className="w-24"
+                              />
                             </div>
                           </TableCell>
                           <TableCell className="text-right font-semibold">
                             {formatCurrency(item.gross_salary)}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex flex-col items-end gap-1">
-                              <span>{formatCurrency(item.deductions)}</span>
-                              {item.advance_deduction && item.advance_deduction > 0 && (
-                                <span className="text-xs text-muted-foreground">
-                                  (EMI: {formatCurrency(item.advance_deduction)})
-                                </span>
-                              )}
-                            </div>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.pf_deduction}
+                              onChange={(e) =>
+                                handleFieldChange(originalIndex, "pf_deduction", Number(e.target.value))
+                              }
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.esi_deduction}
+                              onChange={(e) =>
+                                handleFieldChange(originalIndex, "esi_deduction", Number(e.target.value))
+                              }
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.pt_deduction}
+                              onChange={(e) =>
+                                handleFieldChange(originalIndex, "pt_deduction", Number(e.target.value))
+                              }
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.tds_deduction}
+                              onChange={(e) =>
+                                handleFieldChange(originalIndex, "tds_deduction", Number(e.target.value))
+                              }
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.other_deductions || 0}
+                              onChange={(e) =>
+                                handleFieldChange(originalIndex, "other_deductions", Number(e.target.value))
+                              }
+                              className="w-24"
+                              placeholder="0"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {formatCurrency(item.deductions)}
                           </TableCell>
                           <TableCell className="text-right font-semibold text-primary">
                             {formatCurrency(item.net_salary)}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="sticky right-0 bg-background z-10">
                             <div className="flex gap-2">
                               <Button
                                 size="sm"
@@ -521,7 +769,7 @@ export const PayrollReviewDialog = ({
                         </>
                       ) : (
                         <>
-                          <TableCell>
+                          <TableCell className="sticky left-0 bg-background z-10">
                             <div className="space-y-1">
                               <div className="font-medium flex items-center gap-2">
                                 {item.employee_name}
@@ -539,6 +787,9 @@ export const PayrollReviewDialog = ({
                           <TableCell className="text-right">
                             {formatCurrency(item.special_allowance)}
                           </TableCell>
+                          <TableCell className="text-right">{formatCurrency(item.da)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(item.lta)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(item.bonus)}</TableCell>
                           <TableCell className="text-right">
                             <div className="flex flex-col items-end gap-2">
                               <span className="font-semibold">
@@ -551,7 +802,7 @@ export const PayrollReviewDialog = ({
                                     variant="outline"
                                     onClick={() => handleOpenIncentive(originalIndex)}
                                   >
-                                    {item.incentive_amount ? "Edit Incentive" : "Add Incentive"}
+                                    {item.incentive_amount ? "Edit" : "Add"}
                                   </Button>
                                   {activeIncentiveIndex === originalIndex && (
                                     <div className="flex items-center justify-end gap-2">
@@ -584,7 +835,14 @@ export const PayrollReviewDialog = ({
                           <TableCell className="text-right font-semibold">
                             {formatCurrency(item.gross_salary)}
                           </TableCell>
+                          <TableCell className="text-right">{formatCurrency(item.pf_deduction)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(item.esi_deduction)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(item.pt_deduction)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(item.tds_deduction)}</TableCell>
                           <TableCell className="text-right">
+                            {formatCurrency(item.other_deductions || 0)}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
                             <div className="flex flex-col items-end gap-1">
                               <span>{formatCurrency(item.deductions)}</span>
                               {item.advance_deduction && item.advance_deduction > 0 && (
@@ -597,7 +855,7 @@ export const PayrollReviewDialog = ({
                           <TableCell className="text-right font-semibold text-primary">
                             {formatCurrency(item.net_salary)}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="sticky right-0 bg-background z-10">
                             {canModify && (
                               <div className="flex gap-2">
                                 <Button
@@ -638,6 +896,7 @@ export const PayrollReviewDialog = ({
                 </TableBody>
               </Table>
             </div>
+            )}
 
             <Card>
               <CardContent className="pt-6">
@@ -662,60 +921,126 @@ export const PayrollReviewDialog = ({
           </>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={processing}>
-            Cancel
-          </Button>
-          {mode === 'edit' ? (
-            <Button
-              disabled={!canModify || processing || activePayrollItems.length === 0}
-              onClick={saveChanges}
-            >
-              {processing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                "Save Changes"
-              )}
+        <DialogFooter className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2">
+            {mode !== 'edit' && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" disabled={!canModify || processing || activePayrollItems.length === 0}>
+                    Bulk Actions
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => setBulkDialogOpen(true)}>
+                    Set Uniform Payout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={processing}>
+              Cancel
             </Button>
-          ) : (
-            <AlertDialog open={confirmOpen} onOpenChange={(open) => !processing && setConfirmOpen(open)}>
-              <AlertDialogTrigger asChild>
-                <Button
-                  disabled={!canModify || processing || activePayrollItems.length === 0}
-                >
-                  {processing ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    "Process Payroll"
-                  )}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Process payroll?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Are you sure you want to process the payrolls?
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
-                  <AlertDialogAction
-                    disabled={processing}
-                    onClick={() => processPayroll()}
+            {mode === 'edit' ? (
+              <Button
+                disabled={!canModify || processing || activePayrollItems.length === 0}
+                onClick={saveChanges}
+              >
+                {processing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Changes"
+                )}
+              </Button>
+            ) : (
+              <AlertDialog open={confirmOpen} onOpenChange={(open) => !processing && setConfirmOpen(open)}>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    disabled={!canModify || processing || activePayrollItems.length === 0}
                   >
-                    Yes, Process
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
+                    {processing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      "Process Payroll"
+                    )}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Process payroll?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to process the payrolls?
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={processing}>No</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={processing}
+                      onClick={() => processPayroll()}
+                    >
+                      Yes, Process
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
         </DialogFooter>
+
+        <Dialog open={bulkDialogOpen} onOpenChange={(open) => !bulkSaving && setBulkDialogOpen(open)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Set Uniform Payout</DialogTitle>
+              <DialogDescription>
+                Apply the same taxable payout to all visible employees in this run.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="bulk-amount">Amount (INR)</Label>
+                <Input
+                  id="bulk-amount"
+                  type="number"
+                  min={0}
+                  value={bulkAmount}
+                  onChange={(e) => setBulkAmount(e.target.value)}
+                  placeholder="30000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bulk-component">Component Name</Label>
+                <Input
+                  id="bulk-component"
+                  value={bulkComponentName}
+                  onChange={(e) => setBulkComponentName(e.target.value)}
+                  placeholder="Partial Salary Release"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkDialogOpen(false)} disabled={bulkSaving}>
+                Cancel
+              </Button>
+              <Button onClick={handleUniformPayout} disabled={bulkSaving}>
+                {bulkSaving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Applying...
+                  </>
+                ) : (
+                  "Apply to All"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

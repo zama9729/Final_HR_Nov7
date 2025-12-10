@@ -104,13 +104,17 @@ const Employees = () => {
             <ArrowLeft className="mr-2 h-4 w-4" />
             Dashboard
           </Button>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-foreground">Employees - {companyName}</h1>
               <p className="text-muted-foreground">Manage your workforce</p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setIsImportDialogOpen(true)} className="liquid-glass-nav-item">
+            <div className="flex gap-2 flex-shrink-0">
+              <Button 
+                variant="outline" 
+                onClick={() => setIsImportDialogOpen(true)}
+                className="bg-background border-border hover:bg-accent"
+              >
                 <Upload className="mr-2 h-4 w-4" />
                 Import Salaries
               </Button>
