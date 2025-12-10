@@ -2,16 +2,20 @@
 -- Create leave and attendance management tables for LOP tracking
 
 -- Create leave status enum
-CREATE TYPE public.leave_status AS ENUM ('pending', 'approved', 'rejected', 'cancelled');
-
--- Create leave type enum
-CREATE TYPE public.leave_type AS ENUM ('sick', 'casual', 'earned', 'loss_of_pay', 'other');
-
--- Create attendance status enum
-CREATE TYPE public.attendance_status AS ENUM ('present', 'absent', 'half_day', 'holiday', 'weekend');
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'leave_status') THEN
+        CREATE TYPE public.leave_status AS ENUM ('pending', 'approved', 'rejected', 'cancelled');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'leave_type') THEN
+        CREATE TYPE public.leave_type AS ENUM ('sick', 'casual', 'earned', 'loss_of_pay', 'other');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'attendance_status') THEN
+        CREATE TYPE public.attendance_status AS ENUM ('present', 'absent', 'half_day', 'holiday', 'weekend');
+    END IF;
+END $$;
 
 -- Leave requests table
-CREATE TABLE public.leave_requests (
+CREATE TABLE IF NOT EXISTS public.leave_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL,
   employee_id UUID REFERENCES public.employees(id) ON DELETE CASCADE NOT NULL,
@@ -32,7 +36,7 @@ CREATE TABLE public.leave_requests (
 );
 
 -- Attendance records table (daily attendance tracking)
-CREATE TABLE public.attendance_records (
+CREATE TABLE IF NOT EXISTS public.attendance_records (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL,
   employee_id UUID REFERENCES public.employees(id) ON DELETE CASCADE NOT NULL,
@@ -53,24 +57,30 @@ ALTER TABLE public.payroll_items
   ADD COLUMN IF NOT EXISTS total_working_days DECIMAL(5, 2) DEFAULT 0;
 
 -- Create indexes for better query performance
-CREATE INDEX idx_leave_requests_employee_id ON public.leave_requests(employee_id);
-CREATE INDEX idx_leave_requests_tenant_id ON public.leave_requests(tenant_id);
-CREATE INDEX idx_leave_requests_status ON public.leave_requests(status);
-CREATE INDEX idx_leave_requests_dates ON public.leave_requests(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON public.leave_requests(employee_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_tenant_id ON public.leave_requests(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON public.leave_requests(status);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON public.leave_requests(start_date, end_date);
 
-CREATE INDEX idx_attendance_records_employee_id ON public.attendance_records(employee_id);
-CREATE INDEX idx_attendance_records_tenant_id ON public.attendance_records(tenant_id);
-CREATE INDEX idx_attendance_records_date ON public.attendance_records(attendance_date);
-CREATE INDEX idx_attendance_records_lop ON public.attendance_records(is_lop) WHERE is_lop = true;
+CREATE INDEX IF NOT EXISTS idx_attendance_records_employee_id ON public.attendance_records(employee_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_tenant_id ON public.attendance_records(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_date ON public.attendance_records(attendance_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_lop ON public.attendance_records(is_lop) WHERE is_lop = true;
 
 -- Add triggers for updated_at
-CREATE TRIGGER update_leave_requests_updated_at
-BEFORE UPDATE ON public.leave_requests
-FOR EACH ROW
-EXECUTE FUNCTION public.update_updated_at_column();
-
-CREATE TRIGGER update_attendance_records_updated_at
-BEFORE UPDATE ON public.attendance_records
-FOR EACH ROW
-EXECUTE FUNCTION public.update_updated_at_column();
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_leave_requests_updated_at') THEN
+        CREATE TRIGGER update_leave_requests_updated_at
+        BEFORE UPDATE ON public.leave_requests
+        FOR EACH ROW
+        EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_attendance_records_updated_at') THEN
+        CREATE TRIGGER update_attendance_records_updated_at
+        BEFORE UPDATE ON public.attendance_records
+        FOR EACH ROW
+        EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+END $$;
 
