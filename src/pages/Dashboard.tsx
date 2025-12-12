@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, Megaphone, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2 } from "lucide-react";
+import { Clock, Calendar, Bot, CalendarDays, CalendarClock, Briefcase, Megaphone, TrendingUp, AlertCircle, CheckCircle2, SunMedium, MoonStar, Activity, Loader2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, isTomorrow, subDays, startOfDay, isSameDay } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ReferenceLine, Area, AreaChart } from "recharts";
@@ -109,6 +109,7 @@ export default function Dashboard() {
   const [employeeData, setEmployeeData] = useState<any>(null);
   const [announcementDialogOpen, setAnnouncementDialogOpen] = useState(false);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<DashboardStats["announcements"][number] | null>(null);
+  const [viewAllAnnouncementsOpen, setViewAllAnnouncementsOpen] = useState(false);
   const presenceIndicators: Record<string, string> = {
     online: "bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.7)]",
     away: "bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.7)]",
@@ -541,6 +542,18 @@ export default function Dashboard() {
   const handleAnnouncementOpen = (announcement: DashboardStats["announcements"][number]) => {
     setSelectedAnnouncement(announcement);
     setAnnouncementDialogOpen(true);
+  };
+
+  const handleAnnouncementDismiss = (id: string) => {
+    setStats((prev) => ({
+      ...prev,
+      announcements: prev.announcements.filter((a) => a.id !== id),
+    }));
+  };
+
+  const handleAnnouncementsClearAll = () => {
+    setStats((prev) => ({ ...prev, announcements: [] }));
+    setViewAllAnnouncementsOpen(false);
   };
 
   const formatShiftTime = (time: string) => {
@@ -1042,9 +1055,13 @@ export default function Dashboard() {
                 Announcements
               </CardTitle>
               {(userRole === 'hr' || userRole === 'director' || userRole === 'ceo' || userRole === 'admin') && (
-                <Link to="/announcements" className="text-sm text-red-600 hover:underline">
+                <button
+                  type="button"
+                  onClick={() => setViewAllAnnouncementsOpen(true)}
+                  className="text-sm text-red-600 hover:underline"
+                >
                   View All
-                </Link>
+                </button>
               )}
           </CardHeader>
           <CardContent className="max-h-64 overflow-y-auto pr-1">
@@ -1055,8 +1072,7 @@ export default function Dashboard() {
             ) : (
               <div className="space-y-3">
                 {stats.announcements.map((a) => (
-                  <button
-                    type="button"
+                  <div
                     key={a.id}
                     onDoubleClick={() => handleAnnouncementOpen(a)}
                     className={`w-full text-left p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
@@ -1067,28 +1083,48 @@ export default function Dashboard() {
                           : 'border-border'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-medium text-sm line-clamp-1">{a.title}</p>
-                      <div className="flex items-center gap-1">
-                        {a.type === 'birthday' && (
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] px-1.5 py-0 border-amber-400 text-amber-700"
-                          >
-                            Birthday
-                          </Badge>
-                        )}
-                        {a.priority === 'urgent' && a.type !== 'birthday' && (
-                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                            Urgent
-                          </Badge>
-                        )}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm line-clamp-1">{a.title}</p>
+                          <div className="flex items-center gap-1">
+                            {a.type === 'birthday' && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 border-amber-400 text-amber-700"
+                              >
+                                Birthday
+                              </Badge>
+                            )}
+                            {a.priority === 'urgent' && a.type !== 'birthday' && (
+                              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                Urgent
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                          {renderAnnouncementBody(a.body)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                          {format(new Date(a.created_at), 'MMM d')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAnnouncementDismiss(a.id);
+                          }}
+                          className="text-slate-400 hover:text-red-500"
+                          aria-label="Dismiss announcement"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                      {renderAnnouncementBody(a.body)}
-                    </p>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -1157,6 +1193,70 @@ export default function Dashboard() {
                   {renderAnnouncementBody(selectedAnnouncement.body)}
                 </div>
               </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View All Announcements modal */}
+      <Dialog open={viewAllAnnouncementsOpen} onOpenChange={setViewAllAnnouncementsOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between text-base font-semibold">
+              <span className="flex items-center gap-2">
+                <Megaphone className="h-4 w-4 text-amber-600" />
+                All Announcements
+              </span>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={handleAnnouncementsClearAll}>
+                  Clear All
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setViewAllAnnouncementsOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </DialogTitle>
+            <DialogDescription>Review recent announcements.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
+            {stats.announcements.length === 0 ? (
+              <div className="text-sm text-muted-foreground text-center py-6">No announcements.</div>
+            ) : (
+              stats.announcements.map((a) => (
+                <div
+                  key={a.id}
+                  className="rounded-lg border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900/50 px-3 py-2 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                          {a.title}
+                        </span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {a.priority || 'normal'}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {renderAnnouncementBody(a.body)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                        {format(new Date(a.created_at), 'MMM d')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleAnnouncementDismiss(a.id)}
+                        className="text-slate-400 hover:text-red-500"
+                        aria-label="Dismiss announcement"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </DialogContent>
