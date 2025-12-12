@@ -9,6 +9,7 @@ import XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import reimbursementsRouter from "./reimbursements.js";
 import reimbursementRunsRouter from "./reimbursement-runs.js";
+import auditLogsRouter from "./audit-logs.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 const PROOFS_DIRECTORY =
