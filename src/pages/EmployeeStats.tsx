@@ -30,7 +30,8 @@ interface EmployeeStat {
     project_id: string;
     project_name: string;
     role: string;
-    allocation_percent: number;
+    allocation_percent?: number;
+    percent_allocation?: number;
     start_date: string;
     end_date: string | null;
   }>;
@@ -67,8 +68,10 @@ export default function EmployeeStats() {
       if (endDate) params.endDate = endDate;
       
       const data = await api.getEmployeeStats(params);
-      setStats(data || []);
-      setFilteredStats(data || []);
+      // Ensure data is an array
+      const statsArray = Array.isArray(data) ? data : [];
+      setStats(statsArray);
+      setFilteredStats(statsArray);
     } catch (error: any) {
       console.error('Error fetching employee stats:', error);
       toast({
@@ -76,6 +79,8 @@ export default function EmployeeStats() {
         description: error.message || "Failed to fetch employee statistics",
         variant: "destructive",
       });
+      setStats([]);
+      setFilteredStats([]);
     } finally {
       setLoading(false);
     }
@@ -132,7 +137,7 @@ export default function EmployeeStats() {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   };
 
-  if (userRole !== 'hr' && userRole !== 'director' && userRole !== 'ceo') {
+  if (userRole && !['hr', 'director', 'ceo', 'admin'].includes(userRole)) {
     return (
       <AppLayout>
         <Card>
@@ -147,6 +152,16 @@ export default function EmployeeStats() {
   return (
     <AppLayout>
       <div className="space-y-4">
+        {/* Page Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Employee Analytics</h1>
+            <p className="text-muted-foreground mt-1">
+              View detailed statistics and analytics for all employees
+            </p>
+          </div>
+        </div>
+
         {/* Filters Bar */}
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="pt-6">
