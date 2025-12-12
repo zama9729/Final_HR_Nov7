@@ -151,6 +151,8 @@ services:
       - HR_API_URL=http://api:3001
       - PAYROLL_PROVISION_TOKEN=${PAYROLL_PROVISION_TOKEN:-your-shared-provisioning-secret}
       - HR_PAYROLL_JWT_PUBLIC_KEY=${HR_PAYROLL_JWT_PUBLIC_KEY}
+      - ALLOW_UNVERIFIED_SSO=${ALLOW_UNVERIFIED_SSO:-true}
+      - DEV_MODE=${DEV_MODE:-true}
       - DISABLE_PAYROLL_LOCAL_AUTH=${DISABLE_PAYROLL_LOCAL_AUTH:-true}
     depends_on:
       postgres:
