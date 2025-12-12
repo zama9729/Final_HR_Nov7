@@ -606,7 +606,6 @@ router.get("/history", async (req: Request, res: Response) => {
             p.first_name || ' ' || p.last_name, 
             p.first_name, 
             p.last_name, 
-            e.full_name,
             e.email,
             'Unknown'
           ) as employee_name,
