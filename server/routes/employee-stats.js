@@ -62,6 +62,16 @@ router.get('/', authenticateToken, async (req, res) => {
       paramIndex++;
     }
     
+    // Check if project_id and project_type columns exist in timesheet_entries
+    const columnCheck = await query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'timesheet_entries' 
+        AND column_name IN ('project_id', 'project_type')
+    `);
+    const hasProjectId = columnCheck.rows.some(r => r.column_name === 'project_id');
+    const hasProjectType = columnCheck.rows.some(r => r.column_name === 'project_type');
+    
     let statsQuery = `
       SELECT 
         e.id as employee_id,
@@ -73,13 +83,31 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(SUM(a.allocation_percent), 0) as total_allocation,
         COUNT(DISTINCT t.id) as timesheet_count,
         COALESCE(SUM(t.total_hours), 0) as total_hours_logged,
-        COUNT(DISTINCT te.id) as timesheet_entry_count,
-        COUNT(DISTINCT CASE WHEN te.project_id IS NOT NULL THEN te.id END) as billable_entries,
+        COUNT(DISTINCT te.id) as timesheet_entry_count`;
+    
+    // Add project-related counts only if columns exist
+    if (hasProjectId) {
+      statsQuery += `,
+        COUNT(DISTINCT CASE WHEN te.project_id IS NOT NULL THEN te.id END) as billable_entries`;
+    } else {
+      statsQuery += `,
+        0 as billable_entries`;
+    }
+    
+    if (hasProjectType) {
+      statsQuery += `,
         COUNT(DISTINCT CASE WHEN te.project_type = 'non-billable' THEN te.id END) as non_billable_entries,
-        COUNT(DISTINCT CASE WHEN te.project_type = 'internal' THEN te.id END) as internal_entries
+        COUNT(DISTINCT CASE WHEN te.project_type = 'internal' THEN te.id END) as internal_entries`;
+    } else {
+      statsQuery += `,
+        0 as non_billable_entries,
+        0 as internal_entries`;
+    }
+    
+    statsQuery += `
       FROM employees e
       JOIN profiles p ON p.id = e.user_id
-      LEFT JOIN assignments a ON a.employee_id = e.id 
+      LEFT JOIN project_allocations a ON a.employee_id = e.id 
         AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
       LEFT JOIN timesheets t ON t.employee_id = e.id
     `;
@@ -104,11 +132,11 @@ router.get('/', authenticateToken, async (req, res) => {
         `SELECT 
           p.id as project_id,
           p.name as project_name,
-          a.role,
-          a.allocation_percent,
+          a.role_on_project as role,
+          a.percent_allocation as allocation_percent,
           a.start_date,
           a.end_date
-        FROM assignments a
+        FROM project_allocations a
         JOIN projects p ON p.id = a.project_id
         WHERE a.employee_id = $1
           AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
