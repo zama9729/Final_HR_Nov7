@@ -10,6 +10,7 @@ import ExcelJS from "exceljs";
 import reimbursementsRouter from "./reimbursements.js";
 import reimbursementRunsRouter from "./reimbursement-runs.js";
 import auditLogsRouter from "./audit-logs.js";
+import auditLogsRouter from "./audit-logs.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 const PROOFS_DIRECTORY =
@@ -5792,6 +5793,9 @@ appRouter.get("/reports/payroll-register", requireAuth, async (req, res) => {
 // Reimbursement routes
 appRouter.use("/v1/reimbursements", requireAuth, reimbursementsRouter);
 appRouter.use("/v1/reimbursement-runs", requireAuth, reimbursementRunsRouter);
+
+// Audit logs route
+appRouter.use("/audit-logs", requireAuth, auditLogsRouter);
 
 // Statutory Reports Proxy - Forward requests to HR API with authentication
 appRouter.get("/reports/statutory/pf-ecr", requireAuth, async (req, res) => {
