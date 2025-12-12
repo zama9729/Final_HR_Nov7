@@ -69,12 +69,17 @@ const PinAuth = () => {
 
     // Check if coming from SSO
     const sso = searchParams.get('sso');
+    const ssoToken = searchParams.get('token'); // Get SSO token from URL if present
     setIsSSO(sso === 'true');
     
-    // If coming from SSO, immediately show PIN form (session cookie is set by backend)
-    if (sso === 'true') {
+    // If coming from SSO, store token and show PIN form (session cookie is set by backend)
+    if (sso === 'true' || ssoToken) {
       hasCheckedAuth.current = true;
       sessionStorage.setItem(checkKey, 'true');
+      // Store SSO token in sessionStorage for verify-pin endpoint
+      if (ssoToken) {
+        sessionStorage.setItem('payroll_sso_token', ssoToken);
+      }
       setCheckingSession(false);
       toast.info('Please enter your PIN to continue');
       return;
@@ -159,9 +164,24 @@ const PinAuth = () => {
     setIsLoading(true);
     try {
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:4000";
-      const response = await fetch(`${apiUrl}/sso/verify-pin`, {
+      
+      // Get SSO token from sessionStorage if available (for fallback)
+      const ssoToken = sessionStorage.getItem('payroll_sso_token');
+      
+      // Build request with SSO token in query or header if available
+      let url = `${apiUrl}/sso/verify-pin`;
+      if (ssoToken) {
+        url += `?token=${encodeURIComponent(ssoToken)}`;
+      }
+      
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (ssoToken) {
+        headers['x-sso-token'] = ssoToken;
+      }
+      
+      const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         credentials: 'include',
         body: JSON.stringify({ pin })
       });
@@ -196,6 +216,7 @@ const PinAuth = () => {
       // Clear sessionStorage to allow Dashboard to load
       sessionStorage.removeItem('payroll_index_redirected');
       sessionStorage.removeItem('payroll_pinauth_checked');
+      sessionStorage.removeItem('payroll_sso_token'); // Clear SSO token after successful verification
       
       // Check if there's a last screen stored, otherwise use dashboardUrl from response or default to /dashboard
       const lastScreen = sessionStorage.getItem('payroll_last_screen');
