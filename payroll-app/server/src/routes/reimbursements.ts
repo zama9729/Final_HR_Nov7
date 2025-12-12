@@ -524,12 +524,12 @@ router.get("/history", async (req: Request, res: Response) => {
     let queryStr = `
       SELECT 
         r.*,
-        COALESCE(ev.employee_code, e.employee_id, 'N/A') as employee_code,
+        COALESCE(ev.employee_code, e.employee_code, 'N/A') as employee_code,
         COALESCE(ev.full_name, p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as employee_name,
         COALESCE(p.email, ev.email, e.email, 'N/A') as email
       FROM employee_reimbursements r
       LEFT JOIN employees e ON e.id = r.employee_id
-      LEFT JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN profiles p ON p.id = e.user_id OR p.email = e.email
       LEFT JOIN payroll_employee_view ev ON ev.employee_id::text = r.employee_id::text AND ev.org_id = r.org_id
       WHERE r.org_id = $1
     `;
@@ -592,12 +592,19 @@ router.get("/history", async (req: Request, res: Response) => {
       queryStr = `
         SELECT 
           r.*,
-          COALESCE(e.employee_id, 'N/A') as employee_code,
-          COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as employee_name,
+          COALESCE(e.employee_code, 'N/A') as employee_code,
+          COALESCE(
+            p.first_name || ' ' || p.last_name, 
+            p.first_name, 
+            p.last_name, 
+            e.full_name,
+            e.email,
+            'Unknown'
+          ) as employee_name,
           COALESCE(p.email, e.email, 'N/A') as email
         FROM employee_reimbursements r
         LEFT JOIN employees e ON e.id = r.employee_id
-        LEFT JOIN profiles p ON p.id = e.user_id
+        LEFT JOIN profiles p ON p.id = e.user_id OR p.email = e.email
         WHERE r.org_id = $1
       `;
       
@@ -612,13 +619,19 @@ router.get("/history", async (req: Request, res: Response) => {
       }
       
       if (employee_id) {
-        queryStr += ` AND e.employee_id ILIKE $${fallbackIndex}`;
+        queryStr += ` AND (e.employee_code ILIKE $${fallbackIndex} OR e.email ILIKE $${fallbackIndex})`;
         fallbackParams.push(`%${employee_id}%`);
         fallbackIndex++;
       }
       
       if (employee_name) {
-        queryStr += ` AND (p.first_name || ' ' || p.last_name ILIKE $${fallbackIndex} OR p.first_name ILIKE $${fallbackIndex} OR p.last_name ILIKE $${fallbackIndex} OR e.full_name ILIKE $${fallbackIndex})`;
+        queryStr += ` AND (
+          p.first_name || ' ' || p.last_name ILIKE $${fallbackIndex} 
+          OR p.first_name ILIKE $${fallbackIndex} 
+          OR p.last_name ILIKE $${fallbackIndex} 
+          OR e.full_name ILIKE $${fallbackIndex}
+          OR e.email ILIKE $${fallbackIndex}
+        )`;
         fallbackParams.push(`%${employee_name}%`);
         fallbackIndex++;
       }
