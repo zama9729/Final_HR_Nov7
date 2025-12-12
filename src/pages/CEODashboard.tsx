@@ -6,9 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend } from "recharts";
-import { ShieldAlert, Users, TrendingUp, Clock3, Target, Activity, AlertTriangle, TimerReset } from "lucide-react";
+import { ShieldAlert, Users, TrendingUp, Target, Activity, AlertTriangle, Megaphone } from "lucide-react";
 import { api } from "@/lib/api";
-import { formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
+import CalendarPanel from "@/components/dashboard/CalendarPanel";
+import { SmartMemo } from "@/components/dashboard/SmartMemo";
 
 type KpiTrend = "up" | "down" | "flat";
 
@@ -76,6 +78,9 @@ export default function CEODashboard() {
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<"30d" | "6m" | "12m">("30d");
   const [error, setError] = useState<string | null>(null);
+  const [announcements, setAnnouncements] = useState<
+    Array<{ id: string; title: string; body: string; priority: string; created_at: string; type?: string }>
+  >([]);
 
   // Derive metrics from existing org data (employees + projects). Falls back to defaults if missing.
   const loadMetrics = async () => {
@@ -145,8 +150,26 @@ export default function CEODashboard() {
     }
   };
 
+  const loadAnnouncements = async () => {
+    try {
+      const data = await api.getAnnouncements ? await api.getAnnouncements(5) : [];
+      const mapped = (data || []).map((a: any) => ({
+        id: a.id,
+        title: a.title,
+        body: a.body,
+        priority: a.priority || "normal",
+        created_at: a.created_at || new Date().toISOString(),
+        type: a.type || "announcement",
+      }));
+      setAnnouncements(mapped);
+    } catch (_) {
+      setAnnouncements([]);
+    }
+  };
+
   useEffect(() => {
     loadMetrics();
+    loadAnnouncements();
     const id = setInterval(loadMetrics, 5 * 60 * 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -365,6 +388,72 @@ export default function CEODashboard() {
             </ResponsiveContainer>
           </CardContent>
         </Card>
+
+        {/* Announcements */}
+        <Card className="border border-slate-200 shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <Megaphone className="h-5 w-5 text-amber-600" />
+              Announcements
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="max-h-64 overflow-y-auto pr-1">
+            {announcements.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground text-sm">No announcements yet.</div>
+            ) : (
+              <div className="space-y-3">
+                {announcements.map((a) => (
+                  <div
+                    key={a.id}
+                    className={`w-full text-left p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
+                      a.type === 'birthday'
+                        ? 'border-amber-300 bg-amber-50/70'
+                        : a.priority === 'urgent'
+                          ? 'border-red-300 bg-red-50/70'
+                          : 'border-border'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm line-clamp-1">{a.title}</p>
+                          {a.priority === 'urgent' && (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Urgent</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{a.body}</p>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                        {format(new Date(a.created_at), 'MMM d')}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Memo & Team Calendar */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="border border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold text-slate-900">Team Calendar</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <CalendarPanel />
+            </CardContent>
+          </Card>
+
+          <Card className="border border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold text-slate-900">Memo</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <SmartMemo selectedDate={new Date()} onEventsCreated={() => {}} />
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </AppLayout>
   );
