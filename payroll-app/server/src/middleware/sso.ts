@@ -55,11 +55,14 @@ export async function verifyHrSsoToken(
                   (req.headers.authorization?.replace('Bearer ', ''));
 
     if (!token) {
+      console.error('❌ SSO token missing');
       return res.status(401).json({ 
         error: 'SSO token required',
         message: 'Please provide a valid SSO token from HR system'
       });
     }
+
+    console.log(`🔍 Received SSO token, length: ${token.length}`);
 
     // Get JWT verification material. Prefer RS256 public key, fallback to shared secret.
     const publicKey = (process.env.HR_PAYROLL_JWT_PUBLIC_KEY || '').replace(/\\n/g, '\n');

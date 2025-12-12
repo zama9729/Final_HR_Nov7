@@ -331,8 +331,16 @@ app.use((req, res, next) => {
 });
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err);
-  res.status(500).json({ error: "Internal Server Error" });
+  console.error('❌ Unhandled error:', err);
+  console.error('Error stack:', err.stack);
+  
+  // Ensure we always send a response
+  if (!res.headersSent) {
+    res.status(500).json({ 
+      error: "Internal Server Error",
+      message: err.message || "An unexpected error occurred"
+    });
+  }
 });
 
 app.listen(port, () => {

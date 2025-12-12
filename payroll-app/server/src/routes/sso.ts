@@ -30,14 +30,17 @@ const router = Router();
  */
 router.get('/sso', verifyHrSsoToken, async (req: Request, res: Response) => {
   try {
-    const hrUser = req.hrUser!;
+    const hrUser = req.hrUser;
     
     if (!hrUser) {
+      console.error('❌ SSO user not found after verification');
       return res.status(401).json({ 
         error: 'SSO user not found',
         message: 'Failed to extract user from SSO token'
       });
     }
+    
+    console.log(`✅ Processing SSO for user: ${hrUser.email}`);
 
     // Ensure required payroll tables exist before proceeding
     await ensurePayrollUserTables();
@@ -147,13 +150,19 @@ router.get('/sso', verifyHrSsoToken, async (req: Request, res: Response) => {
       destination = `${frontendUrl}/pin-auth?sso=true`;
     }
 
+    console.log(`✅ Redirecting to: ${destination}`);
     res.redirect(destination);
   } catch (error: any) {
-    console.error('SSO error:', error);
-    res.status(500).json({ 
-      error: 'SSO processing failed',
-      message: error.message || 'Internal server error during SSO processing'
-    });
+    console.error('❌ SSO error:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Ensure we always send a response
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'SSO processing failed',
+        message: error.message || 'Internal server error during SSO processing'
+      });
+    }
   }
 });
 
