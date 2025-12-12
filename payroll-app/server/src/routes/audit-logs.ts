@@ -53,6 +53,7 @@ router.get("/", async (req: Request, res: Response) => {
     } = req.query;
 
     // Build the query
+    // Note: audit_logs table has user_id column, but we need to check the actual schema
     let queryStr = `
       SELECT 
         al.id,
@@ -73,6 +74,12 @@ router.get("/", async (req: Request, res: Response) => {
             'email', u.email,
             'first_name', NULL,
             'last_name', NULL
+          ),
+          jsonb_build_object(
+            'id', NULL,
+            'email', NULL,
+            'first_name', NULL,
+            'last_name', NULL
           )
         ) as actor,
         COALESCE(ur.role, 'unknown') as actor_role,
@@ -81,8 +88,8 @@ router.get("/", async (req: Request, res: Response) => {
         al.details->>'scope' as scope
       FROM audit_logs al
       LEFT JOIN users u ON u.id = al.user_id
-      LEFT JOIN profiles p ON p.id = u.id OR p.email = u.email
-      LEFT JOIN user_roles ur ON ur.user_id = COALESCE(u.id, p.id)
+      LEFT JOIN profiles p ON p.id = al.user_id OR (u.id IS NOT NULL AND p.id = u.id) OR (u.email IS NOT NULL AND p.email = u.email)
+      LEFT JOIN user_roles ur ON ur.user_id = COALESCE(al.user_id, u.id, p.id)
       WHERE al.tenant_id = $1
     `;
 
