@@ -75,15 +75,71 @@ export default function CEODashboard() {
   const [metrics, setMetrics] = useState<MetricsResponse>(defaultMetrics);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<"30d" | "6m" | "12m">("30d");
+  const [error, setError] = useState<string | null>(null);
 
+  // Derive metrics from existing org data (employees + projects). Falls back to defaults if missing.
   const loadMetrics = async () => {
     try {
       setLoading(true);
-      // Placeholder API; replace with real endpoint
-      const data = await api
-        .get("/api/ceo/metrics?range=" + timeRange)
-        .catch(() => ({ data: defaultMetrics }));
-      setMetrics((data as any)?.data || defaultMetrics);
+      setError(null);
+
+      const [employees, projects] = await Promise.all([
+        api.getEmployees().catch(() => []),
+        api.getProjects ? api.getProjects().catch(() => []) : Promise.resolve([]),
+      ]);
+
+      const totalEmployees = Array.isArray(employees) ? employees.length : 0;
+      const inactive = (employees || []).filter((e: any) => (e.status || "").toLowerCase() !== "active").length;
+      const attritionRate = totalEmployees ? Number(((inactive / totalEmployees) * 100).toFixed(1)) : 0;
+
+      // Project delivery split by status if available
+      const onTrack = (projects || []).filter((p: any) => (p.status || "").toLowerCase() === "on_track").length;
+      const delayed = (projects || []).filter((p: any) => (p.status || "").toLowerCase() === "delayed").length;
+      const atRisk = (projects || []).filter((p: any) => (p.status || "").toLowerCase() === "at_risk").length;
+      const totalProjects = (projects || []).length || 1;
+      const projectPerformance = {
+        onTrack: Math.round((onTrack / totalProjects) * 100),
+        delayed: Math.round((delayed / totalProjects) * 100),
+        atRisk: Math.round((atRisk / totalProjects) * 100),
+      };
+      const projectDeliveryRate = projectPerformance.onTrack;
+
+      // Headcount trend: naive monthly aggregation from join_date (last 12 months)
+      const now = new Date();
+      const months: Array<{ month: string; value: number }> = [];
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const label = d.toLocaleString("default", { month: "short" });
+        const count = (employees || []).filter((e: any) => {
+          if (!e.join_date) return true; // keep if unknown
+          const jd = new Date(e.join_date);
+          return jd <= new Date(d.getFullYear(), d.getMonth() + 1, 0); // joined on/before end of month
+        }).length;
+        months.push({ month: label, value: count });
+      }
+
+      // Productivity: simple proxy = 100 - attrition*0.5 (fallback)
+      const productivityIndex = Math.max(0, Math.min(100, Math.round(100 - attritionRate * 0.5)));
+
+      // Engagement/OKR placeholders (kept but clearly shown)
+      const engagementScore = 78;
+      const okrProgress = 64;
+
+      setMetrics({
+        totalEmployees,
+        attritionRate,
+        projectDeliveryRate,
+        productivityIndex,
+        headcountTrend: months,
+        projectPerformance,
+        engagementScore,
+        okrProgress,
+        riskSeries: [],
+        lastUpdated: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      setError(err?.message || "Failed to load CEO metrics");
+      setMetrics(defaultMetrics);
     } finally {
       setLoading(false);
     }
