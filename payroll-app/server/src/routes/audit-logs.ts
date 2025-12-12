@@ -87,9 +87,9 @@ router.get("/", async (req: Request, res: Response) => {
         al.details->>'diff' as diff,
         al.details->>'scope' as scope
       FROM audit_logs al
-      LEFT JOIN users u ON u.id = al.user_id
-      LEFT JOIN profiles p ON p.id = al.user_id OR (u.id IS NOT NULL AND p.id = u.id) OR (u.email IS NOT NULL AND p.email = u.email)
-      LEFT JOIN user_roles ur ON ur.user_id = COALESCE(al.user_id, u.id, p.id)
+      LEFT JOIN users u ON u.id = (al.details->>'user_id')::uuid OR u.id = (al.details->>'actor_id')::uuid
+      LEFT JOIN profiles p ON p.id = u.id OR (u.email IS NOT NULL AND p.email = u.email)
+      LEFT JOIN user_roles ur ON ur.user_id = u.id
       WHERE al.tenant_id = $1
     `;
 
