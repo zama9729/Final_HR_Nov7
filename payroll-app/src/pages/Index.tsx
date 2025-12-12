@@ -34,6 +34,8 @@ const Index = () => {
     if (token) {
       hasRedirected.current = true;
       sessionStorage.setItem(redirectKey, 'true');
+      // Store SSO token in sessionStorage for verify-pin endpoint (in case cookie doesn't work)
+      sessionStorage.setItem('payroll_sso_token', token);
       // Redirect to backend SSO endpoint - backend will handle SSO, set cookies, and redirect to /pin-auth or /setup-pin
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
       window.location.href = `${apiUrl}/sso?token=${encodeURIComponent(token)}`;
