@@ -240,33 +240,74 @@ router.post('/sso/setup-pin', async (req: Request, res: Response) => {
       });
     }
     
-    // Get user from session cookie
-    const token = req.cookies?.session;
-    if (!token && !userId) {
-      return res.status(401).json({ 
-        error: 'Authentication required',
-        message: 'Please login first'
-      });
+    // Get user from session cookie, SSO token, or query parameter
+    const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+    let actualUserId = userId;
+    
+    // Try to get from session cookie first
+    const sessionToken = req.cookies?.session;
+    if (!actualUserId && sessionToken) {
+      try {
+        const decoded = jwt.verify(sessionToken, JWT_SECRET) as any;
+        actualUserId = decoded.userId;
+        console.log('[setup-pin] ✅ Found user from session cookie:', actualUserId);
+      } catch (jwtError) {
+        console.warn('[setup-pin] Invalid or expired session cookie:', jwtError);
+      }
     }
     
-    let actualUserId = userId;
-    if (!actualUserId && token) {
-      try {
-        const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
-        actualUserId = decoded.userId;
-      } catch (jwtError) {
-        return res.status(401).json({ 
-          error: 'Invalid session',
-          message: 'Please login again'
-        });
+    // If no session cookie, try to get from SSO token (query, Authorization header, or custom header)
+    if (!actualUserId) {
+      const ssoToken = (req.query.token as string) || 
+                       (req.headers.authorization?.replace('Bearer ', '')) ||
+                       (req.headers['x-sso-token'] as string);
+      
+      if (ssoToken) {
+        try {
+          // Verify SSO token from HR system
+          const publicKey = (process.env.HR_PAYROLL_JWT_PUBLIC_KEY || '').replace(/\\n/g, '\n');
+          const sharedSecret = process.env.HR_JWT_SECRET || process.env.PAYROLL_JWT_SECRET || process.env.JWT_SECRET || process.env.DEV_PAYROLL_SSO_SECRET;
+          
+          // Decode to check algorithm
+          const decodedToken = jwt.decode(ssoToken, { complete: true }) as any;
+          const tokenAlgorithm = decodedToken?.header?.alg;
+          
+          let payload: any;
+          if (tokenAlgorithm === 'RS256' && publicKey && publicKey.includes('BEGIN PUBLIC KEY')) {
+            payload = jwt.verify(ssoToken, publicKey, { algorithms: ['RS256'] });
+          } else if (sharedSecret) {
+            payload = jwt.verify(ssoToken, sharedSecret);
+          } else {
+            // Development fallback - decode without verification
+            if (process.env.NODE_ENV === 'development' || process.env.DEV_MODE === 'true') {
+              if (process.env.ALLOW_UNVERIFIED_SSO === 'true') {
+                console.warn('[setup-pin] ⚠️  Development mode: Decoding SSO token without verification');
+                payload = decodedToken?.payload;
+              }
+            }
+          }
+          
+          if (payload && payload.sub) {
+            // Get user by HR user ID or email
+            const userResult = await query(
+              `SELECT id FROM users WHERE hr_user_id = $1 OR email = $2 LIMIT 1`,
+              [payload.sub, payload.email]
+            );
+            if (userResult.rows.length > 0) {
+              actualUserId = userResult.rows[0].id;
+              console.log(`[setup-pin] ✅ Resolved user from SSO token: ${actualUserId}`);
+            }
+          }
+        } catch (ssoError: any) {
+          console.warn('[setup-pin] Error verifying SSO token:', ssoError.message);
+        }
       }
     }
     
     if (!actualUserId) {
       return res.status(401).json({ 
-        error: 'User ID required',
-        message: 'Unable to identify user'
+        error: 'Authentication required',
+        message: 'Please login first'
       });
     }
     
