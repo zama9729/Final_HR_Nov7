@@ -269,44 +269,56 @@ export default function CEODashboard() {
 
         {/* Charts Grid */}
         <div className="grid gap-4 xl:grid-cols-2">
-          <Card className="border border-slate-200 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-900">
-                <Users className="h-4 w-4 text-red-600" />
+          <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <Users className="h-5 w-5 text-red-600" />
                 Employee Trends
               </CardTitle>
             </CardHeader>
-            <CardContent className="h-[260px]">
+            <CardContent className="h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={headcountData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="value" stroke={BRAND_RED} strokeWidth={3} dot={{ r: 3 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="month" stroke="#64748b" />
+                  <YAxis stroke="#64748b" />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'white', 
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '6px'
+                    }} 
+                  />
+                  <Line type="monotone" dataKey="value" stroke={BRAND_RED} strokeWidth={3} dot={{ r: 4, fill: BRAND_RED }} />
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
 
-          <Card className="border border-slate-200 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-900">
-                <TrendingUp className="h-4 w-4 text-red-600" />
+          <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <TrendingUp className="h-5 w-5 text-red-600" />
                 Project Performance
               </CardTitle>
             </CardHeader>
-            <CardContent className="h-[260px]">
+            <CardContent className="h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={projectBars}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="name" stroke="#64748b" />
+                  <YAxis stroke="#64748b" />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'white', 
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '6px'
+                    }} 
+                  />
                   <Legend />
-                  <Bar dataKey="onTrack" stackId="a" fill={POSITIVE} name="On Track" />
-                  <Bar dataKey="delayed" stackId="a" fill="#f59f00" name="Delayed" />
-                  <Bar dataKey="atRisk" stackId="a" fill={NEGATIVE} name="At Risk" />
+                  <Bar dataKey="onTrack" stackId="a" fill={POSITIVE} name="On Track" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="delayed" stackId="a" fill="#f59f00" name="Delayed" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="atRisk" stackId="a" fill={NEGATIVE} name="At Risk" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -314,14 +326,14 @@ export default function CEODashboard() {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <Card className="border border-slate-200 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-900">
-                <Activity className="h-4 w-4 text-red-600" />
+          <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <Activity className="h-5 w-5 text-red-600" />
                 Engagement & Culture
               </CardTitle>
             </CardHeader>
-            <CardContent className="h-[260px] flex items-center justify-center">
+            <CardContent className="h-[280px] flex items-center justify-center">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -337,62 +349,92 @@ export default function CEODashboard() {
                     <Cell key="eng" fill={BRAND_RED} />
                     <Cell key="gap" fill="#f1f3f5" />
                   </Pie>
-                  <Tooltip />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'white', 
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '6px'
+                    }} 
+                  />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
 
-          <Card className="border border-slate-200 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-900">
-                <Target className="h-4 w-4 text-red-600" />
+          <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <Target className="h-5 w-5 text-red-600" />
                 Strategic Goals (OKRs)
               </CardTitle>
             </CardHeader>
-            <CardContent className="h-[260px] flex items-center justify-center">
+            <CardContent className="h-[280px] flex items-center justify-center">
               <div className="relative inline-flex items-center justify-center">
-                <div className="h-32 w-32 rounded-full border-[10px] border-slate-200" />
+                <div className="h-36 w-36 rounded-full border-[12px] border-slate-200" />
                 <div
-                  className="absolute h-32 w-32 rounded-full"
+                  className="absolute h-36 w-36 rounded-full"
                   style={{
                     background: `conic-gradient(${BRAND_RED} ${okrValue}%, #f1f3f5 0)`,
                   }}
                 />
                 <div className="absolute flex flex-col items-center justify-center text-center">
-                  <div className="text-2xl font-bold" style={{ color: BRAND_BLACK }}>{okrValue}%</div>
-                  <div className="text-xs text-slate-600">OKRs Achieved</div>
+                  <div className="text-3xl font-bold" style={{ color: BRAND_BLACK }}>{okrValue}%</div>
+                  <div className="text-xs text-slate-600 mt-1">OKRs Achieved</div>
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <Card className="border border-slate-200 shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-slate-900">
-              <AlertTriangle className="h-4 w-4 text-red-600" />
-              Risk & Compliance
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="h-[260px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={riskData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
-                <Line type="monotone" dataKey="open" stroke={BRAND_RED} strokeWidth={3} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                Risk & Compliance
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[280px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={riskData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="month" stroke="#64748b" />
+                  <YAxis stroke="#64748b" />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'white', 
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '6px'
+                    }} 
+                  />
+                  <Line type="monotone" dataKey="open" stroke={BRAND_RED} strokeWidth={3} dot={{ r: 4, fill: BRAND_RED }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Placeholder for future chart or keep empty for symmetry */}
+          <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <TrendingUp className="h-5 w-5 text-red-600" />
+                Performance Metrics
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[280px] flex items-center justify-center">
+              <div className="text-center text-slate-500">
+                <TrendingUp className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                <p className="text-sm font-medium">Additional metrics coming soon</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Announcements */}
-        <Card className="border border-slate-200 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2 text-slate-900">
               <Megaphone className="h-5 w-5 text-amber-600" />
               Announcements
             </CardTitle>
@@ -434,26 +476,20 @@ export default function CEODashboard() {
           </CardContent>
         </Card>
 
-        {/* Memo & Team Calendar */}
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="border border-slate-200 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold text-slate-900">Team Calendar</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <CalendarPanel />
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold text-slate-900">Memo</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <SmartMemo selectedDate={new Date()} onEventsCreated={() => {}} />
-            </CardContent>
-          </Card>
+        {/* Team Calendar - Same as regular dashboard */}
+        <div id="team-calendar-section" className="pt-2">
+          <CalendarPanel />
         </div>
+
+        {/* Smart Memo */}
+        <Card className="border border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-slate-900">Memo</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SmartMemo selectedDate={new Date()} onEventsCreated={() => {}} />
+          </CardContent>
+        </Card>
       </div>
     </AppLayout>
   );
