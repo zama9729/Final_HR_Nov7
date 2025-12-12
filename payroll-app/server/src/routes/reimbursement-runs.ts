@@ -60,7 +60,7 @@ router.post("/", async (req: Request, res: Response) => {
         er.description,
         er.category,
         e.employee_id as employee_code,
-        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as employee_name
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.email, 'Unknown') as employee_name
       FROM employee_reimbursements er
       JOIN employees e ON e.id = er.employee_id
       LEFT JOIN profiles p ON p.id = e.user_id
@@ -200,7 +200,7 @@ router.get("/:id", async (req: Request, res: Response) => {
         er.receipt_url,
         er.submitted_at,
         e.employee_id as employee_code,
-        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as employee_name,
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.email, 'Unknown') as employee_name,
         COALESCE(od.bank_account_number, 'N/A') as bank_account_number,
         COALESCE(od.ifsc_code, 'N/A') as bank_ifsc_code,
         COALESCE(od.bank_name, 'N/A') as bank_name
@@ -318,7 +318,7 @@ router.get("/:id/export/bank-file", async (req: Request, res: Response) => {
         er.description,
         er.category,
         e.employee_id as employee_code,
-        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as employee_name,
+        COALESCE(p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.email, 'Unknown') as employee_name,
         COALESCE(od.bank_account_number, 'N/A') as bank_account_number,
         COALESCE(od.ifsc_code, 'N/A') as bank_ifsc_code,
         COALESCE(od.bank_name, 'N/A') as bank_name

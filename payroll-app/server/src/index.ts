@@ -298,6 +298,119 @@ async function ensureRequiredTables() {
     } else {
       console.log('✅ employee_reimbursements table exists');
     }
+
+    // Check if reimbursement_runs table exists
+    const reimbursementRunsCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'reimbursement_runs'
+      );
+    `);
+    
+    if (!reimbursementRunsCheck.rows[0]?.exists) {
+      console.log('⚠️  reimbursement_runs table does not exist, creating...');
+      
+      // Create reimbursement_run_status enum if it doesn't exist
+      await query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reimbursement_run_status') THEN
+            CREATE TYPE reimbursement_run_status AS ENUM (
+              'draft',
+              'paid'
+            );
+          END IF;
+        END
+        $$;
+      `);
+      
+      // Create reimbursement_runs table
+      await query(`
+        CREATE TABLE IF NOT EXISTS public.reimbursement_runs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL,
+          run_date DATE NOT NULL,
+          status TEXT NOT NULL DEFAULT 'draft',
+          total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          total_claims INTEGER NOT NULL DEFAULT 0,
+          reference_note TEXT,
+          created_by UUID,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      
+      // Add foreign key to organizations if it exists
+      try {
+        await query(`
+          ALTER TABLE reimbursement_runs
+          ADD CONSTRAINT fk_reimbursement_runs_tenant
+          FOREIGN KEY (tenant_id) REFERENCES organizations(id) ON DELETE CASCADE;
+        `);
+      } catch (fkError: any) {
+        // Foreign key might already exist or organizations table might not exist
+        console.log('Note: Could not add foreign key constraint:', fkError.message);
+      }
+      
+      // Create indexes
+      await query(`
+        CREATE INDEX IF NOT EXISTS idx_reimbursement_runs_tenant_id
+          ON reimbursement_runs(tenant_id);
+      `);
+      
+      await query(`
+        CREATE INDEX IF NOT EXISTS idx_reimbursement_runs_status
+          ON reimbursement_runs(status);
+      `);
+      
+      await query(`
+        CREATE INDEX IF NOT EXISTS idx_reimbursement_runs_run_date
+          ON reimbursement_runs(run_date);
+      `);
+      
+      console.log('✅ reimbursement_runs table created');
+    } else {
+      console.log('✅ reimbursement_runs table exists');
+    }
+
+    // Add reimbursement_run_id column to employee_reimbursements if it doesn't exist
+    try {
+      const columnCheck = await query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'employee_reimbursements' 
+        AND column_name = 'reimbursement_run_id'
+      `);
+      
+      if (columnCheck.rows.length === 0) {
+        console.log('⚠️  Adding reimbursement_run_id column to employee_reimbursements...');
+        await query(`
+          ALTER TABLE employee_reimbursements
+          ADD COLUMN reimbursement_run_id UUID;
+        `);
+        
+        // Add foreign key if reimbursement_runs table exists
+        try {
+          await query(`
+            ALTER TABLE employee_reimbursements
+            ADD CONSTRAINT fk_reimbursements_run
+            FOREIGN KEY (reimbursement_run_id) REFERENCES reimbursement_runs(id) ON DELETE SET NULL;
+          `);
+        } catch (fkError: any) {
+          console.log('Note: Could not add foreign key constraint for reimbursement_run_id:', fkError.message);
+        }
+        
+        await query(`
+          CREATE INDEX IF NOT EXISTS idx_reimbursements_run_id
+            ON employee_reimbursements(reimbursement_run_id);
+        `);
+        
+        console.log('✅ Added reimbursement_run_id column to employee_reimbursements');
+      }
+    } catch (colError: any) {
+      console.log('Note: Error checking/adding reimbursement_run_id column:', colError.message);
+    }
   } catch (error: any) {
     console.error('⚠️  Error ensuring tables:', error.message);
     // Don't fail startup - continue anyway
