@@ -1,5 +1,5 @@
 -- Create the table to store tenant-specific payroll settings
-CREATE TABLE public.payroll_settings (
+CREATE TABLE IF NOT EXISTS public.payroll_settings (
   tenant_id UUID PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
   pf_rate DECIMAL(5, 2) DEFAULT 12.00,
   esi_rate DECIMAL(5, 2) DEFAULT 3.25,
@@ -14,8 +14,12 @@ CREATE TABLE public.payroll_settings (
 
 -- Add trigger for updated_at
 -- This function was created in your "20251027162450_initial_schema.sql" migration
-CREATE TRIGGER update_payroll_settings_updated_at
-BEFORE UPDATE ON public.payroll_settings
-FOR EACH ROW
-EXECUTE FUNCTION public.update_updated_at_column();
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_payroll_settings_updated_at') THEN
+        CREATE TRIGGER update_payroll_settings_updated_at
+        BEFORE UPDATE ON public.payroll_settings
+        FOR EACH ROW
+        EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+END $$;
 

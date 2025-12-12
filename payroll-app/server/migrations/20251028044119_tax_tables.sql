@@ -1,6 +1,6 @@
 -- Migration: 20251028044119
 -- Create tax_declarations table
-CREATE TABLE public.tax_declarations (
+CREATE TABLE IF NOT EXISTS public.tax_declarations (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   employee_id UUID NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
   tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -15,7 +15,7 @@ CREATE TABLE public.tax_declarations (
 );
 
 -- Create tax_documents table for Form 16, etc.
-CREATE TABLE public.tax_documents (
+CREATE TABLE IF NOT EXISTS public.tax_documents (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   employee_id UUID NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
   tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -37,7 +37,11 @@ ALTER TABLE public.tax_documents ENABLE ROW LEVEL SECURITY;
 
 -- Add trigger for updated_at
 -- This function was created in the first migration file (20251027162450_initial_schema.sql)
-CREATE TRIGGER update_tax_declarations_updated_at
-BEFORE UPDATE ON public.tax_declarations
-FOR EACH ROW
-EXECUTE FUNCTION public.update_updated_at_column();
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_tax_declarations_updated_at') THEN
+        CREATE TRIGGER update_tax_declarations_updated_at
+        BEFORE UPDATE ON public.tax_declarations
+        FOR EACH ROW
+        EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+END $$;

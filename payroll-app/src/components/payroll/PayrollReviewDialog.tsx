@@ -58,6 +58,9 @@ interface PayrollItem {
   lop_days?: number;
   paid_days?: number;
   total_working_days?: number;
+  // Partial Payment Specific fields
+  reference_gross_salary?: number;
+  partial_amount?: number;
 }
 
 interface PayrollReviewDialogProps {
@@ -69,6 +72,7 @@ interface PayrollReviewDialogProps {
   onProcessed: () => void;
   canModify?: boolean;
   mode?: 'edit' | 'process'; // 'edit' for Edit button, 'process' for Process button
+  runType?: "regular" | "off_cycle" | "partial_payment";
 }
 
 export const PayrollReviewDialog = ({
@@ -80,6 +84,7 @@ export const PayrollReviewDialog = ({
   onProcessed,
   canModify = true,
   mode = 'process', // Default to 'process' for backward compatibility
+  runType,
 }: PayrollReviewDialogProps) => {
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -111,11 +116,15 @@ export const PayrollReviewDialog = ({
         ...item,
         incentive_amount: Number(item.incentive_amount || 0),
         other_deductions: Number(item.other_deductions || 0),
+        // For partial runs, initialize reference gross if not provided by backend yet
+        reference_gross_salary: item.reference_gross_salary ?? item.gross_salary,
+        // Initialize partial amount from net salary (since for partial runs, net = partial amount)
+        partial_amount: item.partial_amount ?? (runType === "partial_payment" ? item.net_salary : 0),
       }));
       setPayrollItems(normalized);
       setActiveIncentiveIndex(null);
     }
-  }, [data]);
+  }, [data, runType]);
 
   useEffect(() => {
     if (!open) {
@@ -151,7 +160,7 @@ export const PayrollReviewDialog = ({
 
   const handleSaveEdit = (index: number) => {
     const item = payrollItems[index];
-    
+
     // Recalculate gross salary from all earning components
     const grossSalary =
       item.basic_salary +
@@ -163,7 +172,7 @@ export const PayrollReviewDialog = ({
       (item.incentive_amount || 0);
 
     // Calculate total deductions from all deduction components
-    const totalDeductions = 
+    const totalDeductions =
       item.pf_deduction +
       item.esi_deduction +
       item.pt_deduction +
@@ -191,7 +200,7 @@ export const PayrollReviewDialog = ({
       ...item,
       [field]: value,
     };
-    
+
     // Recalculate gross salary if any earning component changed
     if (['basic_salary', 'hra', 'special_allowance', 'da', 'lta', 'bonus', 'incentive_amount'].includes(field)) {
       const grossSalary =
@@ -204,7 +213,7 @@ export const PayrollReviewDialog = ({
         (updatedItems[index].incentive_amount || 0);
       updatedItems[index].gross_salary = grossSalary;
     }
-    
+
     // Recalculate deductions if any deduction component changed
     if (['pf_deduction', 'esi_deduction', 'pt_deduction', 'tds_deduction', 'other_deductions'].includes(field)) {
       const totalDeductions =
@@ -215,10 +224,33 @@ export const PayrollReviewDialog = ({
         (updatedItems[index].other_deductions || 0);
       updatedItems[index].deductions = totalDeductions;
     }
-    
+
     // Recalculate net salary
     updatedItems[index].net_salary = updatedItems[index].gross_salary - updatedItems[index].deductions;
-    
+
+    setPayrollItems(updatedItems);
+  };
+
+  const handlePartialAmountChange = (index: number, amount: number) => {
+    const updatedItems = [...payrollItems];
+    const item = updatedItems[index];
+    const refGross = item.reference_gross_salary || 0;
+
+    // Validate amount
+    if (amount > refGross) {
+      toast.error(`Partial amount cannot exceed Reference Gross Salary (${formatCurrency(refGross)})`);
+      return;
+      // Optionally we could clamp it here: amount = refGross;
+    }
+
+    updatedItems[index] = {
+      ...item,
+      partial_amount: amount,
+      // For partial run: Gross is 0 (reference kept separately), Deductions 0, Net = Amount
+      gross_salary: 0,
+      deductions: 0,
+      net_salary: amount,
+    };
     setPayrollItems(updatedItems);
   };
 
@@ -252,6 +284,9 @@ export const PayrollReviewDialog = ({
         lop_days: item.lop_days,
         paid_days: item.paid_days,
         total_working_days: item.total_working_days,
+        // Include partial specific fields
+        reference_gross_salary: item.reference_gross_salary,
+        partial_amount: item.partial_amount,
       }));
   };
 
@@ -261,12 +296,12 @@ export const PayrollReviewDialog = ({
       const itemsToSave = prepareItems();
       const result = await api.payroll.saveChanges(cycleId, itemsToSave);
       toast.success(result.message || "Changes saved successfully");
-      
+
       // Invalidate queries to ensure UI reflects updated data
       await queryClient.invalidateQueries({ queryKey: ["payroll-preview", cycleId] });
       await queryClient.invalidateQueries({ queryKey: ["payroll-cycles"] });
       await queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); // Also invalidate payroll-runs for consistency
-      
+
       onProcessed();
       onOpenChange(false);
     } catch (error: any) {
@@ -283,12 +318,12 @@ export const PayrollReviewDialog = ({
       const itemsToProcess = prepareItems();
       const result = await api.payroll.processCycle(cycleId, itemsToProcess);
       toast.success(result.message || "Payroll processed successfully");
-      
+
       // Invalidate queries to ensure UI reflects updated data
       await queryClient.invalidateQueries({ queryKey: ["payroll-preview", cycleId] });
       await queryClient.invalidateQueries({ queryKey: ["payroll-cycles"] });
       await queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); // Also invalidate payroll-runs for consistency
-      
+
       onProcessed();
       onOpenChange(false);
     } catch (error: any) {
@@ -370,13 +405,13 @@ export const PayrollReviewDialog = ({
     try {
       await api.payroll.setIncentive(cycleId, target.employee_id, parsedAmount);
       toast.success("Incentive saved.");
-      
+
       // Invalidate queries to ensure UI reflects updated data
       // This ensures the Review Dialog, Bank Export, and Payment History all show matching amounts
       await queryClient.invalidateQueries({ queryKey: ["payroll-preview", cycleId] });
       await queryClient.invalidateQueries({ queryKey: ["payroll-cycles"] });
       await queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); // Also invalidate payroll-runs for consistency
-      
+
       await refetch();
     } catch (error: any) {
       toast.error(error.message || "Failed to save incentive");
@@ -401,7 +436,7 @@ export const PayrollReviewDialog = ({
   const activePayrollItems = filteredPayrollItems.filter(
     item => !heldEmployeeIds.has(item.employee_id)
   );
-  
+
   const isPartialRun = runType === "partial_payment";
   const totalGross = activePayrollItems.reduce((sum, item) => sum + (isPartialRun ? 0 : item.gross_salary), 0);
   const totalDeductions = activePayrollItems.reduce((sum, item) => sum + (isPartialRun ? 0 : item.deductions), 0);
@@ -465,6 +500,7 @@ export const PayrollReviewDialog = ({
                   <TableHeader>
                     <TableRow>
                       <TableHead className="sticky left-0 bg-background z-10">Employee</TableHead>
+                      <TableHead className="text-right">Reference Gross Salary</TableHead>
                       <TableHead className="text-right">Partial Payout Amount</TableHead>
                       <TableHead className="text-right font-semibold text-primary">Net Pay</TableHead>
                       <TableHead className="sticky right-0 bg-background z-10">Actions</TableHead>
@@ -496,34 +532,17 @@ export const PayrollReviewDialog = ({
                                 <div className="text-xs text-muted-foreground">{item.employee_code}</div>
                               </div>
                             </TableCell>
+                            <TableCell className="text-right text-muted-foreground">
+                              {formatCurrency(item.reference_gross_salary || 0)}
+                            </TableCell>
                             <TableCell className="text-right">
                               <Input
                                 type="number"
-                                value={item.net_salary}
+                                value={item.partial_amount || 0}
                                 onChange={(e) => {
-                                  const val = Number(e.target.value || 0);
-                                  const updated = [...payrollItems];
-                                  updated[originalIndex] = {
-                                    ...updated[originalIndex],
-                                    net_salary: val,
-                                    gross_salary: val,
-                                    deductions: 0,
-                                    basic_salary: 0,
-                                    hra: 0,
-                                    special_allowance: 0,
-                                    da: 0,
-                                    lta: 0,
-                                    bonus: 0,
-                                    incentive_amount: 0,
-                                    pf_deduction: 0,
-                                    esi_deduction: 0,
-                                    pt_deduction: 0,
-                                    tds_deduction: 0,
-                                    other_deductions: 0,
-                                  };
-                                  setPayrollItems(updated);
+                                  handlePartialAmountChange(originalIndex, Number(e.target.value));
                                 }}
-                                className="w-32"
+                                className="w-32 ml-auto text-right"
                                 disabled={!canModify}
                               />
                             </TableCell>
@@ -560,342 +579,343 @@ export const PayrollReviewDialog = ({
               </div>
             )}
             {!isPartialRun && (
-            <div className="border rounded-lg overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="sticky left-0 bg-background z-10">Employee</TableHead>
-                    <TableHead className="text-right">Basic</TableHead>
-                    <TableHead className="text-right">HRA</TableHead>
-                    <TableHead className="text-right">Special Allowance</TableHead>
-                    <TableHead className="text-right">DA</TableHead>
-                    <TableHead className="text-right">LTA</TableHead>
-                    <TableHead className="text-right">Bonus</TableHead>
-                    <TableHead className="text-right">Incentive</TableHead>
-                    <TableHead className="text-right font-semibold">Gross</TableHead>
-                    <TableHead className="text-right">PF</TableHead>
-                    <TableHead className="text-right">ESI</TableHead>
-                    <TableHead className="text-right">PT</TableHead>
-                    <TableHead className="text-right">TDS</TableHead>
-                    <TableHead className="text-right">Other Ded.</TableHead>
-                    <TableHead className="text-right font-semibold">Total Ded.</TableHead>
-                    <TableHead className="text-right font-semibold text-primary">Net Salary</TableHead>
-                    <TableHead className="sticky right-0 bg-background z-10">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredPayrollItems.length === 0 ? (
+              <div className="border rounded-lg overflow-x-auto">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={17} className="text-center py-8 text-muted-foreground">
-                        No employees found matching your search.
-                      </TableCell>
+                      <TableHead className="sticky left-0 bg-background z-10">Employee</TableHead>
+                      <TableHead className="text-right">Basic</TableHead>
+                      <TableHead className="text-right">HRA</TableHead>
+                      <TableHead className="text-right">Special Allowance</TableHead>
+                      <TableHead className="text-right">DA</TableHead>
+                      <TableHead className="text-right">LTA</TableHead>
+                      <TableHead className="text-right">Bonus</TableHead>
+                      <TableHead className="text-right">Incentive</TableHead>
+                      <TableHead className="text-right font-semibold">Gross</TableHead>
+                      <TableHead className="text-right">PF</TableHead>
+                      <TableHead className="text-right">ESI</TableHead>
+                      <TableHead className="text-right">PT</TableHead>
+                      <TableHead className="text-right">TDS</TableHead>
+                      <TableHead className="text-right">Other Ded.</TableHead>
+                      <TableHead className="text-right font-semibold">Total Ded.</TableHead>
+                      <TableHead className="text-right font-semibold text-primary">Net Salary</TableHead>
+                      <TableHead className="sticky right-0 bg-background z-10">Actions</TableHead>
                     </TableRow>
-                  ) : (
-                    filteredPayrollItems.map((item, index) => {
-                      // Find the original index in payrollItems array for editing
-                      const originalIndex = payrollItems.findIndex(p => p.employee_id === item.employee_id);
-                      const isHeld = heldEmployeeIds.has(item.employee_id);
-                      return (
-                      <TableRow key={item.employee_id} className={isHeld ? "opacity-50 bg-muted/30" : ""}>
-                      {editingIndex === originalIndex ? (
-                        <>
-                          <TableCell className="sticky left-0 bg-background z-10">
-                            <div className="space-y-1">
-                              <div className="font-medium flex items-center gap-2">
-                                {item.employee_name}
-                                {heldEmployeeIds.has(item.employee_id) && (
-                                  <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">
-                                    HELD
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-muted-foreground">{item.employee_code}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.basic_salary}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "basic_salary", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.hra}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "hra", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.special_allowance}
-                              onChange={(e) =>
-                                handleFieldChange(
-                                  originalIndex,
-                                  "special_allowance",
-                                  Number(e.target.value)
-                                )
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.da}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "da", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.lta}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "lta", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.bonus}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "bonus", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex flex-col items-end gap-2">
-                              <Input
-                                type="number"
-                                value={item.incentive_amount || 0}
-                                onChange={(e) =>
-                                  handleFieldChange(originalIndex, "incentive_amount", Number(e.target.value))
-                                }
-                                className="w-24"
-                              />
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-semibold">
-                            {formatCurrency(item.gross_salary)}
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.pf_deduction}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "pf_deduction", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.esi_deduction}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "esi_deduction", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.pt_deduction}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "pt_deduction", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.tds_deduction}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "tds_deduction", Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={item.other_deductions || 0}
-                              onChange={(e) =>
-                                handleFieldChange(originalIndex, "other_deductions", Number(e.target.value))
-                              }
-                              className="w-24"
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell className="text-right font-semibold">
-                            {formatCurrency(item.deductions)}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold text-primary">
-                            {formatCurrency(item.net_salary)}
-                          </TableCell>
-                          <TableCell className="sticky right-0 bg-background z-10">
-                            <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleSaveEdit(originalIndex)}
-                              >
-                                <Check className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={handleCancelEdit}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </>
-                      ) : (
-                        <>
-                          <TableCell className="sticky left-0 bg-background z-10">
-                            <div className="space-y-1">
-                              <div className="font-medium flex items-center gap-2">
-                                {item.employee_name}
-                                {heldEmployeeIds.has(item.employee_id) && (
-                                  <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">
-                                    HELD
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-muted-foreground">{item.employee_code}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.basic_salary)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.hra)}</TableCell>
-                          <TableCell className="text-right">
-                            {formatCurrency(item.special_allowance)}
-                          </TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.da)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.lta)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.bonus)}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex flex-col items-end gap-2">
-                              <span className="font-semibold">
-                                {formatCurrency(item.incentive_amount || 0)}
-                              </span>
-                              {canModify && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleOpenIncentive(originalIndex)}
-                                  >
-                                    {item.incentive_amount ? "Edit" : "Add"}
-                                  </Button>
-                                  {activeIncentiveIndex === originalIndex && (
-                                    <div className="flex items-center justify-end gap-2">
-                                      <Input
-                                        type="number"
-                                        value={incentiveDraft}
-                                        onChange={(e) => setIncentiveDraft(e.target.value)}
-                                        className="w-28"
-                                      />
+                  </TableHeader>
+                  <TableBody>
+                    {filteredPayrollItems.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={17} className="text-center py-8 text-muted-foreground">
+                          No employees found matching your search.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredPayrollItems.map((item, index) => {
+                        // Find the original index in payrollItems array for editing
+                        const originalIndex = payrollItems.findIndex(p => p.employee_id === item.employee_id);
+                        const isHeld = heldEmployeeIds.has(item.employee_id);
+                        return (
+                          <TableRow key={item.employee_id} className={isHeld ? "opacity-50 bg-muted/30" : ""}>
+                            {editingIndex === originalIndex ? (
+                              <>
+                                <TableCell className="sticky left-0 bg-background z-10">
+                                  <div className="space-y-1">
+                                    <div className="font-medium flex items-center gap-2">
+                                      {item.employee_name}
+                                      {heldEmployeeIds.has(item.employee_id) && (
+                                        <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">
+                                          HELD
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">{item.employee_code}</div>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.basic_salary}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "basic_salary", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.hra}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "hra", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.special_allowance}
+                                    onChange={(e) =>
+                                      handleFieldChange(
+                                        originalIndex,
+                                        "special_allowance",
+                                        Number(e.target.value)
+                                      )
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.da}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "da", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.lta}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "lta", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.bonus}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "bonus", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex flex-col items-end gap-2">
+                                    <Input
+                                      type="number"
+                                      value={item.incentive_amount || 0}
+                                      onChange={(e) =>
+                                        handleFieldChange(originalIndex, "incentive_amount", Number(e.target.value))
+                                      }
+                                      className="w-24"
+                                    />
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right font-semibold">
+                                  {formatCurrency(item.gross_salary)}
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.pf_deduction}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "pf_deduction", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.esi_deduction}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "esi_deduction", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.pt_deduction}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "pt_deduction", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.tds_deduction}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "tds_deduction", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    value={item.other_deductions || 0}
+                                    onChange={(e) =>
+                                      handleFieldChange(originalIndex, "other_deductions", Number(e.target.value))
+                                    }
+                                    className="w-24"
+                                    placeholder="0"
+                                  />
+                                </TableCell>
+                                <TableCell className="text-right font-semibold">
+                                  {formatCurrency(item.deductions)}
+                                </TableCell>
+                                <TableCell className="text-right font-semibold text-primary">
+                                  {formatCurrency(item.net_salary)}
+                                </TableCell>
+                                <TableCell className="sticky right-0 bg-background z-10">
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handleSaveEdit(originalIndex)}
+                                    >
+                                      <Check className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={handleCancelEdit}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </>
+                            ) : (
+                              <>
+                                <TableCell className="sticky left-0 bg-background z-10">
+                                  <div className="space-y-1">
+                                    <div className="font-medium flex items-center gap-2">
+                                      {item.employee_name}
+                                      {heldEmployeeIds.has(item.employee_id) && (
+                                        <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">
+                                          HELD
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">{item.employee_code}</div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.basic_salary)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.hra)}</TableCell>
+                                <TableCell className="text-right">
+                                  {formatCurrency(item.special_allowance)}
+                                </TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.da)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.lta)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.bonus)}</TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex flex-col items-end gap-2">
+                                    <span className="font-semibold">
+                                      {formatCurrency(item.incentive_amount || 0)}
+                                    </span>
+                                    {canModify && (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleOpenIncentive(originalIndex)}
+                                        >
+                                          {item.incentive_amount ? "Edit" : "Add"}
+                                        </Button>
+                                        {activeIncentiveIndex === originalIndex && (
+                                          <div className="flex items-center justify-end gap-2">
+                                            <Input
+                                              type="number"
+                                              value={incentiveDraft}
+                                              onChange={(e) => setIncentiveDraft(e.target.value)}
+                                              className="w-28"
+                                            />
+                                            <Button
+                                              size="sm"
+                                              onClick={handleSaveIncentive}
+                                              disabled={savingIncentive}
+                                            >
+                                              Save
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              onClick={() => setActiveIncentiveIndex(null)}
+                                            >
+                                              Cancel
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right font-semibold">
+                                  {formatCurrency(item.gross_salary)}
+                                </TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.pf_deduction)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.esi_deduction)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.pt_deduction)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.tds_deduction)}</TableCell>
+                                <TableCell className="text-right">
+                                  {formatCurrency(item.other_deductions || 0)}
+                                </TableCell>
+                                <TableCell className="text-right font-semibold">
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span>{formatCurrency(item.deductions)}</span>
+                                    {item.advance_deduction && item.advance_deduction > 0 && (
+                                      <span className="text-xs text-muted-foreground">
+                                        (EMI: {formatCurrency(item.advance_deduction)})
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right font-semibold text-primary">
+                                  {formatCurrency(item.net_salary)}
+                                </TableCell>
+                                <TableCell className="sticky right-0 bg-background z-10">
+                                  {canModify && (
+                                    <div className="flex gap-2">
                                       <Button
                                         size="sm"
-                                        onClick={handleSaveIncentive}
-                                        disabled={savingIncentive}
+                                        variant="outline"
+                                        onClick={() => handleEdit(originalIndex)}
+                                        disabled={isHeld}
                                       >
-                                        Save
+                                        <Edit2 className="h-4 w-4 mr-1" />
+                                        Edit
                                       </Button>
                                       <Button
                                         size="sm"
-                                        variant="ghost"
-                                        onClick={() => setActiveIncentiveIndex(null)}
+                                        variant={isHeld ? "default" : "destructive"}
+                                        onClick={() => handleHoldEmployee(item.employee_id)}
+                                        title={isHeld ? "Unhold Salary" : "Hold Salary"}
                                       >
-                                        Cancel
+                                        {isHeld ? (
+                                          <>
+                                            <RotateCcw className="h-4 w-4 mr-1" />
+                                            Unhold
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Ban className="h-4 w-4 mr-1" />
+                                            Hold
+                                          </>
+                                        )}
                                       </Button>
                                     </div>
                                   )}
-                                </>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-semibold">
-                            {formatCurrency(item.gross_salary)}
-                          </TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.pf_deduction)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.esi_deduction)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.pt_deduction)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.tds_deduction)}</TableCell>
-                          <TableCell className="text-right">
-                            {formatCurrency(item.other_deductions || 0)}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold">
-                            <div className="flex flex-col items-end gap-1">
-                              <span>{formatCurrency(item.deductions)}</span>
-                              {item.advance_deduction && item.advance_deduction > 0 && (
-                                <span className="text-xs text-muted-foreground">
-                                  (EMI: {formatCurrency(item.advance_deduction)})
-                                </span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-semibold text-primary">
-                            {formatCurrency(item.net_salary)}
-                          </TableCell>
-                          <TableCell className="sticky right-0 bg-background z-10">
-                            {canModify && (
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleEdit(originalIndex)}
-                                  disabled={isHeld}
-                                >
-                                  <Edit2 className="h-4 w-4 mr-1" />
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant={isHeld ? "default" : "destructive"}
-                                  onClick={() => handleHoldEmployee(item.employee_id)}
-                                  title={isHeld ? "Unhold Salary" : "Hold Salary"}
-                                >
-                                  {isHeld ? (
-                                    <>
-                                      <RotateCcw className="h-4 w-4 mr-1" />
-                                      Unhold
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Ban className="h-4 w-4 mr-1" />
-                                      Hold
-                                    </>
-                                  )}
-                                </Button>
-                              </div>
+                                </TableCell>
+                              </>
                             )}
-                          </TableCell>
-                        </>
-                      )}
-                    </TableRow>
-                  )})
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                          </TableRow>
+                        )
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             )}
 
             <Card>

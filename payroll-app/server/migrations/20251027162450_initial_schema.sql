@@ -1,11 +1,19 @@
 -- Migration: 20251027162450 (Corrected)
 -- Create enums
-CREATE TYPE public.user_role AS ENUM ('owner', 'admin', 'hr', 'payroll', 'finance', 'manager', 'employee');
-CREATE TYPE public.employment_status AS ENUM ('active', 'inactive', 'on_leave', 'terminated');
-CREATE TYPE public.payroll_status AS ENUM ('draft', 'approved', 'processing', 'completed', 'failed');
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+        CREATE TYPE public.user_role AS ENUM ('owner', 'admin', 'hr', 'payroll', 'finance', 'manager', 'employee');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'employment_status') THEN
+        CREATE TYPE public.employment_status AS ENUM ('active', 'inactive', 'on_leave', 'terminated');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payroll_status') THEN
+        CREATE TYPE public.payroll_status AS ENUM ('draft', 'approved', 'processing', 'completed', 'failed');
+    END IF;
+END $$;
 
 -- Tenants table
-CREATE TABLE public.tenants (
+CREATE TABLE IF NOT EXISTS public.tenants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   subdomain TEXT UNIQUE NOT NULL,
   company_name TEXT NOT NULL,
@@ -16,7 +24,7 @@ CREATE TABLE public.tenants (
 );
 
 -- Users table (This was missing)
-CREATE TABLE public.users (
+CREATE TABLE IF NOT EXISTS public.users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
@@ -24,7 +32,7 @@ CREATE TABLE public.users (
 );
 
 -- User roles table
-CREATE TABLE public.user_roles (
+CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL,
@@ -34,7 +42,7 @@ CREATE TABLE public.user_roles (
 );
 
 -- Profiles table
-CREATE TABLE public.profiles (
+CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
@@ -45,7 +53,7 @@ CREATE TABLE public.profiles (
 );
 
 -- Employees table
-CREATE TABLE public.employees (
+CREATE TABLE IF NOT EXISTS public.employees (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL,
   employee_code TEXT NOT NULL,
@@ -70,7 +78,7 @@ CREATE TABLE public.employees (
 );
 
 -- Compensation structures table
-CREATE TABLE public.compensation_structures (
+CREATE TABLE IF NOT EXISTS public.compensation_structures (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL,
   employee_id UUID REFERENCES public.employees(id) ON DELETE CASCADE NOT NULL,
@@ -90,7 +98,7 @@ CREATE TABLE public.compensation_structures (
 );
 
 -- Payroll cycles table
-CREATE TABLE public.payroll_cycles (
+CREATE TABLE IF NOT EXISTS public.payroll_cycles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL,
   month INTEGER NOT NULL CHECK (month >= 1 AND month <= 12),
@@ -107,7 +115,7 @@ CREATE TABLE public.payroll_cycles (
 );
 
 -- Payroll items table
-CREATE TABLE public.payroll_items (
+CREATE TABLE IF NOT EXISTS public.payroll_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL,
   payroll_cycle_id UUID REFERENCES public.payroll_cycles(id) ON DELETE CASCADE NOT NULL,
@@ -128,7 +136,7 @@ CREATE TABLE public.payroll_items (
 );
 
 -- Audit logs table
-CREATE TABLE public.audit_logs (
+CREATE TABLE IF NOT EXISTS public.audit_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL,
   user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
@@ -149,21 +157,35 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_tenants_updated_at BEFORE UPDATE ON public.tenants
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
-CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
-CREATE TRIGGER update_employees_updated_at BEFORE UPDATE ON public.employees
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
-CREATE TRIGGER update_compensation_updated_at BEFORE UPDATE ON public.compensation_structures
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
-CREATE TRIGGER update_payroll_cycles_updated_at BEFORE UPDATE ON public.payroll_cycles
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
-CREATE TRIGGER update_payroll_items_updated_at BEFORE UPDATE ON public.payroll_items
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_tenants_updated_at') THEN
+        CREATE TRIGGER update_tenants_updated_at BEFORE UPDATE ON public.tenants
+          FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_profiles_updated_at') THEN
+        CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles
+          FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_employees_updated_at') THEN
+        CREATE TRIGGER update_employees_updated_at BEFORE UPDATE ON public.employees
+          FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_compensation_updated_at') THEN
+        CREATE TRIGGER update_compensation_updated_at BEFORE UPDATE ON public.compensation_structures
+          FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_payroll_cycles_updated_at') THEN
+        CREATE TRIGGER update_payroll_cycles_updated_at BEFORE UPDATE ON public.payroll_cycles
+          FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_payroll_items_updated_at') THEN
+        CREATE TRIGGER update_payroll_items_updated_at BEFORE UPDATE ON public.payroll_items
+          FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+END $$;
 
