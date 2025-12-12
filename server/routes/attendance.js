@@ -922,6 +922,28 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
     // Validate capture_method
     const validCaptureMethods = ['geo', 'manual', 'kiosk', 'unknown'];
     const finalCaptureMethod = validCaptureMethods.includes(capture_method) ? capture_method : 'unknown';
+    
+    // Validate and clamp lat/lon values to prevent numeric overflow
+    // NUMERIC(9,6) allows -999.999999 to 999.999999, but lat/lon should be:
+    // lat: -90 to 90, lon: -180 to 180
+    let validatedLat = null;
+    let validatedLon = null;
+    
+    if (resolvedLat !== null && resolvedLat !== undefined) {
+      const latNum = parseFloat(resolvedLat);
+      if (!isNaN(latNum)) {
+        validatedLat = Math.max(-90, Math.min(90, latNum));
+        validatedLat = Math.round(validatedLat * 1000000) / 1000000; // Round to 6 decimal places
+      }
+    }
+    
+    if (resolvedLon !== null && resolvedLon !== undefined) {
+      const lonNum = parseFloat(resolvedLon);
+      if (!isNaN(lonNum)) {
+        validatedLon = Math.max(-180, Math.min(180, lonNum));
+        validatedLon = Math.round(validatedLon * 1000000) / 1000000; // Round to 6 decimal places
+      }
+    }
 
     // Check for open session if clocking in
     if (action === 'IN') {
@@ -951,8 +973,8 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
         punchTime,
         action,
         device_id || null,
-        resolvedLat,
-        resolvedLon,
+        validatedLat,
+        validatedLon,
         resolvedAddress,
         finalCaptureMethod,
         consent,
@@ -1011,8 +1033,8 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
           event.id,
           punchTime,
           device_id || null,
-          resolvedLat,
-          resolvedLon,
+          validatedLat,
+          validatedLon,
           resolvedAddress,
           finalCaptureMethod,
           consent,
@@ -1099,6 +1121,9 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
         timesheetId = timesheetResult.rows[0].id;
       }
 
+      // Validate and clamp totalHours to prevent overflow (DECIMAL(5,2) allows up to 999.99)
+      const validatedTotalHours = Math.max(0, Math.min(999.99, Math.round(totalHours * 100) / 100));
+      
       const entryResult = await query(
         `INSERT INTO timesheet_entries (
           timesheet_id, employee_id, work_date, hours, tenant_id, source, 
@@ -1110,7 +1135,7 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
           timesheetId,
           employeeId,
           workDate,
-          totalHours,
+          validatedTotalHours,
           userTenantId,
           event.id,
           startTime,
@@ -1145,7 +1170,7 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
         [timesheetId]
       );
 
-      const durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
+      const durationMinutes = Math.max(1, Math.min(999999, Math.round((endTime - startTime) / (1000 * 60))));
       
       // Update the open session
       await query(
@@ -1170,8 +1195,8 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
           endTime,
           durationMinutes,
           device_id || null,
-          resolvedLat,
-          resolvedLon,
+          validatedLat,
+          validatedLon,
           resolvedAddress,
           finalCaptureMethod,
           consent,
