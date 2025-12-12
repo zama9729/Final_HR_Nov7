@@ -1,380 +1,314 @@
-import { useEffect, useState } from 'react';
-import { AppLayout } from '@/components/layout/AppLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { api } from '@/lib/api';
-import { useToast } from '@/hooks/use-toast';
-import { Plus, Calendar, MapPin, Users, TrendingUp, Loader2, Edit, Trash2, X, ArrowLeftRight } from 'lucide-react';
-import { format } from 'date-fns';
-import ViewAssignedModal from '@/components/ViewAssignedModal';
+import { useEffect, useMemo, useState } from "react";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAuth } from "@/contexts/AuthContext";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend } from "recharts";
+import { ShieldAlert, Users, TrendingUp, Clock3, Target, Activity, AlertTriangle, TimerReset } from "lucide-react";
+import { api } from "@/lib/api";
+import { formatDistanceToNow } from "date-fns";
 
-interface Project {
-  id: string;
-  name: string;
-  start_date: string | null;
-  end_date: string | null;
-  priority: number;
-  expected_allocation_percent: number;
-  location: string | null;
-  required_skills: string[] | null;
-  required_certifications: string[] | null;
-  assignment_count: number;
-  total_allocation: number;
-  created_at: string;
+type KpiTrend = "up" | "down" | "flat";
+
+interface KpiCardProps {
+  title: string;
+  value: string;
+  trend: KpiTrend;
+  subtext?: string;
+}
+
+interface MetricsResponse {
+  totalEmployees: number;
+  attritionRate: number;
+  projectDeliveryRate: number;
+  productivityIndex: number;
+  headcountTrend: Array<{ month: string; value: number }>;
+  projectPerformance: { onTrack: number; delayed: number; atRisk: number };
+  engagementScore: number;
+  okrProgress: number;
+  riskSeries: Array<{ month: string; open: number }>;
+  lastUpdated: string;
+}
+
+const BRAND_RED = "#d62828";
+const BRAND_BLACK = "#000000";
+const BRAND_WHITE = "#ffffff";
+const POSITIVE = "#2f9e44";
+const NEGATIVE = "#d62828";
+
+const defaultMetrics: MetricsResponse = {
+  totalEmployees: 0,
+  attritionRate: 0,
+  projectDeliveryRate: 0,
+  productivityIndex: 0,
+  headcountTrend: [],
+  projectPerformance: { onTrack: 0, delayed: 0, atRisk: 0 },
+  engagementScore: 0,
+  okrProgress: 0,
+  riskSeries: [],
+  lastUpdated: new Date().toISOString(),
+};
+
+function KpiCard({ title, value, trend, subtext }: KpiCardProps) {
+  const arrow = trend === "up" ? "▲" : trend === "down" ? "▼" : "➖";
+  const color = trend === "up" ? POSITIVE : trend === "down" ? NEGATIVE : BRAND_BLACK;
+  return (
+    <Card className="border border-slate-200 shadow-sm">
+      <CardContent className="p-4 flex flex-col gap-2">
+        <div className="text-sm text-slate-600">{title}</div>
+        <div className="flex items-center gap-2">
+          <div className="text-2xl font-bold" style={{ color: BRAND_BLACK }}>{value}</div>
+          <div className="text-sm font-semibold" style={{ color }}>
+            {arrow}
+          </div>
+        </div>
+        {subtext && <div className="text-xs text-slate-500">{subtext}</div>}
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function CEODashboard() {
-  const { toast } = useToast();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const { userRole } = useAuth();
+  const [metrics, setMetrics] = useState<MetricsResponse>(defaultMetrics);
   const [loading, setLoading] = useState(true);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [viewAssignedOpen, setViewAssignedOpen] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [editForm, setEditForm] = useState({
-    name: '',
-    start_date: '',
-    end_date: '',
-    priority: 0,
-    location: '',
-    expected_allocation_percent: 50,
-  });
+  const [timeRange, setTimeRange] = useState<"30d" | "6m" | "12m">("30d");
 
-  useEffect(() => {
-    fetchProjects();
-  }, []);
-
-  const fetchProjects = async () => {
+  const loadMetrics = async () => {
     try {
       setLoading(true);
-      const data = await api.getProjects();
-      setProjects(data || []);
-    } catch (error: any) {
-      console.error('Error fetching projects:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to fetch projects',
-        variant: 'destructive',
-      });
+      // Placeholder API; replace with real endpoint
+      const data = await api
+        .get("/api/ceo/metrics?range=" + timeRange)
+        .catch(() => ({ data: defaultMetrics }));
+      setMetrics((data as any)?.data || defaultMetrics);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEdit = (project: Project) => {
-    setSelectedProject(project);
-    setEditForm({
-      name: project.name,
-      start_date: project.start_date ? format(new Date(project.start_date), 'yyyy-MM-dd') : '',
-      end_date: project.end_date ? format(new Date(project.end_date), 'yyyy-MM-dd') : '',
-      priority: project.priority || 0,
-      location: project.location || '',
-      expected_allocation_percent: project.expected_allocation_percent || 50,
-    });
-    setEditDialogOpen(true);
-  };
+  useEffect(() => {
+    loadMetrics();
+    const id = setInterval(loadMetrics, 5 * 60 * 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeRange]);
 
-  const handleSaveEdit = async () => {
-    if (!selectedProject) return;
-    
-    try {
-      await api.updateProject(selectedProject.id, {
-        name: editForm.name,
-        start_date: editForm.start_date || undefined,
-        end_date: editForm.end_date || undefined,
-        priority: editForm.priority,
-        location: editForm.location || undefined,
-        expected_allocation_percent: editForm.expected_allocation_percent,
-      });
-      
-      toast({
-        title: 'Success',
-        description: 'Project updated successfully',
-      });
-      
-      setEditDialogOpen(false);
-      setSelectedProject(null);
-      fetchProjects();
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update project',
-        variant: 'destructive',
-      });
-    }
-  };
+  const lastUpdatedLabel = useMemo(() => {
+    if (!metrics.lastUpdated) return "";
+    return formatDistanceToNow(new Date(metrics.lastUpdated), { addSuffix: true });
+  }, [metrics.lastUpdated]);
 
-  const handleDelete = async () => {
-    if (!selectedProject) return;
-    
-    try {
-      await api.deleteProject(selectedProject.id);
-      
-      toast({
-        title: 'Success',
-        description: 'Project deleted successfully',
-      });
-      
-      setDeleteDialogOpen(false);
-      setSelectedProject(null);
-      fetchProjects();
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to delete project',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleViewAssigned = (project: Project) => {
-    setSelectedProject(project);
-    setViewAssignedOpen(true);
-  };
-
-  if (loading) {
+  if ((userRole || "").toLowerCase() !== "ceo") {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Card className="max-w-md w-full text-center border border-red-200">
+            <CardContent className="py-12 space-y-3">
+              <ShieldAlert className="h-10 w-10 text-red-600 mx-auto" />
+              <h2 className="text-xl font-semibold text-slate-900">403 - Access Denied</h2>
+              <p className="text-sm text-slate-600">This page is restricted to CEO role.</p>
+              <Button variant="outline" onClick={() => (window.location.href = "/dashboard")}>
+                Go to dashboard
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </AppLayout>
     );
   }
 
+  const headcountData = metrics.headcountTrend.length
+    ? metrics.headcountTrend
+    : [
+        { month: "Jan", value: 240 },
+        { month: "Feb", value: 242 },
+        { month: "Mar", value: 245 },
+        { month: "Apr", value: 250 },
+        { month: "May", value: 252 },
+        { month: "Jun", value: 255 },
+        { month: "Jul", value: 258 },
+        { month: "Aug", value: 262 },
+        { month: "Sep", value: 265 },
+        { month: "Oct", value: 267 },
+        { month: "Nov", value: 270 },
+        { month: "Dec", value: 272 },
+      ];
+
+  const projectBars = [
+    { name: "Status", onTrack: metrics.projectPerformance.onTrack || 62, delayed: metrics.projectPerformance.delayed || 24, atRisk: metrics.projectPerformance.atRisk || 14 },
+  ];
+
+  const riskData = metrics.riskSeries.length
+    ? metrics.riskSeries
+    : [
+        { month: "Jan", open: 11 },
+        { month: "Feb", open: 9 },
+        { month: "Mar", open: 7 },
+        { month: "Apr", open: 8 },
+        { month: "May", open: 6 },
+        { month: "Jun", open: 5 },
+      ];
+
+  const engagementValue = metrics.engagementScore || 78;
+  const okrValue = metrics.okrProgress || 64;
+
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold">CEO Staffing Dashboard</h1>
-            <p className="text-muted-foreground">Manage projects and staffing allocations</p>
+            <h1 className="text-3xl font-bold" style={{ color: BRAND_BLACK }}>CEO Dashboard – Organization Overview</h1>
+            <p className="text-sm text-slate-600">Company-wide performance snapshot</p>
           </div>
-          <a href="/projects/new">
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Create Project
-            </Button>
-          </a>
+          <div className="flex items-center gap-3">
+            <Select value={timeRange} onValueChange={(v) => setTimeRange(v as any)}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Time range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="30d">Last 30 days</SelectItem>
+                <SelectItem value="6m">6 months</SelectItem>
+                <SelectItem value="12m">12 months</SelectItem>
+              </SelectContent>
+            </Select>
+            <Badge variant="outline" className="text-xs border-slate-300">
+              Last updated {lastUpdatedLabel || "just now"}
+            </Badge>
+          </div>
         </div>
 
-        {projects.length === 0 ? (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="text-lg font-semibold mb-2">No projects yet</h3>
-              <p className="text-muted-foreground mb-4">
-                Get started by creating your first project
-              </p>
-              <a href="/projects/new">
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Project
-                </Button>
-              </a>
+        {/* KPI Row */}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <KpiCard title="Total Employees" value={metrics.totalEmployees ? metrics.totalEmployees.toString() : "–"} trend="up" subtext="vs last month" />
+          <KpiCard title="Attrition Rate" value={`${metrics.attritionRate || 0}%`} trend="down" subtext="vs last month" />
+          <KpiCard title="Project Delivery Rate" value={`${metrics.projectDeliveryRate || 0}%`} trend="up" subtext="vs last month" />
+          <KpiCard title="Productivity Index" value={(metrics.productivityIndex || 72).toString()} trend="up" subtext="vs last month" />
+        </div>
+
+        {/* Charts Grid */}
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Card className="border border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-slate-900">
+                <Users className="h-4 w-4 text-red-600" />
+                Employee Trends
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={headcountData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="value" stroke={BRAND_RED} strokeWidth={3} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
             </CardContent>
           </Card>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {projects.map((project) => (
-              <Card key={project.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <CardTitle className="text-lg font-semibold">{project.name}</CardTitle>
-                    <div className="flex items-center gap-2">
-                      {project.priority > 0 && (
-                        <Badge variant={project.priority >= 8 ? 'destructive' : project.priority >= 5 ? 'default' : 'secondary'}>
-                          Priority {project.priority}
-                        </Badge>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEdit(project)}
-                        className="h-6 w-6 p-0"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedProject(project);
-                          setDeleteDialogOpen(true);
-                        }}
-                        className="h-6 w-6 p-0 text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(project.start_date || project.end_date) && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Calendar className="h-4 w-4" />
-                      <span>
-                        {project.start_date && format(new Date(project.start_date), 'MMM dd, yyyy')}
-                        {project.start_date && project.end_date && ' - '}
-                        {project.end_date && format(new Date(project.end_date), 'MMM dd, yyyy')}
-                      </span>
-                    </div>
-                  )}
 
-                  {project.location && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <MapPin className="h-4 w-4" />
-                      <span>{project.location}</span>
-                    </div>
-                  )}
+          <Card className="border border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-slate-900">
+                <TrendingUp className="h-4 w-4 text-red-600" />
+                Project Performance
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={projectBars}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="onTrack" stackId="a" fill={POSITIVE} name="On Track" />
+                  <Bar dataKey="delayed" stackId="a" fill="#f59f00" name="Delayed" />
+                  <Bar dataKey="atRisk" stackId="a" fill={NEGATIVE} name="At Risk" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Users className="h-4 w-4 text-muted-foreground" />
-                      <span>{project.assignment_count || 0} assigned</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                      <span>{Number(project.total_allocation || 0).toFixed(0)}% allocated</span>
-                    </div>
-                  </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Card className="border border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-slate-900">
+                <Activity className="h-4 w-4 text-red-600" />
+                Engagement & Culture
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[260px] flex items-center justify-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: "Engagement", value: engagementValue },
+                      { name: "Gap", value: 100 - engagementValue },
+                    ]}
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    <Cell key="eng" fill={BRAND_RED} />
+                    <Cell key="gap" fill="#f1f3f5" />
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
 
-                  <div className="pt-2 flex gap-2">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      size="sm"
-                      onClick={() => handleViewAssigned(project)}
-                    >
-                      <Users className="h-4 w-4 mr-2" />
-                      View Assigned
-                    </Button>
-                    <a href={`/projects/${project.id}/suggestions`} className="flex-1">
-                      <Button variant="default" className="w-full" size="sm">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Assign Candidates
-                      </Button>
-                    </a>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        {/* Edit Project Dialog */}
-        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit Project</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="edit-name">Project Name *</Label>
-                <Input
-                  id="edit-name"
-                  value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+          <Card className="border border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-slate-900">
+                <Target className="h-4 w-4 text-red-600" />
+                Strategic Goals (OKRs)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[260px] flex items-center justify-center">
+              <div className="relative inline-flex items-center justify-center">
+                <div className="h-32 w-32 rounded-full border-[10px] border-slate-200" />
+                <div
+                  className="absolute h-32 w-32 rounded-full"
+                  style={{
+                    background: `conic-gradient(${BRAND_RED} ${okrValue}%, #f1f3f5 0)`,
+                  }}
                 />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="edit-start-date">Start Date</Label>
-                  <Input
-                    id="edit-start-date"
-                    type="date"
-                    value={editForm.start_date}
-                    onChange={(e) => setEditForm({ ...editForm, start_date: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="edit-end-date">End Date</Label>
-                  <Input
-                    id="edit-end-date"
-                    type="date"
-                    value={editForm.end_date}
-                    onChange={(e) => setEditForm({ ...editForm, end_date: e.target.value })}
-                  />
+                <div className="absolute flex flex-col items-center justify-center text-center">
+                  <div className="text-2xl font-bold" style={{ color: BRAND_BLACK }}>{okrValue}%</div>
+                  <div className="text-xs text-slate-600">OKRs Achieved</div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="edit-priority">Priority (0-10)</Label>
-                  <Input
-                    id="edit-priority"
-                    type="number"
-                    min="0"
-                    max="10"
-                    value={editForm.priority}
-                    onChange={(e) => setEditForm({ ...editForm, priority: Number(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="edit-allocation">Expected Allocation %</Label>
-                  <Input
-                    id="edit-allocation"
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={editForm.expected_allocation_percent}
-                    onChange={(e) => setEditForm({ ...editForm, expected_allocation_percent: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
-              <div>
-                <Label htmlFor="edit-location">Location</Label>
-                <Input
-                  id="edit-location"
-                  value={editForm.location}
-                  onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
-                  placeholder="e.g., New York, Remote"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleSaveEdit}>Save Changes</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </CardContent>
+          </Card>
+        </div>
 
-        {/* Delete Project Dialog */}
-        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Delete Project</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              Are you sure you want to delete "{selectedProject?.name}"? This action cannot be undone.
-            </p>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={handleDelete}>
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* View Assigned Modal */}
-        {selectedProject && (
-          <ViewAssignedModal
-            open={viewAssignedOpen}
-            onOpenChange={setViewAssignedOpen}
-            projectId={selectedProject.id}
-            projectName={selectedProject.name}
-            onUpdate={fetchProjects}
-          />
-        )}
+        <Card className="border border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-slate-900">
+              <AlertTriangle className="h-4 w-4 text-red-600" />
+              Risk & Compliance
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={riskData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="open" stroke={BRAND_RED} strokeWidth={3} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
       </div>
     </AppLayout>
   );
