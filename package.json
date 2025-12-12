@@ -9,6 +9,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "test": "vitest",
+    "test:rls": "vitest run server/tests/rls.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -96,6 +97,7 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^5.4.19",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.4",
+    "pg": "^8.11.5"
   }
 }

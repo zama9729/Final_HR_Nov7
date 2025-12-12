@@ -63,6 +63,7 @@ export async function withClient(fn, orgId) {
       await client.query(`SET LOCAL app.org_id = '${escapedOrgId}'`);
       await client.query(`SET LOCAL app.current_tenant = '${escapedOrgId}'`);
       await client.query(`SET LOCAL app.current_org_id = '${escapedOrgId}'`);
+      await client.query(`SET LOCAL app.current_org = '${escapedOrgId}'`);
     }
     const result = await fn(client);
 

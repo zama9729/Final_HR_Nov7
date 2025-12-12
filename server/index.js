@@ -73,6 +73,7 @@ import probationPoliciesRoutes from './routes/probation-policies.js';
 import documentUploadRoutes from './routes/document-upload.js';
 import backgroundCheckRoutes from './routes/background-check.js';
 import employeeHistoryRoutes from './routes/employee-history.js';
+import healthRoutes from './routes/health.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders } from './services/cron.js';
 import { scheduleReminderChecks } from './services/reminder-cron.js';
@@ -151,6 +152,7 @@ app.get('/health', (req, res) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/health', healthRoutes);
 app.use('/api/employees', authenticateToken, employeesRoutes);
 app.use('/api/profiles', authenticateToken, profilesRoutes);
 app.use('/api/organizations', organizationsRoutes);
