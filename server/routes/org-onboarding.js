@@ -146,65 +146,9 @@ router.post('/complete', authenticateToken, async (req, res) => {
         }
       }
 
-      // Step 2b: Upsert designations from onboarding wizard into designations table
-      if (designations && Array.isArray(designations)) {
-        // Build existing map (name -> row)
-        const existingDesignationsRes = await query(
-          `SELECT id, name FROM designations WHERE org_id = $1`,
-          [orgId]
-        );
-        const nameToId = new Map(
-          existingDesignationsRes.rows.map((d) => [d.name.toLowerCase(), d.id])
-        );
-
-        // First pass: create or update designations (without parents)
-        for (const desig of designations) {
-          if (!desig?.name) continue;
-          const normalizedName = desig.name.trim().toLowerCase();
-          const levelVal = desig.level ?? desig.priority ?? desig.rank ?? null;
-
-          if (nameToId.has(normalizedName)) {
-            // Update level if provided
-            if (levelVal !== null && levelVal !== undefined) {
-              await query(
-                `UPDATE designations
-                 SET level = COALESCE($1, level), updated_at = now()
-                 WHERE id = $2 AND org_id = $3`,
-                [levelVal, nameToId.get(normalizedName), orgId]
-              );
-            }
-          } else {
-            const insertRes = await query(
-              `INSERT INTO designations (org_id, name, level)
-               VALUES ($1, $2, $3)
-               RETURNING id`,
-              [orgId, desig.name.trim(), levelVal]
-            );
-            nameToId.set(normalizedName, insertRes.rows[0].id);
-          }
-        }
-
-        // Second pass: set parent relationships
-        for (const desig of designations) {
-          if (!desig?.name) continue;
-          const normalizedName = desig.name.trim().toLowerCase();
-          const selfId = nameToId.get(normalizedName);
-          if (!selfId) continue;
-
-          let parentId = desig.parentId || desig.parent_id || desig.parent_designation_id || null;
-          if (!parentId && desig.parentName) {
-            const parentNorm = desig.parentName.trim().toLowerCase();
-            parentId = nameToId.get(parentNorm) || null;
-          }
-
-          await query(
-            `UPDATE designations
-             SET parent_designation_id = $1, updated_at = now()
-             WHERE id = $2 AND org_id = $3`,
-            [parentId, selfId, orgId]
-          );
-        }
-      }
+      // Step 2b: Legacy support - Skip as we use org_designations in Step 3
+      // This section is kept for backward compatibility but the main logic is in Step 3
+      // which properly handles org_designations and org_reporting_lines
 
       // Step 3: Ensure normalized tables exist (run migration if needed)
       try {

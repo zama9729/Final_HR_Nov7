@@ -13,10 +13,10 @@ router.get('/', authenticateToken, setTenantContext, async (req, res) => {
 
         const result = await queryWithOrg(
             `SELECT d.*, 
-              (SELECT COUNT(*) FROM employees e WHERE e.designation_id = d.id) as employee_count
-       FROM designations d 
-       WHERE d.org_id = $1 
-       ORDER BY d.level ASC, d.name ASC`,
+              (SELECT COUNT(*) FROM employees e WHERE e.position = d.name AND e.tenant_id = $1) as employee_count
+       FROM org_designations d 
+       WHERE d.organisation_id = $1 
+       ORDER BY d.name ASC`,
             [orgId],
             orgId
         );
@@ -30,9 +30,26 @@ router.get('/', authenticateToken, setTenantContext, async (req, res) => {
                 map[d.id] = { ...d, children: [] };
             });
 
+            // Build tree using org_reporting_lines
+            const reportingLinesResult = await queryWithOrg(
+                `SELECT designation_id, parent_designation_id 
+                 FROM org_reporting_lines 
+                 WHERE organisation_id = $1`,
+                [orgId],
+                orgId
+            );
+            
+            const parentMap = new Map();
+            reportingLinesResult.rows.forEach(rl => {
+                if (rl.parent_designation_id) {
+                    parentMap.set(rl.designation_id, rl.parent_designation_id);
+                }
+            });
+
             designations.forEach(d => {
-                if (d.parent_designation_id && map[d.parent_designation_id]) {
-                    map[d.parent_designation_id].children.push(map[d.id]);
+                const parentId = parentMap.get(d.id);
+                if (parentId && map[parentId]) {
+                    map[parentId].children.push(map[d.id]);
                 } else {
                     roots.push(map[d.id]);
                 }
@@ -59,10 +76,10 @@ router.post('/', authenticateToken, setTenantContext, requireRole('hr', 'directo
         }
 
         const result = await queryWithOrg(
-            `INSERT INTO designations (org_id, name, level, parent_designation_id)
-       VALUES ($1, $2, $3, $4)
+            `INSERT INTO org_designations (organisation_id, name)
+       VALUES ($1, $2)
        RETURNING *`,
-            [orgId, name, level || 0, parent_designation_id || null],
+            [orgId, name],
             orgId
         );
 
@@ -89,14 +106,12 @@ router.put('/:id', authenticateToken, setTenantContext, requireRole('hr', 'direc
         }
 
         const result = await queryWithOrg(
-            `UPDATE designations 
+            `UPDATE org_designations 
        SET name = COALESCE($1, name),
-           level = COALESCE($2, level),
-           parent_designation_id = $3,
            updated_at = now()
-       WHERE id = $4 AND org_id = $5
+       WHERE id = $2 AND organisation_id = $3
        RETURNING *`,
-            [name, level, parent_designation_id, id, orgId],
+            [name, id, orgId],
             orgId
         );
 
@@ -117,10 +132,23 @@ router.delete('/:id', authenticateToken, setTenantContext, requireRole('hr', 'di
         const orgId = req.orgId;
         const { id } = req.params;
 
-        // Check if any employees are assigned
-        const empCheck = await queryWithOrg(
-            'SELECT 1 FROM employees WHERE designation_id = $1 AND tenant_id = $2 LIMIT 1',
+        // Get designation name first
+        const desigResult = await queryWithOrg(
+            'SELECT name FROM org_designations WHERE id = $1 AND organisation_id = $2',
             [id, orgId],
+            orgId
+        );
+
+        if (desigResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Designation not found' });
+        }
+
+        const designationName = desigResult.rows[0].name;
+
+        // Check if any employees are assigned (by matching position field)
+        const empCheck = await queryWithOrg(
+            'SELECT 1 FROM employees WHERE position = $1 AND tenant_id = $2 LIMIT 1',
+            [designationName, orgId],
             orgId
         );
 
@@ -128,9 +156,9 @@ router.delete('/:id', authenticateToken, setTenantContext, requireRole('hr', 'di
             return res.status(400).json({ error: 'Cannot delete designation assigned to employees' });
         }
 
-        // Check if it has child designations
+        // Check if it has child designations via reporting lines
         const childCheck = await queryWithOrg(
-            'SELECT 1 FROM designations WHERE parent_designation_id = $1 AND org_id = $2 LIMIT 1',
+            'SELECT 1 FROM org_reporting_lines WHERE parent_designation_id = $1 AND organisation_id = $2 LIMIT 1',
             [id, orgId],
             orgId
         );
@@ -140,7 +168,7 @@ router.delete('/:id', authenticateToken, setTenantContext, requireRole('hr', 'di
         }
 
         const result = await queryWithOrg(
-            'DELETE FROM designations WHERE id = $1 AND org_id = $2 RETURNING id',
+            'DELETE FROM org_designations WHERE id = $1 AND organisation_id = $2 RETURNING id',
             [id, orgId],
             orgId
         );
