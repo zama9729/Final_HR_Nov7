@@ -352,10 +352,10 @@ router.post('/sso/verify-pin', async (req: Request, res: Response) => {
     let userId: string | null = null;
 
     // Try to get user from session cookie
-    const sessionToken = req.cookies?.session;
-    if (sessionToken) {
+    const existingSessionToken = req.cookies?.session;
+    if (existingSessionToken) {
       try {
-        const decoded = jwt.verify(sessionToken, JWT_SECRET) as any;
+        const decoded = jwt.verify(existingSessionToken, JWT_SECRET) as any;
         userId = decoded.userId;
       } catch (e) {
         console.warn('Invalid or expired session cookie:', e);
