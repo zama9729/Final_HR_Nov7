@@ -334,23 +334,75 @@ router.post('/sso/verify-pin', async (req: Request, res: Response) => {
     }
 
     // Resolve user from session cookie
-    const token = req.cookies?.session;
-    if (!token) {
-      return res.status(401).json({ error: 'Authentication required' });
+    const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+    let userId: string | null = null;
+
+    // Try to get user from session cookie
+    const sessionToken = req.cookies?.session;
+    if (sessionToken) {
+      try {
+        const decoded = jwt.verify(sessionToken, JWT_SECRET) as any;
+        userId = decoded.userId;
+      } catch (e) {
+        console.warn('Invalid or expired session cookie:', e);
+      }
     }
 
-    const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
-    let userId: string;
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
-      userId = decoded.userId;
-    } catch (e) {
-      return res.status(401).json({ error: 'Invalid session' });
+    // If no session cookie, try to get from SSO token in query or Authorization header
+    if (!userId) {
+      const ssoToken = (req.query.token as string) || 
+                       (req.headers.authorization?.replace('Bearer ', '')) ||
+                       (req.headers['x-sso-token'] as string);
+      
+      if (ssoToken) {
+        try {
+          // Verify SSO token from HR system
+          const publicKey = (process.env.HR_PAYROLL_JWT_PUBLIC_KEY || '').replace(/\\n/g, '\n');
+          const sharedSecret = process.env.HR_JWT_SECRET || process.env.PAYROLL_JWT_SECRET || process.env.JWT_SECRET || process.env.DEV_PAYROLL_SSO_SECRET;
+          
+          // Decode to check algorithm
+          const decodedToken = jwt.decode(ssoToken, { complete: true }) as any;
+          const tokenAlgorithm = decodedToken?.header?.alg;
+          
+          let payload: any;
+          if (tokenAlgorithm === 'RS256' && publicKey && publicKey.includes('BEGIN PUBLIC KEY')) {
+            payload = jwt.verify(ssoToken, publicKey, { algorithms: ['RS256'] });
+          } else if (sharedSecret) {
+            payload = jwt.verify(ssoToken, sharedSecret);
+          } else {
+            // Development fallback - decode without verification
+            payload = decodedToken?.payload;
+          }
+          
+          if (payload && payload.sub) {
+            // Get user by HR user ID or email
+            const userResult = await query(
+              `SELECT id FROM users WHERE hr_user_id = $1 OR email = $2 LIMIT 1`,
+              [payload.sub, payload.email]
+            );
+            if (userResult.rows.length > 0) {
+              userId = userResult.rows[0].id;
+              console.log(`✅ Resolved user from SSO token: ${userId}`);
+            }
+          }
+        } catch (e) {
+          console.warn('SSO token verification failed:', e);
+        }
+      }
+    }
+
+    // If still no userId, return error with helpful message
+    if (!userId) {
+      console.error('❌ No valid session or SSO token found for PIN verification');
+      return res.status(401).json({ 
+        error: 'Authentication required',
+        message: 'Please ensure you are logged in via SSO. If you just came from SSO, please refresh the page and try again.'
+      });
     }
     
-    // Get user PIN hash and payroll role
+    // Get user PIN hash, payroll role, and org info
     const userResult = await query(
-      `SELECT pin_hash, payroll_role FROM users WHERE id = $1`,
+      `SELECT pin_hash, payroll_role, org_id, email FROM users WHERE id = $1`,
       [userId]
     );
     
@@ -376,6 +428,22 @@ router.post('/sso/verify-pin', async (req: Request, res: Response) => {
     // payroll_admin (CEO/HR/Admin) -> /dashboard
     // payroll_employee (Director/Employee/Manager) -> /employee-portal
     const dashboardUrl = payrollRole === 'payroll_admin' ? '/dashboard' : '/employee-portal';
+    
+    // Set or refresh session cookie (in case it was missing)
+    const sessionToken = jwt.sign({ 
+      userId: userId, 
+      payrollRole: payrollRole,
+      orgId: userResult.rows[0]?.org_id || null,
+      email: userResult.rows[0]?.email || null
+    }, JWT_SECRET, { expiresIn: '7d' });
+    
+    res.cookie('session', sessionToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/', // Explicit path to ensure cookie is accessible
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
     
     // Mark this session as PIN-verified
     res.cookie('pin_ok', '1', {
