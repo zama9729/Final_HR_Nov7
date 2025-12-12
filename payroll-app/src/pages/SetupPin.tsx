@@ -56,11 +56,21 @@ const SetupPin = () => {
     try {
       // Call API to set PIN
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-      const response = await fetch(`${apiUrl}/sso/setup-pin`, {
+      
+      // Get SSO token from sessionStorage if available (for first-time setup)
+      const ssoToken = sessionStorage.getItem('payroll_sso_token');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Include SSO token if available (for first-time setup when session cookie might not exist)
+      if (ssoToken) {
+        headers['x-sso-token'] = ssoToken;
+      }
+      
+      const response = await fetch(`${apiUrl}/sso/setup-pin${ssoToken ? `?token=${encodeURIComponent(ssoToken)}` : ''}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include', // Include cookies for session
         body: JSON.stringify({ pin }),
       });
