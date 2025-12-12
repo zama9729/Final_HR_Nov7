@@ -156,6 +156,11 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    // CEOs should use CEO dashboard
+    if ((userRole || '').toLowerCase() === 'ceo') {
+      navigate('/ceo/dashboard', { replace: true });
+      return;
+    }
     checkOnboardingStatus();
     fetchDashboardStats();
     fetchPresenceStatus();

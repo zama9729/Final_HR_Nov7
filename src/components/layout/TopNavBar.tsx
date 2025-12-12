@@ -66,6 +66,8 @@ export function TopNavBar() {
     });
   }, [userRole, payrollIntegrationEnabled, isClockMode, isTimesheetMode]);
 
+  const homePath = (userRole || '').toLowerCase() === 'ceo' ? '/ceo/dashboard' : '/dashboard';
+
   useEffect(() => {
     const enabled = import.meta.env.VITE_PAYROLL_INTEGRATION_ENABLED !== 'false';
     setPayrollIntegrationEnabled(enabled);
@@ -319,7 +321,7 @@ export function TopNavBar() {
             </button>
 
             <NavLink
-              to="/dashboard"
+              to={homePath}
               className="flex h-10 w-auto min-w-[2.5rem] items-center justify-center relative"
             >
               {organization?.logo_url ? (

@@ -229,7 +229,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       id: "ceo-overview",
       label: "Overview",
       items: [
-        { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+        { title: "CEO Dashboard", url: "/ceo/dashboard", icon: BarChart3 },
         { title: "Analytics", url: "/analytics", icon: BarChart3 },
         { title: "Employee Analytics", url: "/employee-stats", icon: BarChart3 },
       ],
