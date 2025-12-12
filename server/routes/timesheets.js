@@ -599,7 +599,52 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const timesheet = timesheetResult.rows[0] || null;
 
-    // Build base rows from punches (attendance_events)
+    // First, check for timesheet entries created from clock in/out (source = 'api')
+    // These entries have start_time_utc and end_time_utc which are the actual clock times
+    const clockEntriesResult = await query(
+      `SELECT 
+         work_date,
+         start_time_utc,
+         end_time_utc,
+         hours,
+         source,
+         attendance_event_id
+       FROM timesheet_entries
+       WHERE employee_id = $1
+         AND tenant_id = $2
+         AND work_date >= $3::date
+         AND work_date <= $4::date
+         AND source = 'api'
+       ORDER BY work_date, start_time_utc`,
+      [employeeId, tenantId, weekStart, weekEnd]
+    );
+
+    // Build map from timesheet entries (preferred source)
+    const clockEntriesMap = new Map();
+    clockEntriesResult.rows.forEach((row) => {
+      const dateKey = String(row.work_date);
+      // If multiple entries for same date, use the one with the earliest start time for IN
+      // and latest end time for OUT
+      const existing = clockEntriesMap.get(dateKey);
+      if (!existing) {
+        clockEntriesMap.set(dateKey, {
+          work_date: dateKey,
+          first_in: row.start_time_utc,
+          last_out: row.end_time_utc,
+          hours: row.hours,
+        });
+      } else {
+        if (row.start_time_utc && (!existing.first_in || row.start_time_utc < existing.first_in)) {
+          existing.first_in = row.start_time_utc;
+        }
+        if (row.end_time_utc && (!existing.last_out || row.end_time_utc > existing.last_out)) {
+          existing.last_out = row.end_time_utc;
+        }
+        existing.hours = (existing.hours || 0) + (row.hours || 0);
+      }
+    });
+
+    // Fallback: Build base rows from punches (attendance_events) if no timesheet entries exist
     const punchesResult = await query(
       `SELECT 
          DATE(raw_timestamp) AS work_date,
@@ -617,7 +662,11 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const punchMap = new Map();
     punchesResult.rows.forEach((row) => {
-      punchMap.set(String(row.work_date), row);
+      const dateKey = String(row.work_date);
+      // Only add if we don't already have a timesheet entry for this date
+      if (!clockEntriesMap.has(dateKey)) {
+        punchMap.set(dateKey, row);
+      }
     });
 
     // If a timesheet exists, load its entries to overlay manual edits
@@ -640,14 +689,16 @@ router.get('/', authenticateToken, async (req, res) => {
     const endDate = new Date(weekEnd);
     while (cursor <= endDate) {
       const dateKey = cursor.toISOString().split('T')[0];
+      const clockEntry = clockEntriesMap.get(dateKey);
       const punch = punchMap.get(dateKey);
       const existing = existingEntriesByDate.get(dateKey);
 
-      let clockIn = punch?.first_in || null;
-      let clockOut = punch?.last_out || null;
+      // Prefer timesheet entries from clock in/out, then fallback to attendance_events
+      let clockIn = clockEntry?.first_in || punch?.first_in || null;
+      let clockOut = clockEntry?.last_out || punch?.last_out || null;
       let manualIn = existing?.manual_in || null;
       let manualOut = existing?.manual_out || null;
-      let source = existing?.source || (manualIn || manualOut ? 'manual_edit' : 'punch');
+      let source = existing?.source || (clockEntry ? 'api' : (manualIn || manualOut ? 'manual_edit' : 'punch'));
 
       // Prefer manual overrides if present
       const effectiveIn = manualIn || clockIn;
@@ -662,6 +713,9 @@ router.get('/', authenticateToken, async (req, res) => {
         hasMissingPunches = true;
       }
 
+      // Use hours from timesheet entry if available, otherwise calculate
+      const finalHours = existing?.hours_worked ?? clockEntry?.hours ?? hoursWorked;
+
       rows.push({
         work_date: dateKey,
         clock_in: clockIn,
@@ -669,7 +723,7 @@ router.get('/', authenticateToken, async (req, res) => {
         manual_in: manualIn,
         manual_out: manualOut,
         notes: existing?.notes || existing?.description || null,
-        hours_worked: existing?.hours_worked ?? hoursWorked,
+        hours_worked: finalHours,
         source,
         has_missing_punches: hasMissingPunches,
       });
