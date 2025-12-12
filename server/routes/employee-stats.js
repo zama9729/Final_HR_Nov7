@@ -80,7 +80,7 @@ router.get('/', authenticateToken, async (req, res) => {
         e.department,
         e.position,
         COUNT(DISTINCT a.id) as project_count,
-        COALESCE(SUM(a.allocation_percent), 0) as total_allocation,
+        COALESCE(SUM(a.percent_allocation), 0) as total_allocation,
         COUNT(DISTINCT t.id) as timesheet_count,
         COALESCE(SUM(t.total_hours), 0) as total_hours_logged,
         COUNT(DISTINCT te.id) as timesheet_entry_count`;
