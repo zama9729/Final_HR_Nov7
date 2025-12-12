@@ -521,11 +521,20 @@ router.get("/history", async (req: Request, res: Response) => {
 
     // Build the query
     // Try using payroll_employee_view first, fallback to employees + profiles if view doesn't exist
+    // Note: employees table may or may not have full_name column, so we construct it from available fields
     let queryStr = `
       SELECT 
         r.*,
         COALESCE(ev.employee_code, e.employee_code, 'N/A') as employee_code,
-        COALESCE(ev.full_name, p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, 'Unknown') as employee_name,
+        COALESCE(
+          ev.full_name, 
+          p.first_name || ' ' || p.last_name, 
+          p.first_name, 
+          p.last_name, 
+          e.full_name,
+          e.email,
+          'Unknown'
+        ) as employee_name,
         COALESCE(p.email, ev.email, e.email, 'N/A') as email
       FROM employee_reimbursements r
       LEFT JOIN employees e ON e.id = r.employee_id
