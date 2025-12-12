@@ -43,7 +43,12 @@ router.get('/sso', verifyHrSsoToken, async (req: Request, res: Response) => {
     console.log(`✅ Processing SSO for user: ${hrUser.email}`);
 
     // Ensure required payroll tables exist before proceeding
-    await ensurePayrollUserTables();
+    try {
+      await ensurePayrollUserTables();
+    } catch (tableError: any) {
+      console.error('❌ Error ensuring payroll tables:', tableError);
+      // Continue anyway - tables might already exist
+    }
 
     // Auto-provision user (create or update)
     let user;

@@ -98,10 +98,21 @@ export async function verifyHrSsoToken(
         // In development, allow skipping verification if explicitly enabled or if no key is configured
         if (devMode && (process.env.ALLOW_UNVERIFIED_SSO === 'true' || !publicKey)) {
           console.warn('⚠️  DEVELOPMENT MODE: Allowing unverified RS256 token (no public key configured)');
+          console.warn('⚠️  This is UNSAFE for production. Set HR_PAYROLL_JWT_PUBLIC_KEY for proper verification.');
           // Decode without verification
-          payload = decodedToken.payload;
+          try {
+            payload = decodedToken.payload;
+            console.log('✅ Token decoded (unverified) in development mode');
+          } catch (decodeError: any) {
+            console.error('❌ Failed to decode token even without verification:', decodeError);
+            return res.status(401).json({ 
+              error: 'Invalid token',
+              message: 'Token could not be decoded'
+            });
+          }
         } else {
           console.error('❌ RS256 token requires HR_PAYROLL_JWT_PUBLIC_KEY but it is not configured.');
+          console.error('❌ Set ALLOW_UNVERIFIED_SSO=true in development or configure HR_PAYROLL_JWT_PUBLIC_KEY');
           return res.status(500).json({ 
             error: 'SSO configuration error',
             message: 'RS256 token requires HR_PAYROLL_JWT_PUBLIC_KEY environment variable. Please configure it or set ALLOW_UNVERIFIED_SSO=true in development.',

@@ -309,7 +309,7 @@ ensureRequiredTables().catch(console.error);
 
 // Debug middleware to log all requests
 app.use((req, res, next) => {
-  console.log(`[REQUEST] ${req.method} ${req.path}`);
+  console.log(`[REQUEST] ${req.method} ${req.path}${req.query.token ? ' (with SSO token)' : ''}`);
   next();
 });
 
