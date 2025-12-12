@@ -351,15 +351,23 @@ router.post('/sso/verify-pin', async (req: Request, res: Response) => {
     const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
     let userId: string | null = null;
 
+    console.log('[verify-pin] Checking for session cookie or SSO token...');
+    console.log('[verify-pin] Cookies:', Object.keys(req.cookies || {}));
+    console.log('[verify-pin] Query params:', Object.keys(req.query || {}));
+    console.log('[verify-pin] Headers:', req.headers['x-sso-token'] ? 'x-sso-token present' : 'no x-sso-token');
+
     // Try to get user from session cookie
     const existingSessionToken = req.cookies?.session;
     if (existingSessionToken) {
       try {
         const decoded = jwt.verify(existingSessionToken, JWT_SECRET) as any;
         userId = decoded.userId;
+        console.log('[verify-pin] ✅ Found user from session cookie:', userId);
       } catch (e) {
-        console.warn('Invalid or expired session cookie:', e);
+        console.warn('[verify-pin] Invalid or expired session cookie:', e);
       }
+    } else {
+      console.log('[verify-pin] No session cookie found');
     }
 
     // If no session cookie, try to get from SSO token in query or Authorization header
@@ -396,8 +404,12 @@ router.post('/sso/verify-pin', async (req: Request, res: Response) => {
             );
             if (userResult.rows.length > 0) {
               userId = userResult.rows[0].id;
-              console.log(`✅ Resolved user from SSO token: ${userId}`);
+              console.log(`[verify-pin] ✅ Resolved user from SSO token: ${userId}`);
+            } else {
+              console.log(`[verify-pin] ⚠️  SSO token valid but user not found in payroll database`);
             }
+          } else {
+            console.log(`[verify-pin] ⚠️  SSO token payload missing 'sub' field`);
           }
         } catch (e) {
           console.warn('SSO token verification failed:', e);
