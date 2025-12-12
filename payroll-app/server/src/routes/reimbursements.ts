@@ -560,7 +560,7 @@ router.get("/history", async (req: Request, res: Response) => {
 
     if (employee_name) {
       queryStr += ` AND (
-        COALESCE(ev.full_name, p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.full_name, '') ILIKE $${paramIndex}
+        COALESCE(ev.full_name, p.first_name || ' ' || p.last_name, p.first_name, p.last_name, e.email, '') ILIKE $${paramIndex}
       )`;
       params.push(`%${employee_name}%`);
       paramIndex++;
@@ -636,7 +636,6 @@ router.get("/history", async (req: Request, res: Response) => {
           p.first_name || ' ' || p.last_name ILIKE $${fallbackIndex} 
           OR p.first_name ILIKE $${fallbackIndex} 
           OR p.last_name ILIKE $${fallbackIndex} 
-          OR e.full_name ILIKE $${fallbackIndex}
           OR e.email ILIKE $${fallbackIndex}
         )`;
         fallbackParams.push(`%${employee_name}%`);
