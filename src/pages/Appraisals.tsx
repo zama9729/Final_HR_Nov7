@@ -93,10 +93,23 @@ export default function Appraisals() {
   };
   const fetchTeamMembers = async () => {
     try {
-      const data = await api.getTeamMembers();
-      setTeamMembers(data || []);
+      // For appraisals, we need all employees, not just team members
+      // Managers will see their team members via the employees API (which filters by role)
+      // HR/CEO/Admin will see all employees
+      const data = await api.getEmployees();
+      // Transform employees to match the expected format
+      const transformed = (data || []).map((emp: any) => ({
+        id: emp.id,
+        employee_id: emp.employee_id,
+        position: emp.position,
+        user_id: emp.user_id,
+        profiles: emp.profiles || {},
+      }));
+      setTeamMembers(transformed);
     } catch (e: any) {
-      toast.error("Failed to fetch team members");
+      console.error("Failed to fetch employees for appraisals:", e);
+      toast.error("Failed to fetch employees");
+      setTeamMembers([]);
     }
   };
   const fetchReviews = async () => {

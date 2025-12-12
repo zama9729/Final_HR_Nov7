@@ -8,6 +8,8 @@ import { Download, Filter, RefreshCw, Users, CalendarDays, Briefcase, UserSquare
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import { SkillsNetworkGraph } from "@/components/analytics/SkillsNetworkGraph";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // Fix for default marker icon in React-Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -101,6 +103,7 @@ const projectCoordinates = (lat: number, lon: number) => {
 export default function Analytics() {
   const [departmentData, setDepartmentData] = useState<DistributionDatum[]>([]);
   const [skillsData, setSkillsData] = useState<DistributionDatum[]>([]);
+  const [skillsNetworkData, setSkillsNetworkData] = useState<any>(null);
   const [overall, setOverall] = useState<Record<string, number>>({});
   const [branches, setBranches] = useState<BranchMarker[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,7 +129,16 @@ export default function Analytics() {
   }, [branches.length]);
 
   const initialize = async () => {
-    await Promise.all([loadAnalyticsData(), loadBranches()]);
+    await Promise.all([loadAnalyticsData(), loadBranches(), loadSkillsNetwork()]);
+  };
+
+  const loadSkillsNetwork = async () => {
+    try {
+      const data = await api.getSkillsNetwork();
+      setSkillsNetworkData(data);
+    } catch (error) {
+      console.error("Skills network error", error);
+    }
   };
 
   const loadAnalyticsData = async () => {
@@ -377,15 +389,16 @@ export default function Analytics() {
         </section>
 
         <section className="grid gap-6 xl:grid-cols-2">
-          <div className="rounded-[26px] border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 backdrop-blur-xl shadow-[0_25px_70px_rgba(15,23,42,0.15)] dark:shadow-[0_25px_70px_rgba(2,8,20,0.45)]">
-            <div className="flex items-center justify-between">
+          <div className="rounded-[26px] border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 backdrop-blur-xl shadow-[0_25px_70px_rgba(15,23,42,0.15)] dark:shadow-[0_25px_70px_rgba(2,8,20,0.45)] flex flex-col h-full">
+            <div className="flex items-center justify-between flex-shrink-0">
               <div>
                 <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Departments</p>
                 <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Distribution by department</h2>
                 <p className="text-xs text-slate-600 dark:text-slate-300">Team mix & presence ({departmentTotal} employees)</p>
               </div>
             </div>
-            <div className="mt-4 h-[320px]">
+            <div className="mt-4 flex-1 min-h-0">
+              <div className="h-full min-h-[320px]">
               {departmentData.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">No data available</div>
               ) : (
@@ -411,8 +424,9 @@ export default function Analytics() {
                   </PieChart>
                 </ResponsiveContainer>
               )}
+              </div>
             </div>
-            <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-slate-700 dark:text-slate-200 lg:grid-cols-3">
+            <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-slate-700 dark:text-slate-200 lg:grid-cols-3 flex-shrink-0">
               {departmentData.slice(0, 6).map((entry, index) => (
                 <div key={entry.name} className="flex items-center justify-between rounded-2xl bg-slate-50/80 dark:bg-white/5 p-3">
                   <div className="flex items-center gap-3">
@@ -428,55 +442,59 @@ export default function Analytics() {
             </div>
           </div>
 
-          <div className="rounded-[26px] border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 backdrop-blur-xl shadow-[0_25px_70px_rgba(15,23,42,0.15)] dark:shadow-[0_25px_70px_rgba(2,8,20,0.45)]">
-            <div className="flex items-center justify-between">
+          <div className="rounded-[26px] border border-slate-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 backdrop-blur-xl shadow-[0_25px_70px_rgba(15,23,42,0.15)] dark:shadow-[0_25px_70px_rgba(2,8,20,0.45)] flex flex-col h-full">
+            <div className="flex items-center justify-between flex-shrink-0">
               <div>
                 <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Skills</p>
-                <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Critical skills mix</h2>
-                <p className="text-xs text-slate-600 dark:text-slate-300">Top proficiencies ({skillTotal} endorsements)</p>
+                <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Skills Network Map</h2>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Interactive visualization of skills and employee connections
+                  {skillsNetworkData?.stats && (
+                    <> • {skillsNetworkData.stats.totalSkills} skills • {skillsNetworkData.stats.totalEmployees} employees</>
+                  )}
+                </p>
               </div>
             </div>
-            <div className="mt-4 h-[320px]">
-              {skillsData.length === 0 ? (
-                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">No data captured</div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={skillsData}
-                      innerRadius={75}
-                      outerRadius={115}
-                      paddingAngle={2}
-                      cornerRadius={6}
-                      dataKey="value"
-                      strokeWidth={3}
-                    >
-                      {skillsData.map((entry, index) => (
-                        <Cell
-                          key={entry.name}
-                          fill={SLICE_COLORS[(index + 3) % SLICE_COLORS.length]}
-                          stroke={SLICE_COLORS[(index + 3) % SLICE_COLORS.length]}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip content={buildDonutTooltip(skillTotal)} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-            <div className="mt-6 grid gap-2 text-sm text-slate-700 dark:text-slate-200">
-              {skillsData.slice(0, 5).map((skill, index) => (
-                <div key={skill.name} className="flex items-center justify-between rounded-2xl bg-slate-50/80 dark:bg-white/5 px-4 py-2.5">
-                  <div className="flex items-center gap-3">
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: SLICE_COLORS[(index + 3) % SLICE_COLORS.length] }}
-                    />
-                    <span>{skill.name}</span>
-                  </div>
-                  <span className="font-semibold text-slate-900 dark:text-slate-100">{skill.value}</span>
+            <div className="mt-4 flex-1 min-h-0 flex flex-col">
+              {!skillsNetworkData || skillsNetworkData.nodes.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                  {loading ? "Loading skills network..." : "No skills data available"}
                 </div>
-              ))}
+              ) : (
+                <Tabs defaultValue="network" className="w-full h-full flex flex-col">
+                  <TabsList className="mb-4 flex-shrink-0">
+                    <TabsTrigger value="network">Network Graph</TabsTrigger>
+                    <TabsTrigger value="list">List View</TabsTrigger>
+                  </TabsList>
+                  <div className="flex-1 min-h-0">
+                    <TabsContent value="network" className="mt-0 h-full">
+                      <div className="w-full h-full overflow-hidden rounded-lg">
+                        <SkillsNetworkGraph 
+                          data={skillsNetworkData} 
+                          width={800} 
+                          height={500}
+                        />
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="list" className="mt-0 h-full">
+                      <div className="grid gap-2 text-sm text-slate-700 dark:text-slate-200 h-full overflow-y-auto">
+                        {skillsData.slice(0, 10).map((skill, index) => (
+                          <div key={skill.name} className="flex items-center justify-between rounded-2xl bg-slate-50/80 dark:bg-white/5 px-4 py-2.5">
+                            <div className="flex items-center gap-3">
+                              <span
+                                className="h-2.5 w-2.5 rounded-full"
+                                style={{ backgroundColor: SLICE_COLORS[(index + 3) % SLICE_COLORS.length] }}
+                              />
+                              <span>{skill.name}</span>
+                            </div>
+                            <span className="font-semibold text-slate-900 dark:text-slate-100">{skill.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </TabsContent>
+                  </div>
+                </Tabs>
+              )}
             </div>
           </div>
         </section>

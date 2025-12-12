@@ -107,14 +107,25 @@ export function UnifiedAssistantWorkspace() {
             setMessages(prev => [...prev, assistantMsg]);
         } catch (error: any) {
             console.error("AI Error:", error);
+            let errorMessage = error.message || "Failed to get response";
+            let errorTitle = "Error";
+            
+            // Provide helpful message for RAG service unavailable
+            if (errorMessage.includes('RAG service is not available')) {
+                errorTitle = "Service Unavailable";
+                errorMessage = "AI Assistant is currently unavailable. The RAG service needs to be started.\n\nTo start it, run:\ncd rag-service && docker-compose up -d";
+            }
+            
             toast({
-                title: "Error",
-                description: error.message || "Failed to get response",
+                title: errorTitle,
+                description: errorMessage,
                 variant: "destructive"
             });
             setMessages(prev => [...prev, {
                 role: "assistant",
-                content: "Sorry, I encountered an error. Please try again.",
+                content: errorMessage.includes('RAG service') 
+                    ? "AI Assistant is currently unavailable. Please start the RAG service to use this feature."
+                    : "Sorry, I encountered an error. Please try again.",
                 timestamp: new Date()
             }]);
         } finally {

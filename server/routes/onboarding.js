@@ -211,12 +211,29 @@ router.get('/me/about', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // Ensure columns exist before querying - execute separately
+    try {
+      await query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS about_me TEXT');
+    } catch (err) {
+      // Ignore if column already exists
+    }
+    try {
+      await query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS job_love TEXT');
+    } catch (err) {
+      // Ignore if column already exists
+    }
+    try {
+      await query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS hobbies TEXT');
+    } catch (err) {
+      // Ignore if column already exists
+    }
+
     const result = await query(
       `SELECT 
         e.id as employee_id,
-        e.about_me,
-        e.job_love,
-        e.hobbies
+        COALESCE(e.about_me, '') as about_me,
+        COALESCE(e.job_love, '') as job_love,
+        COALESCE(e.hobbies, '') as hobbies
       FROM employees e
       WHERE e.user_id = $1
       LIMIT 1`,
@@ -239,6 +256,23 @@ router.post('/me/about', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
     const { about_me, job_love, hobbies } = req.body;
+
+    // Ensure columns exist before updating - execute separately
+    try {
+      await query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS about_me TEXT');
+    } catch (err) {
+      // Ignore if column already exists
+    }
+    try {
+      await query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS job_love TEXT');
+    } catch (err) {
+      // Ignore if column already exists
+    }
+    try {
+      await query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS hobbies TEXT');
+    } catch (err) {
+      // Ignore if column already exists
+    }
 
     await query(
       `UPDATE employees 

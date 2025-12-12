@@ -53,10 +53,22 @@ export function ProfilePicture({ userId, src, className, alt }: ProfilePicturePr
       } catch (error: any) {
         // Silently handle 404 or other errors - just use the original URL
         // Only log non-404 errors to avoid console spam
-        if (error?.message && !error.message.includes('not found') && !error.message.includes('404')) {
+        const errorMsg = error?.message || '';
+        const isNotFound = errorMsg.includes('not found') || 
+                          errorMsg.includes('404') || 
+                          errorMsg.includes('No profile picture') ||
+                          errorMsg.includes('access denied');
+        
+        if (!isNotFound) {
           console.error('Failed to get presigned URL for profile picture:', error);
         }
-        setPresignedUrl(src); // Fallback to original URL
+        
+        // If no profile picture exists, don't set any URL (will show default avatar)
+        if (errorMsg.includes('No profile picture')) {
+          setPresignedUrl(undefined);
+        } else {
+          setPresignedUrl(src); // Fallback to original URL
+        }
       } finally {
         setLoading(false);
       }

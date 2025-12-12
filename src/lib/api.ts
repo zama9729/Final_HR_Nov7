@@ -136,6 +136,13 @@ class ApiClient {
       if (error.name === 'AbortError') {
         throw new Error('RAG service timeout. Please check the connection.');
       }
+      // Handle connection errors gracefully
+      if (error.message?.includes('Failed to fetch') || 
+          error.message?.includes('ERR_CONNECTION_REFUSED') || 
+          error.name === 'TypeError' ||
+          error.message?.includes('NetworkError')) {
+        throw new Error('RAG service is not available. Please ensure the RAG service is running on port 8001.');
+      }
       throw error;
     }
   }
@@ -553,6 +560,10 @@ class ApiClient {
     const qs = query.toString();
     const url = qs ? `/api/analytics/approvals/pending?${qs}` : `/api/analytics/approvals/pending`;
     return this.request(url);
+  }
+
+  async getSkillsNetwork() {
+    return this.request('/api/analytics/skills/network');
   }
 
   async getAnnouncements(limit = 5) {

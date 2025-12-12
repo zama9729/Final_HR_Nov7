@@ -242,6 +242,71 @@ router.delete('/orgs/:orgId/reset', authenticateToken, setTenantContext, require
   }
 });
 
+// List all emails in the system (superadmin only)
+router.get('/emails', authenticateToken, requireSuperadmin, async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT 
+        p.id,
+        p.email,
+        p.first_name,
+        p.last_name,
+        p.phone,
+        p.tenant_id,
+        o.name as organization_name,
+        ARRAY_AGG(DISTINCT ur.role) FILTER (WHERE ur.role IS NOT NULL) as roles,
+        e.employee_id,
+        e.department,
+        e.position,
+        e.status as employee_status,
+        p.created_at
+      FROM profiles p
+      LEFT JOIN organizations o ON o.id = p.tenant_id
+      LEFT JOIN user_roles ur ON ur.user_id = p.id
+      LEFT JOIN employees e ON e.user_id = p.id
+      WHERE p.email IS NOT NULL
+      GROUP BY p.id, p.email, p.first_name, p.last_name, p.phone, p.tenant_id, o.name, e.employee_id, e.department, e.position, e.status, p.created_at
+      ORDER BY p.created_at DESC
+    `);
+
+    // Format roles array
+    const formatted = result.rows.map(row => {
+      let rolesArray = [];
+      if (row.roles) {
+        if (Array.isArray(row.roles)) {
+          rolesArray = row.roles;
+        } else if (typeof row.roles === 'string') {
+          rolesArray = row.roles.replace(/[{}]/g, '').split(',').filter(r => r);
+        }
+      }
+
+      return {
+        id: row.id,
+        email: row.email,
+        firstName: row.first_name,
+        lastName: row.last_name,
+        phone: row.phone,
+        tenantId: row.tenant_id,
+        organizationName: row.organization_name,
+        roles: rolesArray,
+        employeeId: row.employee_id,
+        department: row.department,
+        position: row.position,
+        employeeStatus: row.employee_status,
+        createdAt: row.created_at,
+      };
+    });
+
+    res.json({
+      total: formatted.length,
+      emails: formatted,
+    });
+  } catch (error) {
+    console.error('Admin emails error:', error);
+    res.status(500).json({ error: error.message || 'Failed to load emails' });
+  }
+});
+
 export default router;
 
 

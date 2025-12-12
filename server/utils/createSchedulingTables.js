@@ -142,9 +142,29 @@ export async function createSchedulingTables() {
         approved_by UUID REFERENCES profiles(id),
         approved_at TIMESTAMPTZ,
         created_by UUID REFERENCES profiles(id),
+        team_id UUID REFERENCES teams(id),
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+    `);
+
+    // Ensure team_id column exists (for existing tables)
+    // First add column without constraint if it doesn't exist
+    await query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'generated_schedules' AND column_name = 'team_id'
+        ) THEN
+          -- Check if teams table exists before adding foreign key
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'teams') THEN
+            ALTER TABLE generated_schedules ADD COLUMN team_id UUID REFERENCES teams(id);
+          ELSE
+            ALTER TABLE generated_schedules ADD COLUMN team_id UUID;
+          END IF;
+        END IF;
+      END $$;
     `);
 
     // Ensure algorithm constraint includes latest options

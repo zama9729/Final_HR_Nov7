@@ -238,15 +238,20 @@ export function UnifiedAssistant({ embedded = false }: UnifiedAssistantProps) {
 
         } catch (error: any) {
             console.error("Query error:", error);
-            const errorMessage = error?.message || "Sorry, I encountered an error. Please try again.";
+            let errorMessage = error?.message || "Sorry, I encountered an error. Please try again.";
+            
+            // Provide helpful message for RAG service unavailable
+            if (errorMessage.includes('RAG service is not available')) {
+                errorMessage = `AI Assistant is currently unavailable. The RAG service needs to be started.\n\nTo start it, run:\n\`cd rag-service && docker-compose up -d\``;
+            }
 
             setMessages((prev) => [
                 ...prev,
-                { role: "assistant", content: `Error: ${errorMessage}` },
+                { role: "assistant", content: errorMessage },
             ]);
 
             toast({
-                title: "Request Failed",
+                title: errorMessage.includes('RAG service') ? "Service Unavailable" : "Request Failed",
                 description: errorMessage,
                 variant: "destructive",
             });

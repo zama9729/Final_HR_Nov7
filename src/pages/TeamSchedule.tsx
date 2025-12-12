@@ -110,6 +110,10 @@ export default function TeamSchedule() {
   }, []);
 
   useEffect(() => {
+    fetchInitialEvents();
+  }, [currentWeek, selectedTeamId]);
+
+  useEffect(() => {
     if (selectedTeamId && selectedTeamId !== "all") {
       fetchMembers(selectedTeamId);
     } else {
@@ -251,7 +255,7 @@ export default function TeamSchedule() {
         });
       });
 
-      // Team requests for manager/HR/CEO/Admin – so they see their team’s time off
+      // Team requests for manager/HR/CEO/Admin – so they see their team's time off
       if (isManagerLike) {
         (data.teamRequests || []).forEach((r: any) => {
           mapped.push({
@@ -286,7 +290,36 @@ export default function TeamSchedule() {
         employee_id: ev.employee_id,
       }));
 
-      setEvents([...mapped, ...persistedMapped]);
+      // Load holidays from calendar API (ignore projects/birthdays for this view)
+      try {
+        const calendarData = await api.get(`/api/calendar?start_date=${start}&end_date=${end}&view_type=organization`);
+        const calendarEvents: TeamScheduleEvent[] = [];
+        
+        (calendarData.events || []).forEach((ev: any) => {
+          const resourceType = ev.resource?.type;
+          
+          // Only include holidays; skip projects/assignments/birthdays
+          if (resourceType === 'holiday') {
+            calendarEvents.push({
+              id: ev.id,
+              type: 'holiday',
+              title: ev.title,
+              start_date: ev.start?.split('T')[0] || ev.start,
+              end_date: ev.end?.split('T')[0] || ev.end || ev.start?.split('T')[0] || ev.start,
+              start_time: null, // Holidays have no time
+              end_time: null,
+              team_id: null,
+              employee_id: null,
+            });
+          }
+        });
+        
+        setEvents([...mapped, ...persistedMapped, ...calendarEvents]);
+      } catch (calendarError) {
+        console.error("Failed to load calendar events (birthdays, holidays, projects):", calendarError);
+        // Continue with just team events if calendar fails
+        setEvents([...mapped, ...persistedMapped]);
+      }
     } catch (error) {
       console.error("Failed to seed time off / team events:", error);
     } finally {
@@ -603,6 +636,7 @@ export default function TeamSchedule() {
                             </td>
                             {weekDays.map((day) => {
                               const dateStr = format(day, "yyyy-MM-dd");
+                              const isWeekend = day.getDay() === 0 || day.getDay() === 6;
                               const dayEvents = events.filter(
                                 (ev) =>
                                   coversDate(ev, dateStr) &&
@@ -611,6 +645,80 @@ export default function TeamSchedule() {
                                     (!!ev.team_id && selectedTeamId !== "all" && ev.team_id === selectedTeamId)
                                   ),
                               );
+
+                              const isHoliday = dayEvents.some(ev => ev.type === "holiday");
+
+                              // Holiday has priority over weekend for styling
+                              if (isHoliday) {
+                                return (
+                                  <td
+                                    key={dateStr}
+                                    className="px-3 py-2 align-top bg-blue-100"
+                                  >
+                                    <div className="flex flex-col gap-1">
+                                      {dayEvents.map((ev) => {
+                                        const isTimeOff = ev.type === "time_off";
+                                        const baseLeaveLabel = ev.title || "Leave";
+                                        const personName = fullName || member.employee_email || member.employee_id || "Employee";
+                                        const leaveLabel = isTimeOff
+                                          ? ev.status === "approved"
+                                            ? `${personName} - ${baseLeaveLabel}`
+                                            : ev.status === "pending"
+                                              ? `${personName} - ${baseLeaveLabel} (pending)`
+                                              : `${personName} - ${baseLeaveLabel} (declined)`
+                                          : ev.title;
+
+                                        // Show timestamps for meeting-like events with times
+                                        const meetingTypes = ["event", "milestone", "team_event"];
+                                        const isMeetingLike = meetingTypes.includes(ev.type);
+                                        const hasStartTime =
+                                          ev.start_time !== null &&
+                                          ev.start_time !== undefined &&
+                                          ev.start_time !== "";
+                                        const hasEndTime =
+                                          ev.end_time !== null &&
+                                          ev.end_time !== undefined &&
+                                          ev.end_time !== "";
+                                        const shouldShowTimestamp =
+                                          isMeetingLike && (hasStartTime || hasEndTime);
+
+                                        return (
+                                          <div
+                                            key={ev.id}
+                                            className={`rounded-full px-2 py-1 text-[11px] border shadow-sm ${
+                                              isTimeOff
+                                                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                                : "bg-sky-50 text-sky-800 border-sky-200"
+                                            }`}
+                                          >
+                                            <span className="font-medium">
+                                              {leaveLabel}
+                                            </span>
+                                            {shouldShowTimestamp && (
+                                              <span className="ml-1 text-[10px] opacity-80">
+                                                <Clock className="inline-block h-3 w-3 mr-0.5 align-middle" />
+                                                {formatTime(ev.start_time || undefined)}
+                                                {ev.end_time ? ` – ${formatTime(ev.end_time)}` : ""}
+                                              </span>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </td>
+                                );
+                              }
+
+                              // Weekend (non-holiday): just green cell with no content
+                              if (isWeekend) {
+                                return (
+                                  <td
+                                    key={dateStr}
+                                    className="px-3 py-6 text-center text-[11px] bg-green-100"
+                                  >
+                                  </td>
+                                );
+                              }
 
                               if (dayEvents.length === 0) {
                                 return (
@@ -653,6 +761,24 @@ export default function TeamSchedule() {
                                             : `${personName} - ${baseLeaveLabel} (declined)`
                                         : ev.title;
 
+                                      // Show timestamps for meeting / task items when time exists
+                                      // Hide for time_off, announcements, holidays
+                                      const suppressTypes = ["time_off", "announcement", "holiday"];
+                                      const meetingTypes = ["event", "milestone", "team_event"];
+                                      const isMeetingLike = meetingTypes.includes(ev.type);
+                                      const hasStartTime =
+                                        ev.start_time !== null &&
+                                        ev.start_time !== undefined &&
+                                        ev.start_time !== "";
+                                      const hasEndTime =
+                                        ev.end_time !== null &&
+                                        ev.end_time !== undefined &&
+                                        ev.end_time !== "";
+                                      const shouldShowTimestamp =
+                                        isMeetingLike &&
+                                        !suppressTypes.includes(ev.type) &&
+                                        (hasStartTime || hasEndTime);
+                                      
                                       return (
                                         <div
                                           key={ev.id}
@@ -665,7 +791,7 @@ export default function TeamSchedule() {
                                           <span className="font-medium">
                                             {leaveLabel}
                                           </span>
-                                          {(ev.start_time || ev.end_time) && (
+                                          {shouldShowTimestamp && (
                                             <span className="ml-1 text-[10px] opacity-80">
                                               <Clock className="inline-block h-3 w-3 mr-0.5 align-middle" />
                                               {formatTime(ev.start_time || undefined)}

@@ -42,6 +42,8 @@ interface Employee {
   position: string;
   status: string;
   presence_status?: string;
+  display_presence_status?: string;
+  onboarding_status?: string;
   join_date: string;
   profiles?: {
     first_name?: string;
@@ -116,7 +118,16 @@ export default function Employees() {
       case 'away': return 'text-red-500';
       case 'break': return 'text-yellow-500';
       case 'out_of_office': return 'text-blue-500';
+      case 'waiting_for_onboarding': return 'text-orange-500';
       default: return 'text-gray-400';
+    }
+  };
+
+  const getPresenceLabel = (status?: string) => {
+    switch (status) {
+      case 'waiting_for_onboarding': return 'Waiting for onboarding';
+      case 'out_of_office': return 'Out of office';
+      default: return status?.replace('_', ' ') || 'Unknown';
     }
   };
 
@@ -178,6 +189,14 @@ export default function Employees() {
     }
 
     // Prepare CSV data
+    const getPresenceLabelForCSV = (status?: string) => {
+      switch (status) {
+        case 'waiting_for_onboarding': return 'Waiting for onboarding';
+        case 'out_of_office': return 'Out of office';
+        default: return status?.replace('_', ' ') || 'Unknown';
+      }
+    };
+
     const headers = ['Employee ID', 'First Name', 'Last Name', 'Email', 'Position', 'Department', 'Status', 'Join Date', 'Presence Status'];
     const rows = employees.map(emp => [
       emp.employee_id || '',
@@ -188,7 +207,7 @@ export default function Employees() {
       emp.department || '',
       emp.status || '',
       emp.join_date ? new Date(emp.join_date).toLocaleDateString() : '',
-      emp.presence_status || ''
+      getPresenceLabelForCSV(emp.display_presence_status || emp.presence_status)
     ]);
 
     // Create CSV content
@@ -311,9 +330,9 @@ export default function Employees() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <Circle className={`h-2.5 w-2.5 ${getPresenceColor(employee.presence_status)} rounded-full`} fill="currentColor" />
+                            <Circle className={`h-2.5 w-2.5 ${getPresenceColor(employee.display_presence_status || employee.presence_status)} rounded-full`} fill="currentColor" />
                             <span className="text-sm capitalize">
-                              {employee.presence_status?.replace('_', ' ') || 'Unknown'}
+                              {getPresenceLabel(employee.display_presence_status || employee.presence_status)}
                             </span>
                           </div>
                         </TableCell>

@@ -20,7 +20,6 @@ import Employees from "./pages/Employees";
 import Appraisals from "./pages/Appraisals";
 import MyAppraisal from "./pages/MyAppraisal";
 import ShiftManagement from "./pages/ShiftManagement";
-import UnifiedCalendar from "./pages/UnifiedCalendar";
 import StaffScheduling from "./pages/StaffScheduling";
 import AIAssistantPage from "./pages/AIAssistantPage";
 import RAGDocumentUpload from "./pages/RAGDocumentUpload";
@@ -187,7 +186,6 @@ const App = () => (
             <Route path="/ceo/dashboard" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin','manager']}><CEODashboard /></ProtectedRoute>} />
             <Route path="/projects/new" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectNew /></ProtectedRoute>} />
             <Route path="/projects/:id/suggestions" element={<ProtectedRoute allowedRoles={['hr','director','ceo','admin']}><ProjectSuggestions /></ProtectedRoute>} />
-            <Route path="/calendar" element={<ProtectedRoute><UnifiedCalendar /></ProtectedRoute>} />
             {/* Admin page: login required; backend enforces superadmin */}
             <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             

@@ -592,6 +592,17 @@ router.get('/:id/members', authenticateToken, setTenantContext, async (req, res)
     const { id } = req.params;
     const orgId = req.orgId;
     
+    // Validate team ID
+    if (!id || id === 'undefined' || id === 'null') {
+      return res.status(400).json({ error: 'Team ID is required' });
+    }
+    
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({ error: 'Invalid team ID format' });
+    }
+    
     const result = await queryWithOrg(
       `SELECT 
          tm.*,

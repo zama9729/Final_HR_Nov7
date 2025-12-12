@@ -23,14 +23,14 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
       orgId
     );
 
-    // Department distribution
+    // Department distribution - ensure departments are scoped to org
     const departmentResult = await queryWithOrg(
       `SELECT 
          COALESCE(d.name, 'Unassigned') as name,
          COUNT(DISTINCT e.id) as value
        FROM employees e
        LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
-       LEFT JOIN departments d ON d.id = ea.department_id
+       LEFT JOIN departments d ON d.id = ea.department_id AND d.org_id = $1
        WHERE e.tenant_id = $1 AND e.status = 'active'
        GROUP BY d.name
        ORDER BY value DESC`,
@@ -77,7 +77,7 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
       orgId
     );
 
-    // Project utilization
+    // Project utilization - ensure org_id matches tenant_id
     const projectResult = await queryWithOrg(
       `SELECT 
          p.name,
@@ -85,6 +85,7 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
          COUNT(DISTINCT a.id) as assignments
        FROM projects p
        LEFT JOIN assignments a ON a.project_id = p.id
+       LEFT JOIN employees e ON e.id = a.employee_id AND e.tenant_id = $1
        WHERE p.org_id = $1
        GROUP BY p.id, p.name
        ORDER BY employees DESC
@@ -93,7 +94,7 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
       orgId
     );
 
-    // Top skills
+    // Top skills - filter by tenant_id on skills table directly for RLS compliance
     const skillsResult = await queryWithOrg(
       `SELECT 
          s.name,
@@ -101,7 +102,7 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
          AVG(s.level) as avg_level
        FROM skills s
        JOIN employees e ON e.id = s.employee_id
-       WHERE e.tenant_id = $1
+       WHERE s.tenant_id = $1 AND e.tenant_id = $1 AND e.status = 'active'
        GROUP BY s.name
        ORDER BY count DESC
        LIMIT 10`,
@@ -109,16 +110,19 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
       orgId
     );
 
-    // Overall stats
+    // Overall stats - ensure all subqueries are properly scoped
     const overallResult = await queryWithOrg(
       `SELECT 
          (SELECT COUNT(*) FROM employees WHERE tenant_id = $1 AND status = 'active') as total_employees,
          (SELECT COUNT(DISTINCT e.id) FROM employees e 
           WHERE e.tenant_id = $1 AND e.status = 'active'
-          AND (e.id IN (SELECT reporting_manager_id FROM employees WHERE reporting_manager_id IS NOT NULL)
-               OR e.user_id IN (SELECT user_id FROM user_roles WHERE role = 'manager'))) as manager_count,
+          AND (e.id IN (SELECT reporting_manager_id FROM employees WHERE reporting_manager_id IS NOT NULL AND tenant_id = $1)
+               OR e.user_id IN (SELECT ur.user_id FROM user_roles ur 
+                                 JOIN employees emp ON emp.user_id = ur.user_id 
+                                 WHERE ur.role = 'manager' AND emp.tenant_id = $1))) as manager_count,
          (SELECT COUNT(DISTINCT lr.employee_id) FROM leave_requests lr
-          WHERE lr.tenant_id = $1 
+          JOIN employees emp ON emp.id = lr.employee_id
+          WHERE lr.tenant_id = $1 AND emp.tenant_id = $1
           AND lr.status = 'approved'
           AND CURRENT_DATE BETWEEN lr.start_date AND lr.end_date) as employees_on_leave,
          (SELECT COUNT(*) FROM projects WHERE org_id = $1 AND status = 'open') as active_projects,
@@ -186,7 +190,7 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
     const todayPresentResult = await queryWithOrg(
       `SELECT COUNT(DISTINCT ae.employee_id) as count
        FROM attendance_events ae
-       JOIN employees e ON e.id = ae.employee_id
+       JOIN employees e ON e.id = ae.employee_id AND e.tenant_id = $1
        WHERE ae.tenant_id = $1
          AND DATE(ae.raw_timestamp) = $2
          AND ae.event_type = 'IN'
@@ -203,7 +207,7 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
     const onTimeResult = await queryWithOrg(
       `SELECT COUNT(*) as on_time, COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM ae.raw_timestamp) > 9) as late
        FROM attendance_events ae
-       JOIN employees e ON e.id = ae.employee_id
+       JOIN employees e ON e.id = ae.employee_id AND e.tenant_id = $1
        WHERE ae.tenant_id = $1
          AND DATE(ae.raw_timestamp) >= $2
          AND DATE(ae.raw_timestamp) <= $3
@@ -224,7 +228,7 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
          COUNT(*) FILTER (WHERE COALESCE(ae.work_type, 'WFH') = 'WFO') as wfo_count,
          COUNT(*) FILTER (WHERE COALESCE(ae.work_type, 'WFH') = 'WFH') as wfh_count
        FROM attendance_events ae
-       JOIN employees e ON e.id = ae.employee_id
+       JOIN employees e ON e.id = ae.employee_id AND e.tenant_id = $1
        WHERE ae.tenant_id = $1
          AND DATE(ae.raw_timestamp) >= $2
          AND DATE(ae.raw_timestamp) <= $3
@@ -243,7 +247,7 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
     const pendingApprovalsResult = await queryWithOrg(
       `SELECT COUNT(*) as count
        FROM timesheets t
-       JOIN employees e ON e.id = t.employee_id
+       JOIN employees e ON e.id = t.employee_id AND e.tenant_id = $1
        WHERE t.tenant_id = $1
          AND t.status = 'pending_approval'
          ${branch_id ? 'AND EXISTS (SELECT 1 FROM employee_assignments ea WHERE ea.employee_id = e.id AND ea.branch_id = $2)' : ''}`,
@@ -318,10 +322,10 @@ router.get('/approvals/pending', authenticateToken, setTenantContext, requireRol
          mp.last_name  AS manager_last_name,
          mp.email      AS manager_email
        FROM timesheets t
-       JOIN employees e ON e.id = t.employee_id
-       JOIN profiles p ON p.id = e.user_id
-       LEFT JOIN employees mgr ON mgr.id = e.reporting_manager_id
-       LEFT JOIN profiles mp ON mp.id = mgr.user_id
+       JOIN employees e ON e.id = t.employee_id AND e.tenant_id = $1
+       JOIN profiles p ON p.id = e.user_id AND p.tenant_id = $1
+       LEFT JOIN employees mgr ON mgr.id = e.reporting_manager_id AND mgr.tenant_id = $1
+       LEFT JOIN profiles mp ON mp.id = mgr.user_id AND mp.tenant_id = $1
        LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
        WHERE ${filters.join(' AND ')}
        ORDER BY t.submitted_at DESC NULLS LAST`,
@@ -378,6 +382,7 @@ router.get('/attendance/histogram', authenticateToken, setTenantContext, require
          COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN' AND COALESCE(ae.work_type, 'WFH') = 'WFH') as wfh,
          COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN' AND EXTRACT(HOUR FROM ae.raw_timestamp) > 9) as late
        FROM attendance_events ae
+       JOIN employees e ON e.id = ae.employee_id AND e.tenant_id = $1
        WHERE ${filters.join(' AND ')}
        GROUP BY DATE(ae.raw_timestamp)
        ORDER BY date`,
@@ -468,7 +473,7 @@ router.get('/attendance/heatmap', authenticateToken, setTenantContext, requireRo
          COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN') as present_count,
          COUNT(DISTINCT e.id) as total_employees
        FROM attendance_events ae
-       JOIN employees e ON e.id = ae.employee_id
+       JOIN employees e ON e.id = ae.employee_id AND e.tenant_id = $1
        LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
        ${groupJoin}
        WHERE ae.tenant_id = $1
@@ -529,7 +534,8 @@ router.get('/attendance/map', authenticateToken, setTenantContext, requireRole('
          COUNT(*) as frequency,
          COUNT(DISTINCT ae.employee_id) as unique_employees
        FROM attendance_events ae
-       LEFT JOIN org_branches ob ON ob.id = ae.work_location_branch_id
+       JOIN employees e ON e.id = ae.employee_id AND e.tenant_id = $1
+       LEFT JOIN org_branches ob ON ob.id = ae.work_location_branch_id AND ob.org_id = $1
        WHERE ae.tenant_id = $1
          AND DATE(ae.raw_timestamp) >= $2
          AND DATE(ae.raw_timestamp) <= $3
@@ -593,17 +599,18 @@ router.get('/attendance/distribution', authenticateToken, setTenantContext, requ
            COALESCE(
              (SELECT MIN(ae2.raw_timestamp) FROM attendance_events ae2 
               WHERE ae2.employee_id = ae.employee_id 
+                AND ae2.tenant_id = $1
                 AND DATE(ae2.raw_timestamp) = DATE(ae.raw_timestamp)
                 AND ae2.event_type = 'OUT'),
              ae.raw_timestamp + INTERVAL '8 hours'
            ) - ae.raw_timestamp
          )) / 3600 as hours_worked
        FROM attendance_events ae
-       JOIN employees e ON e.id = ae.employee_id
-       JOIN profiles p ON p.id = e.user_id
+       JOIN employees e ON e.id = ae.employee_id AND e.tenant_id = $1
+       JOIN profiles p ON p.id = e.user_id AND p.tenant_id = $1
        LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
-       LEFT JOIN teams t ON t.id = ea.team_id
-       LEFT JOIN departments d ON d.id = ea.department_id
+       LEFT JOIN teams t ON t.id = ea.team_id AND t.org_id = $1
+       LEFT JOIN departments d ON d.id = ea.department_id AND d.org_id = $1
        WHERE ae.tenant_id = $1
          AND DATE(ae.raw_timestamp) >= $2
          AND DATE(ae.raw_timestamp) <= $3
@@ -656,6 +663,128 @@ router.get('/attendance/distribution', authenticateToken, setTenantContext, requ
   } catch (error) {
     console.error('Analytics distribution error:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch distribution' });
+  }
+});
+
+// GET /api/analytics/skills/network - Get skills network data for interactive graph
+router.get('/skills/network', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
+  try {
+    const orgId = req.orgId;
+
+    // Get all skills with employee connections
+    const skillsNetworkResult = await queryWithOrg(
+      `SELECT 
+         s.id as skill_id,
+         s.name as skill_name,
+         s.level,
+         s.endorsements,
+         e.id as employee_id,
+         p.first_name || ' ' || p.last_name as employee_name,
+         p.email as employee_email,
+         ea.department_id,
+         d.name as department_name
+       FROM skills s
+       JOIN employees e ON e.id = s.employee_id AND e.tenant_id = $1
+       JOIN profiles p ON p.id = e.user_id AND p.tenant_id = $1
+       LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
+       LEFT JOIN departments d ON d.id = ea.department_id AND d.org_id = $1
+       WHERE s.tenant_id = $1 AND e.status = 'active'
+       ORDER BY s.name, s.level DESC`,
+      [orgId],
+      orgId
+    );
+
+    // Build network structure: only skills, connected by shared employees
+    const skillNodes = new Map();
+    const employeeSkillsMap = new Map(); // employee_id -> Set of skill names
+
+    skillsNetworkResult.rows.forEach(row => {
+      const skillId = `skill_${row.skill_name}`;
+      const employeeId = row.employee_id;
+
+      // Add skill node
+      if (!skillNodes.has(skillId)) {
+        skillNodes.set(skillId, {
+          id: skillId,
+          type: 'skill',
+          name: row.skill_name,
+          count: 0,
+          avgLevel: 0,
+          totalEndorsements: 0,
+          employees: [],
+          departments: new Set(),
+        });
+      }
+      const skillNode = skillNodes.get(skillId);
+      skillNode.count += 1;
+      skillNode.avgLevel = ((skillNode.avgLevel * (skillNode.count - 1)) + (row.level || 1)) / skillNode.count;
+      skillNode.totalEndorsements += row.endorsements || 0;
+      skillNode.employees.push({
+        id: row.employee_id,
+        name: row.employee_name,
+        email: row.employee_email,
+        level: row.level,
+        department: row.department_name,
+      });
+      if (row.department_name) {
+        skillNode.departments.add(row.department_name);
+      }
+
+      // Track employee skills for co-occurrence
+      if (!employeeSkillsMap.has(employeeId)) {
+        employeeSkillsMap.set(employeeId, new Set());
+      }
+      employeeSkillsMap.get(employeeId).add(row.skill_name);
+    });
+
+    // Build links between skills based on shared employees (co-occurrence)
+    const links = [];
+    const linkMap = new Map(); // Track existing links to avoid duplicates
+
+    employeeSkillsMap.forEach((skillSet, employeeId) => {
+      const skillsArray = Array.from(skillSet);
+      // Create links between all pairs of skills this employee has
+      for (let i = 0; i < skillsArray.length; i++) {
+        for (let j = i + 1; j < skillsArray.length; j++) {
+          const skill1 = `skill_${skillsArray[i]}`;
+          const skill2 = `skill_${skillsArray[j]}`;
+          const linkKey = [skill1, skill2].sort().join('|');
+          
+          if (!linkMap.has(linkKey)) {
+            linkMap.set(linkKey, {
+              source: skill1,
+              target: skill2,
+              weight: 1,
+            });
+          } else {
+            linkMap.get(linkKey).weight += 1;
+          }
+        }
+      }
+    });
+
+    // Convert link map to array
+    links.push(...Array.from(linkMap.values()));
+
+    // Convert skill nodes to array with size based on employee count
+    const nodes = Array.from(skillNodes.values()).map(skill => ({
+      ...skill,
+      departments: Array.from(skill.departments),
+      size: Math.min(60, Math.max(20, skill.count * 4)),
+    }));
+
+    res.json({
+      nodes,
+      links,
+      stats: {
+        totalSkills: skillNodes.size,
+        totalEmployees: employeeSkillsMap.size,
+        totalConnections: links.length,
+      },
+    });
+  } catch (error) {
+    console.error('Skills network error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch skills network' });
   }
 });
 

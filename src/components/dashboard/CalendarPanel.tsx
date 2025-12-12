@@ -199,7 +199,7 @@ export function CalendarPanel() {
         // Expand events with date ranges into individual day events
         const expandedEvents: CalendarEvent[] = [];
         
-        (response.events || []).forEach((event: any, idx: number) => {
+        (response.events || []).forEach((event: any) => {
           const resourceType = event?.resource?.type;
           const normalizedType: CalendarEvent['type'] =
             resourceType === 'shift'

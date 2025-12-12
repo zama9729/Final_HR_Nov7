@@ -979,7 +979,17 @@ export default function Dashboard() {
                   <div className="text-sm text-muted-foreground">No upcoming shifts scheduled</div>
                 )}
                 <Button
-                  onClick={() => navigate(isEmployee ? '/my/profile?tab=shifts' : '/calendar')}
+                  onClick={() => {
+                    if (isEmployee) {
+                      navigate('/my/profile?tab=shifts');
+                    } else {
+                      // Scroll to the team calendar section on the dashboard
+                      const calendarSection = document.getElementById('team-calendar-section');
+                      if (calendarSection) {
+                        calendarSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }
+                  }}
                   className="w-full"
                 >
                   {isEmployee ? 'View My Shifts' : 'View Calendar'}
@@ -1098,7 +1108,7 @@ export default function Dashboard() {
         </div>
 
         {/* Unified Team Calendar */}
-        <div className="pt-2">
+        <div id="team-calendar-section" className="pt-2">
           <CalendarPanel />
         </div>
       </div>

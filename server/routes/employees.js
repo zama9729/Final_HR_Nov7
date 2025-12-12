@@ -248,6 +248,10 @@ router.get('/', authenticateToken, async (req, res) => {
         employeesQuery = `
           SELECT 
             e.*,
+            CASE 
+              WHEN e.onboarding_status IS NULL OR e.onboarding_status != 'completed' THEN 'waiting_for_onboarding'
+              ELSE e.presence_status
+            END as display_presence_status,
             json_build_object(
               'first_name', p.first_name,
               'last_name', p.last_name,
@@ -267,6 +271,10 @@ router.get('/', authenticateToken, async (req, res) => {
         employeesQuery = `
           SELECT 
             e.*,
+            CASE 
+              WHEN e.onboarding_status IS NULL OR e.onboarding_status != 'completed' THEN 'waiting_for_onboarding'
+              ELSE e.presence_status
+            END as display_presence_status,
             json_build_object(
               'first_name', p.first_name,
               'last_name', p.last_name,
@@ -285,6 +293,10 @@ router.get('/', authenticateToken, async (req, res) => {
       employeesQuery = `
         SELECT 
           e.*,
+          CASE 
+            WHEN e.onboarding_status IS NULL OR e.onboarding_status != 'completed' THEN 'waiting_for_onboarding'
+            ELSE e.presence_status
+          END as display_presence_status,
           json_build_object(
             'first_name', p.first_name,
             'last_name', p.last_name,
@@ -387,7 +399,7 @@ router.post('/profile-picture/upload', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized: Invalid file path' });
     }
 
-    // Check if profile_picture_url column exists
+    // Check if profile_picture_url column exists, create if not
     const columnCheck = await query(
       `SELECT column_name 
        FROM information_schema.columns 
@@ -395,9 +407,15 @@ router.post('/profile-picture/upload', authenticateToken, async (req, res) => {
     );
     
     if (columnCheck.rows.length === 0) {
-      return res.status(400).json({ 
-        error: 'Profile picture feature not available. Please run the database migration first.',
-        migration_required: true 
+      // Create the column if it doesn't exist
+      await query(`
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS profile_picture_url TEXT;
+      `).catch((err) => {
+        console.error('Error creating profile_picture_url column:', err);
+        return res.status(500).json({ 
+          error: 'Failed to initialize profile picture feature',
+          migration_required: true 
+        });
       });
     }
 
@@ -406,15 +424,29 @@ router.post('/profile-picture/upload', authenticateToken, async (req, res) => {
     const bucket = process.env.MINIO_BUCKET_ONBOARDING || process.env.DOCS_STORAGE_BUCKET || 'hr-onboarding-docs';
     const publicUrl = `${minioPublicUrl}/${bucket}/${key}`;
 
-    // Update profile with picture URL
-    await query(
-      'UPDATE profiles SET profile_picture_url = $1, updated_at = now() WHERE id = $2',
-      [publicUrl, userId]
+    // Ensure profile_picture_url column exists before updating
+    try {
+      await query('ALTER TABLE profiles ADD COLUMN IF NOT EXISTS profile_picture_url TEXT');
+    } catch (err) {
+      // Ignore if column already exists
+    }
+
+    // Update profile with picture URL - ensure organization scoping
+    const updateResult = await query(
+      `UPDATE profiles 
+       SET profile_picture_url = $1, updated_at = now() 
+       WHERE id = $2 AND tenant_id = $3 
+       RETURNING id, profile_picture_url, tenant_id`,
+      [publicUrl, userId, tenantId]
     );
 
-    res.json({ 
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Profile not found or access denied' });
+    }
+
+    res.json({
       success: true, 
-      profile_picture_url: publicUrl,
+      profile_picture_url: updateResult.rows[0].profile_picture_url || publicUrl,
       message: 'Profile picture uploaded successfully' 
     });
   } catch (error) {
@@ -485,34 +517,106 @@ router.post('/profile-picture/presign', authenticateToken, async (req, res) => {
 router.get('/profile-picture/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
+    const requesterUserId = req.user.id;
 
-    // Get the profile picture URL from database
+    // Ensure profile_picture_url column exists
+    try {
+      await query('ALTER TABLE profiles ADD COLUMN IF NOT EXISTS profile_picture_url TEXT');
+    } catch (err) {
+      // Ignore if column already exists
+    }
+
+    // Get requester's tenant_id for organization scoping
+    const requesterResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [requesterUserId]
+    );
+    const requesterTenantId = requesterResult.rows[0]?.tenant_id;
+
+    if (!requesterTenantId) {
+      return res.status(403).json({ error: 'No organization found for requester' });
+    }
+
+    // Get the profile picture URL from database - ensure organization scoping
     const profileResult = await query(
-      'SELECT profile_picture_url, tenant_id FROM profiles WHERE id = $1',
-      [userId]
+      `SELECT profile_picture_url, tenant_id 
+       FROM profiles 
+       WHERE id = $1 AND tenant_id = $2`,
+      [userId, requesterTenantId]
     );
 
     if (!profileResult.rows.length) {
+      // Check if profile exists but in different tenant (for better error message)
+      const anyProfileResult = await query(
+        'SELECT id, tenant_id FROM profiles WHERE id = $1',
+        [userId]
+      );
+      
+      if (anyProfileResult.rows.length > 0) {
+        console.warn(`Profile ${userId} exists but belongs to different tenant. Requester tenant: ${requesterTenantId}`);
+        return res.status(403).json({ error: 'Access denied: Profile belongs to different organization' });
+      }
+      
       return res.status(404).json({ error: 'Profile not found' });
     }
 
     const profile = profileResult.rows[0];
     
     if (!profile.profile_picture_url) {
-      return res.status(404).json({ error: 'No profile picture found' });
+      // Return 404 but with a more specific message
+      return res.status(404).json({ error: 'No profile picture found', has_profile: true });
     }
 
     // Extract object key from the stored URL
     // URL format: http://localhost:9000/bucket/tenants/.../profile-pictures/.../filename.png
+    // Or: http://localhost:9000/hr-onboarding-docs/tenants/.../profile-pictures/.../filename.png
+    let key = null;
     const urlParts = profile.profile_picture_url.split('/');
-    const bucketIndex = urlParts.findIndex(part => part.includes('tenants') || part === 'docshr' || part === 'hr-onboarding-docs');
     
-    if (bucketIndex === -1) {
-      return res.status(400).json({ error: 'Invalid profile picture URL format' });
+    // Try to find the bucket name first
+    const bucketNames = ['hr-onboarding-docs', 'docshr', 'onboarding-docs'];
+    let bucketIndex = -1;
+    let bucketName = null;
+    
+    for (const bucket of bucketNames) {
+      const idx = urlParts.findIndex(part => part === bucket || part.includes(bucket));
+      if (idx !== -1) {
+        bucketIndex = idx;
+        bucketName = urlParts[idx];
+        break;
+      }
     }
-
-    // Extract key (everything after bucket)
-    const key = urlParts.slice(bucketIndex + 1).join('/');
+    
+    // If bucket found, extract key (everything after bucket)
+    if (bucketIndex !== -1) {
+      key = urlParts.slice(bucketIndex + 1).join('/');
+    } else {
+      // Try to find 'tenants' as a fallback
+      const tenantsIndex = urlParts.findIndex(part => part === 'tenants');
+      if (tenantsIndex !== -1) {
+        key = urlParts.slice(tenantsIndex).join('/');
+      } else {
+        // Last resort: try to extract from common patterns
+        const lastSlashIndex = profile.profile_picture_url.lastIndexOf('/');
+        if (lastSlashIndex !== -1) {
+          const possibleKey = profile.profile_picture_url.substring(
+            profile.profile_picture_url.indexOf('/tenants/') !== -1 
+              ? profile.profile_picture_url.indexOf('/tenants/') + 1
+              : profile.profile_picture_url.indexOf('/profile-pictures/') !== -1
+              ? profile.profile_picture_url.indexOf('/profile-pictures/') + 1
+              : lastSlashIndex
+          );
+          if (possibleKey.includes('tenants/') || possibleKey.includes('profile-pictures/')) {
+            key = possibleKey;
+          }
+        }
+      }
+    }
+    
+    if (!key) {
+      console.error('Could not extract key from URL:', profile.profile_picture_url);
+      return res.status(400).json({ error: 'Invalid profile picture URL format', url: profile.profile_picture_url });
+    }
 
     // Import storage functions
     const { getPresignedGetUrl, getStorageProvider } = await import('../services/storage.js');

@@ -224,15 +224,27 @@ export function RAGAssistant({ embedded = false }: RAGAssistantProps) {
       }
     } catch (error: any) {
       console.error("RAG query error:", error);
-      const errorMessage = error?.message || "Sorry, I encountered an error. Please try again.";
+      let errorMessage = error?.message || "Sorry, I encountered an error. Please try again.";
+      let errorTitle = "Query Failed";
+      
+      // Provide helpful message for RAG service unavailable
+      if (errorMessage.includes('RAG service is not available')) {
+        errorTitle = "Service Unavailable";
+        errorMessage = "AI Assistant is currently unavailable. The RAG service needs to be started.\n\nTo start it, run:\ncd rag-service && docker-compose up -d";
+      }
       
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `Error: ${errorMessage}` },
+        { 
+          role: "assistant", 
+          content: errorMessage.includes('RAG service') 
+            ? "AI Assistant is currently unavailable. Please start the RAG service to use this feature."
+            : `Error: ${errorMessage}` 
+        },
       ]);
       
       toast({
-        title: "Query Failed",
+        title: errorTitle,
         description: errorMessage,
         variant: "destructive",
       });
