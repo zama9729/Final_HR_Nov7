@@ -116,7 +116,7 @@ services:
       - .:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:3001
+      - VITE_API_URL=http://127.0.0.1:3001
     depends_on:
       - api
     restart: unless-stopped
@@ -183,7 +183,7 @@ services:
       - ./payroll-app:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:4000
+      - VITE_API_URL=http://127.0.0.1:4000
       - VITE_PAYROLL_BASE_URL=http://localhost:3002
     depends_on:
       - payroll-api
@@ -195,9 +195,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - VITE_API_URL=http://localhost:3001
+        - VITE_API_URL=http://127.0.0.1:3001
     environment:
-      - VITE_API_URL=http://localhost:3001
+      - VITE_API_URL=http://127.0.0.1:3001
     ports:
       - "8080:80"
     depends_on:

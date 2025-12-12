@@ -40,6 +40,10 @@ interface Employee {
   work_location: string | null;
   presence_status?: string;
   reporting_manager_id: string | null;
+  designation_id?: string | null;
+  designation_name?: string | null;
+  designation_level?: number | null;
+  designation_parent_id?: string | null;
   profiles: {
     first_name: string | null;
     last_name: string | null;
@@ -55,6 +59,13 @@ interface TreeNode extends Employee {
   children: TreeNode[];
 }
 
+interface Designation {
+  id: string;
+  name: string;
+  level: number | null;
+  parent_designation_id: string | null;
+}
+
 async function fetchOrgStructure(): Promise<Employee[]> {
   try {
     const data = await api.getOrgStructure();
@@ -65,18 +76,60 @@ async function fetchOrgStructure(): Promise<Employee[]> {
   }
 }
 
-function buildTree(employees: Employee[]): TreeNode[] {
+function buildTree(employees: Employee[], designations: Designation[] = []): TreeNode[] {
   const employeeMap = new Map<string, TreeNode>();
+  const designationMap = new Map<string, Designation>();
+  const employeesByDesignation = new Map<string, Employee[]>();
+
+  designations.forEach(des => designationMap.set(des.id, des));
   
   employees.forEach(emp => {
     employeeMap.set(emp.id, { ...emp, children: [] });
+    if (emp.designation_id) {
+      const list = employeesByDesignation.get(emp.designation_id) || [];
+      list.push(emp);
+      employeesByDesignation.set(emp.designation_id, list);
+    }
   });
 
   const roots: TreeNode[] = [];
+
+  const resolveManagerId = (emp: Employee): string | null => {
+    if (emp.reporting_manager_id && employeeMap.has(emp.reporting_manager_id)) {
+      return emp.reporting_manager_id;
+    }
+
+    // Fallback: use designation hierarchy to infer manager based on parent designation
+    let currentDesignation = emp.designation_id || null;
+    const visited = new Set<string>();
+
+    while (currentDesignation) {
+      if (visited.has(currentDesignation)) break;
+      visited.add(currentDesignation);
+
+      const parentDesig = designationMap.get(currentDesignation)?.parent_designation_id || null;
+      if (!parentDesig) break;
+
+      const candidateManagers = employeesByDesignation.get(parentDesig);
+      if (candidateManagers && candidateManagers.length > 0) {
+        // If multiple managers exist for parent designation, pick the first one deterministically
+        const sorted = [...candidateManagers].sort((a, b) => (a.employee_id || "").localeCompare(b.employee_id || ""));
+        const chosen = sorted.find(c => c.id !== emp.id) || sorted[0];
+        if (chosen && chosen.id !== emp.id) {
+          return chosen.id;
+        }
+      }
+
+      currentDesignation = parentDesig;
+    }
+
+    return null;
+  };
   
   employeeMap.forEach(node => {
-    if (node.reporting_manager_id && employeeMap.has(node.reporting_manager_id)) {
-      const parent = employeeMap.get(node.reporting_manager_id)!;
+    const managerId = resolveManagerId(node);
+    if (managerId && employeeMap.has(managerId)) {
+      const parent = employeeMap.get(managerId)!;
       parent.children.push(node);
     } else {
       roots.push(node);
@@ -323,6 +376,7 @@ export default function EnhancedOrgChart() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [designations, setDesignations] = useState<Designation[]>([]);
   const [hierarchy, setHierarchy] = useState<{ branches: any[]; departments: any[]; teams: any[] }>({
     branches: [],
     departments: [],
@@ -370,9 +424,14 @@ export default function EnhancedOrgChart() {
   }, []);
 
   const loadOrgChart = async () => {
-    const employees = await fetchOrgStructure();
-    setEmployees(employees);
-    const orgTree = buildTree(employees);
+    const [employeesData, designationsData] = await Promise.all([
+      fetchOrgStructure(),
+      api.getDesignations().catch(() => [] as Designation[]),
+    ]);
+    setEmployees(employeesData);
+    const safeDesignations = (designationsData as Designation[]) || [];
+    setDesignations(safeDesignations);
+    const orgTree = buildTree(employeesData, safeDesignations);
     setTree(orgTree);
     setLoading(false);
   };
@@ -421,7 +480,7 @@ export default function EnhancedOrgChart() {
   useEffect(() => {
     const orgTree = buildTree(filteredEmployees);
     setTree(orgTree);
-  }, [filteredEmployees]);
+  }, [filteredEmployees, designations]);
 
   const metrics = useMemo(() => {
     const branchCounts: Record<string, number> = {};

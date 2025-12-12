@@ -350,6 +350,9 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
     const result = await query(
       `SELECT 
         e.*,
+        d.name as designation_name,
+        d.level as designation_level,
+        d.parent_designation_id as designation_parent_id,
         json_build_object(
           'first_name', p.first_name,
           'last_name', p.last_name,
@@ -360,6 +363,7 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
         ${assignmentSelectFragment}
       FROM employees e
       JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN designations d ON d.id = e.designation_id
       WHERE e.tenant_id = $1 AND e.status = 'active'
       ORDER BY e.employee_id`,
       [tenantId]
