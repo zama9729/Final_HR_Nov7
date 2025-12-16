@@ -599,7 +599,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const timesheet = timesheetResult.rows[0] || null;
 
-    // First, check for timesheet entries created from clock in/out (source = 'api')
+    // First, check for timesheet entries created from clock in/out
+    // Prefer entries created by clock endpoint (source = 'punch'), but also support legacy 'api' entries
     // These entries have start_time_utc and end_time_utc which are the actual clock times
     const clockEntriesResult = await query(
       `SELECT 
@@ -614,7 +615,7 @@ router.get('/', authenticateToken, async (req, res) => {
          AND tenant_id = $2
          AND work_date >= $3::date
          AND work_date <= $4::date
-         AND source = 'api'
+         AND source IN ('punch', 'api')
        ORDER BY work_date, start_time_utc`,
       [employeeId, tenantId, weekStart, weekEnd]
     );
@@ -698,7 +699,7 @@ router.get('/', authenticateToken, async (req, res) => {
       let clockOut = clockEntry?.last_out || punch?.last_out || null;
       let manualIn = existing?.manual_in || null;
       let manualOut = existing?.manual_out || null;
-      let source = existing?.source || (clockEntry ? 'api' : (manualIn || manualOut ? 'manual_edit' : 'punch'));
+      let source = existing?.source || (clockEntry ? 'punch' : (manualIn || manualOut ? 'manual_edit' : 'punch'));
 
       // Prefer manual overrides if present
       const effectiveIn = manualIn || clockIn;

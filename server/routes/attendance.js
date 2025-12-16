@@ -203,7 +203,7 @@ router.post('/punch', authenticateToken, punchRateLimit, async (req, res) => {
             timesheet_id, employee_id, work_date, hours, tenant_id, source, 
             attendance_event_id, start_time_utc, end_time_utc, payroll_status, description
           )
-          VALUES ($1, $2, $3, $4, $5, 'api', $6, $7, $8, 'pending_for_payroll', 'Punch In/Out')
+          VALUES ($1, $2, $3, $4, $5, 'punch', $6, $7, $8, 'pending_for_payroll', 'Punch In/Out')
           RETURNING id`,
           [
             timesheetId,
@@ -1129,7 +1129,7 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
           timesheet_id, employee_id, work_date, hours, tenant_id, source, 
           attendance_event_id, start_time_utc, end_time_utc, payroll_status, description
         )
-        VALUES ($1, $2, $3, $4, $5, 'api', $6, $7, $8, 'pending_for_payroll', 'Punch In/Out')
+        VALUES ($1, $2, $3, $4, $5, 'punch', $6, $7, $8, 'pending_for_payroll', 'Punch In/Out')
         RETURNING id`,
         [
           timesheetId,

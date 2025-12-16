@@ -97,41 +97,18 @@ router.post('/employees/:id/skills', authenticateToken, async (req, res) => {
     }
     
     const result = await withClient(async (client) => {
-      // Check if tenant_id column exists
-      const colCheck = await client.query(`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'skills' AND column_name = 'tenant_id'
-      `);
-      const hasTenantId = colCheck.rows.length > 0;
-      
-      if (hasTenantId) {
-        // Multi-tenant: use tenant_id in conflict
-        return client.query(
-          `INSERT INTO skills (employee_id, name, level, years_experience, last_used_date, tenant_id)
-           VALUES ($1,$2,$3,$4,$5,$6)
-           ON CONFLICT (tenant_id, employee_id, lower(name)) DO UPDATE
-             SET level = EXCLUDED.level,
-                 years_experience = COALESCE(EXCLUDED.years_experience, skills.years_experience),
-                 last_used_date = COALESCE(EXCLUDED.last_used_date, skills.last_used_date),
-                 updated_at = now()
-           RETURNING *`,
-          [id, name, level, years_experience || 0, last_used_date || null, tenant]
-        );
-      } else {
-        // Single tenant: use employee_id and name only
-        return client.query(
-          `INSERT INTO skills (employee_id, name, level, years_experience, last_used_date)
-           VALUES ($1,$2,$3,$4,$5)
-           ON CONFLICT (employee_id, lower(name)) DO UPDATE
-             SET level = EXCLUDED.level,
-                 years_experience = COALESCE(EXCLUDED.years_experience, skills.years_experience),
-                 last_used_date = COALESCE(EXCLUDED.last_used_date, skills.last_used_date),
-                 updated_at = now()
-           RETURNING *`,
-          [id, name, level, years_experience || 0, last_used_date || null]
-        );
-      }
+      // Always insert tenant_id; use unique index on (employee_id, lower(name))
+      return client.query(
+        `INSERT INTO skills (employee_id, name, level, years_experience, last_used_date, tenant_id)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (employee_id, lower(name)) DO UPDATE
+           SET level = EXCLUDED.level,
+               years_experience = COALESCE(EXCLUDED.years_experience, skills.years_experience),
+               last_used_date = COALESCE(EXCLUDED.last_used_date, skills.last_used_date),
+               updated_at = now()
+         RETURNING *`,
+        [id, name, level, years_experience || 0, last_used_date || null, tenant]
+      );
     }, tenant);
     if (result.rows && result.rows.length > 0) {
       res.json(result.rows[0]);

@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ProfilePicture } from "@/components/ProfilePicture";
 import {
   Select,
   SelectContent,
@@ -230,7 +231,16 @@ function OrgChartNode({
               >
                 {/* Profile Picture */}
                 <Avatar className="h-24 w-24 border-2 border-white dark:border-slate-700 shadow-inner">
-                  <AvatarImage src={node.profiles.profile_picture_url || undefined} alt={fullName} />
+                  {node.profiles?.profile_picture_url ? (
+                    <ProfilePicture
+                      userId={node.id}
+                      src={node.profiles.profile_picture_url}
+                      className="h-full w-full object-cover"
+                      alt={fullName}
+                    />
+                  ) : (
+                    <AvatarImage src={undefined} alt={fullName} />
+                  )}
                   <AvatarFallback className="bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900 dark:to-indigo-900 text-blue-700 dark:text-blue-200 text-lg font-semibold">
                     {initials || "?"}
                   </AvatarFallback>
