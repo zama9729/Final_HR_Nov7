@@ -2,6 +2,15 @@ import express from 'express';
 import { query, queryWithOrg } from '../db/pool.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 
+// Helper function to check if user has HR role
+async function isHrUser(userId) {
+  const result = await query(
+    `SELECT role FROM user_roles WHERE user_id = $1 AND role IN ('hr', 'director', 'ceo', 'admin')`,
+    [userId]
+  );
+  return result.rows.length > 0;
+}
+
 // Ensure document infrastructure exists (for onboarding documents)
 let ensureDocumentInfraPromise = null;
 const ensureDocumentInfra = async () => {
@@ -393,6 +402,97 @@ router.get('/me/missing-data', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get missing data error:', error);
     res.status(500).json({ error: error.message || 'Failed to get missing data' });
+  }
+});
+
+// Get documents for an employee (Employee can view their own, HR can view any)
+router.get('/:employeeId/documents', authenticateToken, async (req, res) => {
+  try {
+    await ensureDocumentInfra();
+    const userId = req.user.id;
+    const employeeId = req.params.employeeId;
+    const { status, doc_type } = req.query;
+
+    // Verify employee belongs to user OR user is HR
+    const employeeResult = await query(
+      `SELECT e.id, e.user_id, e.tenant_id 
+       FROM employees e 
+       WHERE e.id = $1`,
+      [employeeId]
+    );
+
+    if (employeeResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const employee = employeeResult.rows[0];
+    const userTenantId = req.orgId; // Set by authenticateToken middleware
+
+    // Check if user is viewing their own documents OR is HR
+    const isOwnEmployee = employee.user_id === userId;
+    const isHr = await isHrUser(userId);
+
+    if (!isOwnEmployee && !isHr) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Verify same tenant
+    if (employee.tenant_id !== userTenantId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Build query with optional filters
+    // Note: hr_documents table doesn't have doc_type, tenant_id, or some other columns
+    let queryStr = `
+      SELECT 
+        id, object_key, filename, size_bytes, content_type,
+        verification_status, verified_by, verified_at, hr_notes,
+        uploaded_by, uploaded_at, checksum, verified, created_at, updated_at
+      FROM hr_documents
+      WHERE employee_id = $1
+    `;
+    const params = [employeeId];
+    let paramIndex = 2;
+
+    if (status) {
+      queryStr += ` AND verification_status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
+    }
+
+    // Note: doc_type filter removed since column doesn't exist
+    // If needed, could filter by filename pattern or add doc_type column later
+
+    queryStr += ` ORDER BY created_at DESC`;
+
+    const result = await query(queryStr, params);
+
+    res.json({
+      documents: result.rows.map(doc => ({
+        id: doc.id,
+        docType: null, // Column doesn't exist in table
+        objectKey: doc.object_key,
+        filename: doc.filename,
+        fileSize: doc.size_bytes,
+        contentType: doc.content_type,
+        verificationStatus: doc.verification_status,
+        verifiedBy: doc.verified_by,
+        verifiedAt: doc.verified_at,
+        verificationNotes: doc.hr_notes,
+        consent: null, // Column doesn't exist in table
+        notes: doc.hr_notes,
+        source: null, // Column doesn't exist in table
+        uploadedBy: doc.uploaded_by,
+        uploadedAt: doc.uploaded_at,
+        checksum: doc.checksum,
+        verified: doc.verified,
+        createdAt: doc.created_at,
+        updatedAt: doc.updated_at,
+      })),
+    });
+  } catch (error) {
+    console.error('Get onboarding documents error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch documents' });
   }
 });
 
