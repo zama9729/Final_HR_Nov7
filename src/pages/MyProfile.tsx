@@ -56,7 +56,7 @@ interface SimpleEmployee {
 }
 
 export default function MyProfile() {
-  const { userRole } = useAuth();
+  const { userRole, user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [employee, setEmployee] = useState<SimpleEmployee | null>(null);
@@ -328,9 +328,9 @@ export default function MyProfile() {
                       <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-gray-200 bg-gray-100">
                         <Avatar className="h-full w-full">
                           {employee?.id && employee.profiles?.profile_picture_url ? (
-                            <ProfilePicture 
-                              userId={employee.id} 
-                              src={employee.profiles.profile_picture_url} 
+                            <ProfilePicture
+                              userId={user?.id || ''}
+                              src={employee.profiles.profile_picture_url}
                             />
                           ) : (
                             <AvatarImage src={undefined} />

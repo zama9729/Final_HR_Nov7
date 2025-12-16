@@ -22,24 +22,19 @@ const ensureAuditLogsTable = async () => {
       await query(`
         CREATE TABLE IF NOT EXISTS audit_logs (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-          tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-          actor_id UUID REFERENCES profiles(id),
-          actor_role TEXT,
+          org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+          actor_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
           action TEXT NOT NULL,
-          entity_type TEXT NOT NULL,
-          entity_id UUID,
-          reason TEXT,
-          details JSONB DEFAULT '{}'::jsonb,
-          diff JSONB,
-          scope TEXT,
+          object_type TEXT NOT NULL,
+          object_id UUID,
+          payload JSONB DEFAULT '{}'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
 
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id);
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_org_id ON audit_logs(org_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_user_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_object ON audit_logs(object_type, object_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
       `);
     } catch (err) {
       console.error('Error creating audit_logs table:', err);
@@ -103,31 +98,32 @@ export async function audit({
     }
 
     // Insert audit log
+    // Store rich payload in a single JSONB column to match existing schema
+    const payload = {
+      reason,
+      details,
+      diff,
+      scope,
+      actor_role: actorRole,
+    };
+
     const result = await query(
       `INSERT INTO audit_logs (
-        tenant_id,
-        actor_id,
-        actor_role,
+        org_id,
+        actor_user_id,
         action,
-        entity_type,
-        entity_id,
-        reason,
-        details,
-        diff,
-        scope
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        object_type,
+        object_id,
+        payload
+      ) VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *`,
       [
         tenantId,
         actorId,
-        actorRole,
         action,
         entityType,
         entityId,
-        reason,
-        JSON.stringify(details),
-        diff ? JSON.stringify(diff) : null,
-        scope,
+        payload,
       ]
     );
 
@@ -172,12 +168,12 @@ export async function getAuditLogs(filters = {}) {
     let paramIndex = 1;
 
     if (tenantId) {
-      conditions.push(`al.tenant_id = $${paramIndex++}`);
+      conditions.push(`al.org_id = $${paramIndex++}`);
       params.push(tenantId);
     }
 
     if (actorId) {
-      conditions.push(`al.actor_id = $${paramIndex++}`);
+      conditions.push(`al.actor_user_id = $${paramIndex++}`);
       params.push(actorId);
     }
 
@@ -192,13 +188,13 @@ export async function getAuditLogs(filters = {}) {
           paramIndex += entityTypes.length;
         }
       } else {
-        conditions.push(`al.entity_type = $${paramIndex++}`);
+        conditions.push(`al.object_type = $${paramIndex++}`);
         params.push(entityType);
       }
     }
 
     if (entityId) {
-      conditions.push(`al.entity_id = $${paramIndex++}`);
+      conditions.push(`al.object_id = $${paramIndex++}`);
       params.push(entityId);
     }
 
@@ -231,7 +227,7 @@ export async function getAuditLogs(filters = {}) {
           'last_name', p.last_name
         ) as actor
        FROM audit_logs al
-       LEFT JOIN profiles p ON p.id = al.actor_id
+       LEFT JOIN profiles p ON p.id = al.actor_user_id
        ${whereClause}
        ORDER BY al.created_at DESC
        LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,

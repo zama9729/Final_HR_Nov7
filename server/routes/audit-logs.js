@@ -35,19 +35,22 @@ router.get('/', requireRole('ceo', 'hr', 'admin', 'accountant'), async (req, res
     });
 
     res.json(
-      logs.map((log) => ({
-        id: log.id,
-        actor: log.actor || null,
-        actor_role: log.actor_role,
-        action: log.action,
-        entity_type: log.entity_type,
-        entity_id: log.entity_id,
-        reason: log.reason,
-        details: log.details,
-        diff: log.diff,
-        scope: log.scope,
-        created_at: log.created_at,
-      }))
+      logs.map((log) => {
+        const payload = log.payload || {};
+        return {
+          id: log.id,
+          actor: log.actor || null,
+          actor_role: payload.actor_role || null,
+          action: log.action,
+          entity_type: log.object_type,
+          entity_id: log.object_id,
+          reason: payload.reason || null,
+          details: payload.details || null,
+          diff: payload.diff || null,
+          scope: payload.scope || null,
+          created_at: log.created_at,
+        };
+      })
     );
   } catch (error) {
     console.error('Audit log fetch error:', error);

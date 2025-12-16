@@ -1210,28 +1210,32 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
 
     // If not an employee, assume admin (they can download any payslip in their tenant)
 
-    // Get payslip with employee and cycle details including all employee fields
+    // Get payslip with employee and cycle details including employee master data
+    // We join payroll_employee_payslip_view (cycle + payroll figures) with payroll_employee_view (master data)
     const payslipResult = await query(
       `
       SELECT 
-        *,
-        full_name,
-        employee_code,
-        email,
-        designation,
-        department,
-        date_of_joining,
-        pan_number,
-        bank_account_number,
-        bank_ifsc,
-        bank_name,
-        month,
-        year,
-        payday,
-        company_name as tenant_name
-      FROM payroll_employee_payslip_view
-      WHERE payslip_id = $1 
-        AND org_id = $2
+        pev.*,
+        ev.full_name,
+        ev.employee_code,
+        ev.email,
+        ev.designation,
+        ev.department,
+        ev.date_of_joining,
+        ev.pan_number,
+        ev.bank_account_number,
+        ev.ifsc_code AS bank_ifsc,
+        ev.bank_name,
+        pc.month,
+        pc.year,
+        pc.payday,
+        o.name AS tenant_name
+      FROM payroll_employee_payslip_view pev
+      JOIN payroll_cycles pc ON pc.id = pev.payroll_cycle_id
+      JOIN organizations o ON o.id = pev.org_id
+      JOIN payroll_employee_view ev ON ev.employee_id = pev.employee_id AND ev.org_id = pev.org_id
+      WHERE pev.payslip_id = $1 
+        AND pev.org_id = $2
       `,
       [payslipId, tenantId]
     );

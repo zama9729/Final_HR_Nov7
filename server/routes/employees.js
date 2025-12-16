@@ -543,12 +543,27 @@ router.get('/profile-picture/:userId', authenticateToken, async (req, res) => {
     }
 
     // Get the profile picture URL from database - ensure organization scoping
-    const profileResult = await query(
+    let profileResult = await query(
       `SELECT profile_picture_url, tenant_id 
        FROM profiles 
        WHERE id = $1 AND tenant_id = $2`,
       [userId, requesterTenantId]
     );
+
+    // If no profile found by userId, treat param as an employee_id and resolve to profile
+    if (!profileResult.rows.length) {
+      const empProfileResult = await query(
+        `SELECT p.profile_picture_url, p.tenant_id
+         FROM employees e
+         JOIN profiles p ON p.id = e.user_id
+         WHERE e.id = $1 AND e.tenant_id = $2`,
+        [userId, requesterTenantId]
+      );
+
+      if (empProfileResult.rows.length) {
+        profileResult = empProfileResult;
+      }
+    }
 
     if (!profileResult.rows.length) {
       // Check if profile exists but in different tenant (for better error message)
