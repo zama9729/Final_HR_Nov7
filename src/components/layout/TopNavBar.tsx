@@ -30,6 +30,8 @@ import { Notifications } from "@/components/Notifications";
 import { ReminderCountdown } from "@/components/ReminderCountdown";
 import { useNavigate } from "react-router-dom";
 import { getMenuItemsForProfile, type NavItem, type NavGroup } from "@/config/navigation";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ProfilePicture } from "@/components/ProfilePicture";
 
 export function TopNavBar() {
   const { user, userRole, logout } = useAuth();
@@ -51,6 +53,7 @@ export function TopNavBar() {
   const { attendanceSettings } = useOrgSetup();
   const [payrollIntegrationEnabled, setPayrollIntegrationEnabled] = useState(true);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+  const [profilePictureUrl, setProfilePictureUrl] = useState<string | undefined>(undefined);
 
   const captureMethod = attendanceSettings?.capture_method === 'clock_in_out' ? 'clock_in_out' : 'timesheets';
   const isClockMode = captureMethod === 'clock_in_out';
@@ -72,6 +75,39 @@ export function TopNavBar() {
     const enabled = import.meta.env.VITE_PAYROLL_INTEGRATION_ENABLED !== 'false';
     setPayrollIntegrationEnabled(enabled);
   }, []);
+
+  // Load current user's profile picture once on mount / when user changes
+  useEffect(() => {
+    const loadProfilePicture = async () => {
+      if (!user?.id) {
+        setProfilePictureUrl(undefined);
+        return;
+      }
+      try {
+        // This returns { url: string } when a profile picture exists
+        const result = await api.getProfilePictureUrl(user.id);
+        if (result?.url) {
+          setProfilePictureUrl(result.url);
+        } else {
+          setProfilePictureUrl(undefined);
+        }
+      } catch (error: any) {
+        // Silently ignore 404 / "No profile picture" so we just show initials
+        const msg = error?.message || '';
+        const isNotFound =
+          msg.includes('not found') ||
+          msg.includes('404') ||
+          msg.includes('No profile picture') ||
+          msg.includes('access denied');
+        if (!isNotFound) {
+          console.error('Failed to load topbar profile picture:', error);
+        }
+        setProfilePictureUrl(undefined);
+      }
+    };
+
+    loadProfilePicture();
+  }, [user?.id]);
 
   useEffect(() => {
     if (user) {
@@ -426,9 +462,23 @@ export function TopNavBar() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="gap-2 h-9 px-2 flex items-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none">
-                  <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-400/20 via-indigo-400/20 to-purple-400/20 backdrop-blur-sm flex items-center justify-center">
-                    <User className="h-4 w-4 text-slate-700" />
-                  </div>
+                  <Avatar className="h-7 w-7 border border-slate-200 bg-white">
+                    {user?.id && profilePictureUrl ? (
+                      <ProfilePicture
+                        userId={user.id}
+                        src={profilePictureUrl}
+                        className="h-full w-full object-cover"
+                        alt={user.firstName || user.email}
+                      />
+                    ) : (
+                      <AvatarImage src={undefined} />
+                    )}
+                    <AvatarFallback className="text-xs font-semibold text-slate-700">
+                      {user?.firstName
+                        ? user.firstName.charAt(0).toUpperCase()
+                        : (user?.email || "U").charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
                   <span className="hidden lg:inline-block text-sm font-medium">
                     {getRoleLabel(userRole)}
                   </span>

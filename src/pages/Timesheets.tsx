@@ -133,16 +133,10 @@ export default function Timesheets() {
       
       // Fetch employee state
       if (empId?.id) {
-        const resp = await fetch(
-          `${import.meta.env.VITE_API_URL}/api/employees/${empId.id}`,
-          { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
-        );
-        if (resp.ok) {
-          const data = await resp.json();
-          setEmployeeState(data.state || '');
-          if (!selectedState || selectedState === 'all') {
-            setSelectedState(data.state || 'all');
-          }
+        const data = await api.get(`/api/employees/${empId.id}`);
+        setEmployeeState(data.state || '');
+        if (!selectedState || selectedState === 'all') {
+          setSelectedState(data.state || 'all');
         }
         
         // Fetch assigned projects
@@ -234,20 +228,13 @@ export default function Timesheets() {
       const params = new URLSearchParams({ year: currentYear.toString() });
       if (stateParam) params.append('state', stateParam);
       
-      const resp = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/holidays/employee/${employeeId}?${params}`,
-        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
-      );
-      
-      if (resp.ok) {
-        const data = await resp.json();
-        // Normalize dates when setting holidays
-        const normalizedHolidays = (data.holidays || []).map((h: any) => ({
-          ...h,
-          date: normalizeDate(h.date)
-        })).filter((h: any) => h.date);
-        setHolidays(normalizedHolidays);
-      }
+      const data = await api.get(`/api/holidays/employee/${employeeId}?${params}`);
+      // Normalize dates when setting holidays
+      const normalizedHolidays = (data.holidays || []).map((h: any) => ({
+        ...h,
+        date: normalizeDate(h.date)
+      })).filter((h: any) => h.date);
+      setHolidays(normalizedHolidays);
     } catch (error) {
       console.error('Error fetching holidays:', error);
     }
@@ -261,17 +248,10 @@ export default function Timesheets() {
         params.append('state', selectedState);
       }
       
-      const resp = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/holidays/calendar?${params}`,
-        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
-      );
-      
-      if (resp.ok) {
-        const data = await resp.json();
-        setHolidayCalendar(data);
-        if (data.states && data.states.length > 0) {
-          setAvailableStates(data.states);
-        }
+      const data = await api.get(`/api/holidays/calendar?${params}`);
+      setHolidayCalendar(data);
+      if (data.states && data.states.length > 0) {
+        setAvailableStates(data.states);
       }
     } catch (error) {
       console.error('Error fetching holiday calendar:', error);

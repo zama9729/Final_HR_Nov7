@@ -158,20 +158,13 @@ export default function MyProfile() {
       setLoadingShifts(true);
       const today = new Date();
       const nextMonth = addDays(today, 30);
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/scheduling/employee/${employeeId}/shifts?start_date=${format(
+      const data = await api.get(
+        `/api/scheduling/employee/${employeeId}/shifts?start_date=${format(
           today,
           'yyyy-MM-dd',
         )}&end_date=${format(nextMonth, 'yyyy-MM-dd')}`,
-        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } },
       );
-
-      if (response.ok) {
-        const data = await response.json();
-        setUpcomingShifts(data.shifts || []);
-      } else {
-        setUpcomingShifts([]);
-      }
+      setUpcomingShifts(data.shifts || []);
     } catch (error) {
       console.error('Error fetching upcoming shifts:', error);
       setUpcomingShifts([]);
