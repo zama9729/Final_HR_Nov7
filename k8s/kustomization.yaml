@@ -1,0 +1,33 @@
+# Optional: Kustomize configuration for easier management
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hr-suite
+
+resources:
+  - namespace.yaml
+  - configmaps.yaml
+  - secrets.yaml
+  - postgres-deployment.yaml
+  - redis-deployment.yaml
+  - minio-deployment.yaml
+  - api-deployment.yaml
+  - payroll-api-deployment.yaml
+  - rag-service-deployment.yaml
+  - frontend-deployment.yaml
+  - services.yaml
+  - ingress.yaml
+
+# Uncomment and configure for different environments
+# commonLabels:
+#   environment: production
+#   app: hr-suite
+
+# images:
+#   - name: hr-suite-api
+#     newName: your-registry/hr-suite-api
+#     newTag: v1.0.0
+#   - name: hr-suite-frontend
+#     newName: your-registry/hr-suite-frontend
+#     newTag: v1.0.0
+

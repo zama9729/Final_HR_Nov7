@@ -1,0 +1,10 @@
+# Ignore sensitive files
+secrets.yaml
+secrets-*.yaml
+*.key
+*.pem
+*.crt
+
+# Keep secrets-template.yaml for reference
+!secrets-template.yaml
+

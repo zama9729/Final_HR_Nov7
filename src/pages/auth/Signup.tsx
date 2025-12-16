@@ -78,7 +78,7 @@ export default function Signup() {
         title: "Account created!",
         description: "Welcome to your HR platform.",
       });
-      navigate("/onboarding");
+      navigate("/dashboard");
     } catch (error: any) {
       toast({
         title: "Signup failed",

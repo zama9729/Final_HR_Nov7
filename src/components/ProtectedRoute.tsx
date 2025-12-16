@@ -62,10 +62,11 @@ export function ProtectedRoute({
 
   const isSetupRoute = location.pathname.startsWith("/setup");
   const isOnboardingRoute = location.pathname === "/onboarding";
+  const isOnboardingWizardRoute = location.pathname === "/onboarding-wizard";
   const requiresSetupGate = shouldGate && !!setupStatus && !setupStatus.isCompleted;
 
   // Show initial loading while auth/setup state resolves
-  if (isLoading || (shouldGate && setupLoading && !isSetupRoute && !isOnboardingRoute)) {
+  if (isLoading || (shouldGate && setupLoading && !isSetupRoute && !isOnboardingRoute && !isOnboardingWizardRoute)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-pulse">Loading...</div>
@@ -78,18 +79,19 @@ export function ProtectedRoute({
     return <Navigate to="/auth/login" replace />;
   }
 
-  // Redirect to new onboarding wizard instead of old setup
-  if (requiresSetupGate && !isOnboardingRoute && !isSetupRoute) {
-    return <Navigate to="/onboarding" replace />;
+  // Redirect to organization onboarding wizard if setup is not complete (for admin roles)
+  // This is different from employee onboarding (/onboarding) which is for personal details
+  if (requiresSetupGate && !isOnboardingWizardRoute && !isOnboardingRoute && !isSetupRoute) {
+    return <Navigate to="/onboarding-wizard" replace />;
   }
 
   // Redirect old setup route to new onboarding wizard
   if (isSetupRoute) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/onboarding-wizard" replace />;
   }
 
-  // If setup is completed and user is on onboarding page, redirect to dashboard
-  if (isOnboardingRoute && shouldGate && setupStatus?.isCompleted) {
+  // If setup is completed and user is on onboarding wizard page, redirect to dashboard
+  if (isOnboardingWizardRoute && shouldGate && setupStatus?.isCompleted) {
     return <Navigate to="/dashboard" replace />;
   }
 

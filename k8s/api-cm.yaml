@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: hr-suite
+data:
+  NODE_ENV: "production"
+  PORT: "3001"
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "hr_suite"
+  DB_USER: "postgres"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  MINIO_ENABLED: "true"
+  MINIO_ENDPOINT: "http://minio-service:9000"
+  MINIO_BUCKET: "hr-docs"
+  DOCS_STORAGE_DRIVER: "s3"
+  DOCS_STORAGE_BUCKET: "hr-docs"
+  AWS_S3_ENDPOINT: "http://minio-service:9000"
+  AWS_S3_FORCE_PATH_STYLE: "true"
+  PAYROLL_API_URL: "http://payroll-api-service:4000"
+  PAYROLL_BASE_URL: "http://payroll-frontend-service:80"
+  PAYROLL_INTEGRATION_ENABLED: "true"
+  PAYROLL_PROVISION_URL: "http://payroll-api-service:4000/api/provision/tenant"

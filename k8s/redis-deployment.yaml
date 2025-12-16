@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: hr-suite
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: hr-suite
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: hostpath  # Use cluster default hostpath on docker-desktop
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payroll-redis
+  namespace: hr-suite
+  labels:
+    app: payroll-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payroll-redis
+  template:
+    metadata:
+      labels:
+        app: payroll-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: payroll-redis-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: payroll-redis-pvc
+  namespace: hr-suite
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: hostpath  # Use cluster default hostpath on docker-desktop
+

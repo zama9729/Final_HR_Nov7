@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: hr-suite
+data:
+  POSTGRES_DB: "hr_suite"
+  POSTGRES_USER: "postgres"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: hr-suite
+data:
+  NODE_ENV: "production"
+  PORT: "3001"
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "hr_suite"
+  DB_USER: "postgres"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  MINIO_ENABLED: "true"
+  MINIO_ENDPOINT: "http://minio-service:9000"
+  MINIO_BUCKET: "hr-docs"
+  DOCS_STORAGE_DRIVER: "s3"
+  DOCS_STORAGE_BUCKET: "hr-docs"
+  AWS_S3_ENDPOINT: "http://minio-service:9000"
+  AWS_S3_FORCE_PATH_STYLE: "true"
+  PAYROLL_API_URL: "http://payroll-api-service:4000"
+  PAYROLL_BASE_URL: "http://localhost:8081"
+  PAYROLL_INTEGRATION_ENABLED: "true"
+  PAYROLL_PROVISION_URL: "http://payroll-api-service:4000/api/provision/tenant"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payroll-api-config
+  namespace: hr-suite
+data:
+  NODE_ENV: "production"
+  PORT: "4000"
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "hr_suite"
+  DB_USER: "postgres"
+  REDIS_URL: "redis://payroll-redis-service:6379"
+  PAYROLL_BASE_URL: "http://payroll-api-service:4000"
+  PAYROLL_FRONTEND_URL: "http://localhost:8081"
+  HR_BASE_URL: "http://api-service:3001"
+  HR_API_URL: "http://api-service:3001"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-service-config
+  namespace: hr-suite
+data:
+  REDIS_URL: "redis://redis-service:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minio-config
+  namespace: hr-suite
+data:
+  MINIO_ROOT_USER: "minioadmin"
+  MINIO_BUCKET: "hr-docs"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: hr-suite
+data:
+  VITE_API_URL: "http://localhost:3001"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payroll-frontend-config
+  namespace: hr-suite
+data:
+  VITE_API_URL: "http://payroll-api-service:4000"
+  VITE_PAYROLL_BASE_URL: "http://payroll-frontend-service:80"
+

@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-service
+  namespace: hr-suite
+  labels:
+    app: rag-service
+spec:
+  replicas: 1  # Scale as needed
+  selector:
+    matchLabels:
+      app: rag-service
+  template:
+    metadata:
+      labels:
+        app: rag-service
+    spec:
+      containers:
+      - name: rag-service
+        image: hr-suite-rag-service:latest  # Change to your image registry
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: rag-service-config
+        - secretRef:
+            name: rag-service-secrets
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: rag-service-secrets
+              key: DATABASE_URL
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+      volumes:
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: rag-uploads-pvc
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres-service -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rag-uploads-pvc
+  namespace: hr-suite
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: hostpath  # Use cluster default hostpath on docker-desktop
+

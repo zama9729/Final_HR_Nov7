@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: hr-suite
+  labels:
+    app: api
+spec:
+  replicas: 2  # Scale as needed
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - name: api
+        image: hr-suite-api:latest  # Change to your image registry
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3001
+        envFrom:
+        - configMapRef:
+            name: api-config
+        - secretRef:
+            name: api-secrets
+        env:
+        - name: FRONTEND_URL
+          value: "http://frontend-service:80"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres-service -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+      - name: wait-for-redis
+        image: redis:7-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until redis-cli -h redis-service ping; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+
+

@@ -13,7 +13,7 @@
  */
 
 import bcrypt from 'bcryptjs';
-import { query } from '../db/pool.js';
+import { createPool, query } from '../db/pool.js';
 
 const PASSWORD_HASH = await bcrypt.hash('password123', 10);
 
@@ -21,6 +21,9 @@ async function seed() {
   console.log('🌱 Starting seed data creation...');
 
   try {
+    // Ensure DB pool is initialized before running any queries
+    await createPool();
+
     // 1. Create organization/tenant
     console.log('Creating organization...');
     const orgResult = await query(
