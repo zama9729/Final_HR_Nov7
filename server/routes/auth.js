@@ -354,9 +354,20 @@ router.post('/check-email', async (req, res) => {
 
     const hasPassword = authResult.rows.length > 0 && authResult.rows[0].password_hash;
 
+    // Check if employee must change password (for new employees)
+    const employeeResult = await query(
+      `SELECT must_change_password FROM employees WHERE user_id = $1`,
+      [user.id]
+    );
+
+    const mustChangePassword = employeeResult.rows.length > 0 && employeeResult.rows[0].must_change_password === true;
+
+    // First login if: no password OR must change password
+    const isFirstLogin = !hasPassword || mustChangePassword;
+
     return res.json({
       exists: true,
-      firstLogin: !hasPassword,
+      firstLogin: isFirstLogin,
       companyName: user.company_name || 'Company',
       companyLogoUrl: user.company_logo_url || null
     });
@@ -396,13 +407,24 @@ router.post('/first-time-setup', async (req, res) => {
 
     const user = userResult.rows[0];
 
+    // Check if employee must change password (for new employees)
+    const employeeCheck = await query(
+      `SELECT must_change_password FROM employees WHERE user_id = $1`,
+      [user.id]
+    );
+
+    const mustChangePassword = employeeCheck.rows.length > 0 && employeeCheck.rows[0].must_change_password === true;
+
     // Check if password already set
     const authCheck = await query(
       `SELECT password_hash FROM user_auth WHERE user_id = $1`,
       [user.id]
     );
 
-    if (authCheck.rows.length > 0 && authCheck.rows[0].password_hash) {
+    const hasPassword = authCheck.rows.length > 0 && authCheck.rows[0].password_hash;
+
+    // Allow password setup if: no password OR must change password
+    if (hasPassword && !mustChangePassword) {
       return res.status(400).json({ error: 'Password already set. Please use regular login.' });
     }
 
@@ -417,6 +439,16 @@ router.post('/first-time-setup', async (req, res) => {
        DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = now()`,
       [user.id, hashedPassword]
     );
+
+    // Clear must_change_password flag after password is set
+    if (mustChangePassword) {
+      await query(
+        `UPDATE employees
+         SET must_change_password = false, updated_at = now()
+         WHERE user_id = $1`,
+        [user.id]
+      );
+    }
 
     // Get user role and org_id
     const roleResult = await query(
