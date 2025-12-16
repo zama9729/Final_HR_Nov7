@@ -402,11 +402,16 @@ class ApiClient {
   }
 
   // Smart Memo
-  async saveSmartMemo(data: { memoText: string; baseDate: string }) {
+  async saveSmartMemo(data: { memoText: string; baseDate: string; mentions?: any[] }) {
     return this.request('/api/calendar/smart-memo', {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  // Custom request method for flexible API calls
+  async customRequest(endpoint: string, options: RequestInit = {}) {
+    return this.request(endpoint, options);
   }
 
   // Reminders

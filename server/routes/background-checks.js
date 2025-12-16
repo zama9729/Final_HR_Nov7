@@ -18,6 +18,31 @@ const getUserRoles = async (userId) => {
   return rows.map((r) => r.role?.toLowerCase()).filter(Boolean);
 };
 
+const notifyOnboardingApproval = async ({ tenantId, employeeId, title, message }) => {
+  if (!tenantId || !employeeId) {
+    console.warn('notifyOnboardingApproval: Missing tenantId or employeeId', { tenantId, employeeId });
+    return;
+  }
+  try {
+    const userResult = await query('SELECT user_id FROM employees WHERE id = $1', [employeeId]);
+    const userId = userResult.rows[0]?.user_id;
+    if (!userId) {
+      console.warn('notifyOnboardingApproval: No user_id found for employee', employeeId);
+      return;
+    }
+
+    const result = await query(
+      `INSERT INTO notifications (tenant_id, user_id, title, message, type, created_at)
+       VALUES ($1, $2, $3, $4, 'onboarding', now())
+       RETURNING id`,
+      [tenantId, userId, title, message]
+    );
+    console.log('Onboarding approval notification sent:', { notificationId: result.rows[0]?.id, userId, employeeId });
+  } catch (error) {
+    console.error('Failed to send onboarding approval notification:', error.message, error.stack);
+  }
+};
+
 router.use((req, res, next) => {
   if (!FEATURE_ENABLED) {
     return res.status(404).json({ error: 'termination_rehire_v1 feature flag disabled' });
@@ -403,10 +428,6 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
     }
     const checkRecord = rows[0];
 
-    if (checkRecord?.employee_id) {
-      await linkDocumentsToBackgroundCheck(checkRecord.id, checkRecord.employee_id);
-    }
-
     const events = await query(
       `
       SELECT * FROM background_check_events
@@ -415,29 +436,51 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       `,
       [req.params.id]
     );
-    const attachmentResult = await query(
-      `
-      SELECT 
-        d.id,
-        d.document_type,
-        d.file_name,
-        d.mime_type,
-        d.file_size,
-        d.status AS document_status,
-        d.storage_key,
-        d.file_path,
-        d.uploaded_at,
-        d.hr_notes,
-        COALESCE(bcd.verification_status::text, bcd.decision, d.status::text) AS decision,
-        bcd.notes,
-        bcd.verified_by,
-        bcd.verified_at
-      FROM background_check_documents bcd
-      JOIN onboarding_documents d ON d.id = bcd.document_id
-      WHERE bcd.background_check_id = $1
-      `,
-      [req.params.id]
-    );
+    
+    // Get all relevant onboarding documents for this employee (both linked and unlinked)
+    // This ensures HR can see all documents even if auto-linking didn't work
+    let attachmentResult = { rows: [] };
+    
+    if (checkRecord?.employee_id) {
+      try {
+        await linkDocumentsToBackgroundCheck(checkRecord.id, checkRecord.employee_id);
+      } catch (linkError) {
+        console.warn('Error linking documents to background check:', linkError.message);
+        // Continue even if linking fails
+      }
+      
+      try {
+        attachmentResult = await query(
+          `
+          SELECT 
+            d.id,
+            d.document_type,
+            d.file_name,
+            d.mime_type,
+            d.file_size,
+            d.status AS document_status,
+            d.storage_key,
+            d.file_path,
+            d.uploaded_at,
+            d.hr_notes,
+            COALESCE(bcd.verification_status::text, bcd.decision, d.status::text) AS decision,
+            COALESCE(bcd.notes, d.hr_notes) AS notes,
+            bcd.verified_by,
+            bcd.verified_at
+          FROM onboarding_documents d
+          LEFT JOIN background_check_documents bcd ON bcd.document_id = d.id AND bcd.background_check_id = $1
+          WHERE (d.employee_id = $2 OR d.candidate_id = $2)
+            AND UPPER(d.document_type) IN ('RESUME', 'ID_PROOF', 'PAN', 'AADHAAR', 'AADHAR', 'PASSPORT', 'EDUCATION_CERT', 'EXPERIENCE_LETTER', 'ADDRESS_PROOF', 'BANK_STATEMENT', 'SIGNED_CONTRACT', 'BG_CHECK_DOC')
+          ORDER BY d.uploaded_at DESC
+          `,
+          [req.params.id, checkRecord.employee_id]
+        );
+      } catch (queryError) {
+        console.error('Error fetching attachments:', queryError);
+        // Return empty attachments array if query fails
+        attachmentResult = { rows: [] };
+      }
+    }
 
     const attachments = await Promise.all(
       attachmentResult.rows.map(async (doc) => {
@@ -468,18 +511,110 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       })
     );
 
-    if (checkRecord.status === 'pending' && attachments.length > 0) {
-      await query(
-        `UPDATE background_checks SET status = 'in_progress', updated_at = now() WHERE id = $1`,
+    // Check if all documents are approved and update status accordingly
+    if (checkRecord?.employee_id && attachments.length > 0) {
+      // Check approval status from background_check_documents table
+      const approvalCheckResult = await query(
+        `SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN verification_status = 'APPROVED' THEN 1 ELSE 0 END) as approved
+         FROM background_check_documents
+         WHERE background_check_id = $1`,
         [checkRecord.id]
       );
-      checkRecord.status = 'in_progress';
+      
+      const { total, approved } = approvalCheckResult.rows[0];
+      const totalCount = parseInt(total) || 0;
+      const approvedCount = parseInt(approved) || 0;
+      
+      if (totalCount > 0 && approvedCount === totalCount) {
+        // All documents approved - mark as completed
+        if (checkRecord.status !== 'completed_green' && checkRecord.status !== 'completed_amber' && checkRecord.status !== 'completed_red') {
+          // Try to add completed_by column if it doesn't exist (idempotent)
+          try {
+            await query(`ALTER TABLE background_checks ADD COLUMN IF NOT EXISTS completed_by UUID REFERENCES profiles(id)`);
+          } catch (alterError) {
+            // Column might already exist, ignore error
+            console.warn('Note: completed_by column check:', alterError.message);
+          }
+          
+          // Update with completed_by if possible
+          try {
+            await query(
+              `UPDATE background_checks 
+               SET status = 'completed_green'::background_check_status_enum, 
+                   completed_at = COALESCE(completed_at, now()),
+                   completed_by = COALESCE(completed_by, $1),
+                   updated_at = now() 
+               WHERE id = $2`,
+              [req.user.id, checkRecord.id]
+            );
+          } catch (updateError) {
+            // Fallback if completed_by column doesn't exist
+            if (updateError.message.includes('completed_by')) {
+              await query(
+                `UPDATE background_checks 
+                 SET status = 'completed_green'::background_check_status_enum, 
+                     completed_at = COALESCE(completed_at, now()),
+                     updated_at = now() 
+                 WHERE id = $1`,
+                [checkRecord.id]
+              );
+            } else {
+              throw updateError;
+            }
+          }
+          
+          // Send notification if not already sent
+          try {
+            if (typeof notifyOnboardingApproval === 'function') {
+              await notifyOnboardingApproval({
+                tenantId,
+                employeeId: checkRecord.employee_id,
+                title: 'Background check completed',
+                message: 'All your documents have been approved. Your onboarding is complete!',
+              });
+            }
+          } catch (notifyError) {
+            console.warn('Could not send notification:', notifyError.message);
+            // Continue even if notification fails
+          }
+          
+          checkRecord.status = 'completed_green';
+        }
+      } else if (checkRecord.status === 'pending' && totalCount > 0) {
+        // Has documents but not all approved - mark as in progress
+        await query(
+          `UPDATE background_checks SET status = 'in_progress'::background_check_status_enum, updated_at = now() WHERE id = $1`,
+          [checkRecord.id]
+        );
+        checkRecord.status = 'in_progress';
+      }
+    }
+
+    // Re-fetch the check record to get the latest status
+    const updatedCheckResult = await query(
+      `SELECT * FROM background_checks WHERE id = $1 AND tenant_id = $2`,
+      [req.params.id, tenantId]
+    );
+    if (updatedCheckResult.rows.length > 0) {
+      Object.assign(checkRecord, updatedCheckResult.rows[0]);
     }
 
     res.json({ ...checkRecord, events: events.rows, attachments });
   } catch (error) {
     console.error('Error fetching background check report:', error);
-    res.status(500).json({ error: 'Failed to fetch report' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      error: 'Failed to fetch report',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

@@ -44,6 +44,8 @@ interface TeamScheduleEvent {
   team_id?: string | null;
   employee_id?: string | null;
   status?: "pending" | "approved" | "declined";
+  is_shared?: boolean;
+  shared_with_employee_ids?: string[];
 }
 
 // Simple helper – inclusive range check on yyyy-MM-dd
@@ -113,13 +115,45 @@ export default function TeamSchedule() {
     fetchInitialEvents();
   }, [currentWeek, selectedTeamId]);
 
+  // Listen for calendar events updates
+  useEffect(() => {
+    const handleCalendarUpdate = () => {
+      fetchInitialEvents();
+    };
+    window.addEventListener('calendar-events-updated', handleCalendarUpdate);
+    return () => {
+      window.removeEventListener('calendar-events-updated', handleCalendarUpdate);
+    };
+  }, []);
+
   useEffect(() => {
     if (selectedTeamId && selectedTeamId !== "all") {
       fetchMembers(selectedTeamId);
     } else {
-      setMembers([]);
+      // When "all" is selected, fetch all employees to show their events
+      fetchAllEmployees();
     }
   }, [selectedTeamId]);
+
+  const fetchAllEmployees = async () => {
+    try {
+      // Fetch all employees from the organization
+      const allEmployees = await api.get('/api/employees?status=active&limit=1000');
+      const employeesAsMembers: TeamMember[] = (allEmployees.employees || allEmployees || []).map((emp: any) => ({
+        id: emp.id,
+        employee_id: emp.id,
+        employee_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || emp.email || emp.employee_id,
+        employee_email: emp.email,
+        employee_id_display: emp.employee_id,
+        position: emp.position,
+        department: emp.department,
+      }));
+      setMembers(employeesAsMembers);
+    } catch (error) {
+      console.error("Failed to fetch all employees:", error);
+      setMembers([]);
+    }
+  };
 
   useEffect(() => {
     if (teamEditDialogOpen && selectedTeamId !== "all") {
@@ -288,6 +322,8 @@ export default function TeamSchedule() {
         end_time: ev.end_time,
         team_id: ev.team_id,
         employee_id: ev.employee_id,
+        is_shared: ev.is_shared || false,
+        shared_with_employee_ids: ev.shared_with_employee_ids || [],
       }));
 
       // Load holidays from calendar API (ignore projects/birthdays for this view)
@@ -480,6 +516,18 @@ export default function TeamSchedule() {
 
   const visibleMembers = members.length > 0 ? members : [];
 
+  // Build a set of visible employee_ids to identify events not tied to current rows
+  const memberEmployeeIds = new Set(visibleMembers.map((m) => m.employee_id));
+  const otherEvents =
+    selectedTeamId === "all"
+      ? events.filter(
+          (ev) =>
+            ev.employee_id &&
+            !memberEmployeeIds.has(ev.employee_id) &&
+            ev.type !== "holiday"
+        )
+      : [];
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -621,7 +669,8 @@ export default function TeamSchedule() {
                         </td>
                       </tr>
                     ) : (
-                      visibleMembers.map((member) => {
+                      <>
+                        {visibleMembers.map((member) => {
                         const fullName = (member.employee_name || "").trim();
 
                         return (
@@ -642,6 +691,7 @@ export default function TeamSchedule() {
                                   coversDate(ev, dateStr) &&
                                   (
                                     ev.employee_id === member.employee_id ||
+                                    (ev.is_shared && ev.shared_with_employee_ids?.includes(member.employee_id)) ||
                                     (!!ev.team_id && selectedTeamId !== "all" && ev.team_id === selectedTeamId)
                                   ),
                               );
@@ -748,7 +798,7 @@ export default function TeamSchedule() {
                                   key={dateStr}
                                   className="px-3 py-2 align-top"
                                 >
-                                  <div className="flex flex-col gap-1">
+                                  <div className="flex flex-col gap-1.5">
                                     {dayEvents.map((ev) => {
                                       const isTimeOff = ev.type === "time_off";
                                       const baseLeaveLabel = ev.title || "Leave";
@@ -782,22 +832,24 @@ export default function TeamSchedule() {
                                       return (
                                         <div
                                           key={ev.id}
-                                          className={`rounded-full px-2 py-1 text-[11px] border shadow-sm ${
+                                          className={`rounded-full px-2 py-1 text-[11px] border shadow-sm whitespace-nowrap ${
                                             isTimeOff
                                               ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                                               : "bg-sky-50 text-sky-800 border-sky-200"
                                           }`}
                                         >
-                                          <span className="font-medium">
-                                            {leaveLabel}
-                                          </span>
-                                          {shouldShowTimestamp && (
-                                            <span className="ml-1 text-[10px] opacity-80">
-                                              <Clock className="inline-block h-3 w-3 mr-0.5 align-middle" />
-                                              {formatTime(ev.start_time || undefined)}
-                                              {ev.end_time ? ` – ${formatTime(ev.end_time)}` : ""}
+                                          <div className="flex items-center gap-1">
+                                            <span className="font-medium truncate">
+                                              {leaveLabel}
                                             </span>
-                                          )}
+                                            {shouldShowTimestamp && (
+                                              <span className="ml-1 text-[10px] opacity-80 flex items-center gap-0.5 flex-shrink-0">
+                                                <Clock className="h-3 w-3" />
+                                                {formatTime(ev.start_time || undefined)}
+                                                {ev.end_time ? ` – ${formatTime(ev.end_time)}` : ""}
+                                              </span>
+                                            )}
+                                          </div>
                                         </div>
                                       );
                                     })}
@@ -820,7 +872,64 @@ export default function TeamSchedule() {
                             })}
                           </tr>
                         );
-                      })
+                        })}
+                        {/* Unassigned / other events row */}
+                        {selectedTeamId === "all" && otherEvents.length > 0 && (
+                          <tr className="border-b last:border-b-0 bg-muted/10">
+                            <td className="px-3 py-2 sticky left-0 bg-background/95 backdrop-blur-sm z-10">
+                              <div className="flex flex-col">
+                                <span className="font-medium">Other events</span>
+                                <span className="text-[11px] text-muted-foreground">
+                                  Not linked to visible team members
+                                </span>
+                              </div>
+                            </td>
+                            {weekDays.map((day) => {
+                              const dateStr = format(day, "yyyy-MM-dd");
+                              const dayEvents = otherEvents.filter((ev) => coversDate(ev, dateStr));
+
+                              return (
+                                <td key={dateStr} className="px-3 py-2 align-top">
+                                  <div className="flex flex-col gap-1.5">
+                                    {dayEvents.map((ev) => {
+                                      const hasStartTime =
+                                        ev.start_time !== null &&
+                                        ev.start_time !== undefined &&
+                                        ev.start_time !== "";
+                                      const hasEndTime =
+                                        ev.end_time !== null &&
+                                        ev.end_time !== undefined &&
+                                        ev.end_time !== "";
+                                      const shouldShowTimestamp =
+                                        ["event", "milestone", "team_event"].includes(ev.type) &&
+                                        (hasStartTime || hasEndTime);
+
+                                      return (
+                                        <div
+                                          key={ev.id}
+                                          className="rounded-full px-2 py-1 text-[11px] border shadow-sm bg-sky-50 text-sky-800 border-sky-200 whitespace-nowrap"
+                                        >
+                                          <div className="flex items-center gap-1">
+                                            <span className="font-medium truncate">
+                                              {ev.title}
+                                            </span>
+                                            {shouldShowTimestamp && (
+                                              <span className="ml-1 text-[10px] opacity-80 flex items-center gap-0.5 flex-shrink-0">
+                                                <Clock className="h-3 w-3" />
+                                                {formatTime(ev.start_time)} - {formatTime(ev.end_time || ev.start_time || "")}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        )}
+                      </>
                     )}
                   </tbody>
                 </table>

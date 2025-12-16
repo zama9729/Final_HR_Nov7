@@ -100,3 +100,4 @@ echo "   kubectl logs -f deployment/payroll-api -n $NAMESPACE"
 echo ""
 echo "📖 For more information, see README.md"
 
+

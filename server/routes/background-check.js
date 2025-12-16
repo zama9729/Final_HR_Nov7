@@ -38,19 +38,27 @@ const ensureHrAccess = async (req, res, next) => {
 };
 
 const notifyOnboardingApproval = async ({ tenantId, employeeId, title, message }) => {
-  if (!tenantId || !employeeId) return;
+  if (!tenantId || !employeeId) {
+    console.warn('notifyOnboardingApproval: Missing tenantId or employeeId', { tenantId, employeeId });
+    return;
+  }
   try {
     const userResult = await query('SELECT user_id FROM employees WHERE id = $1', [employeeId]);
     const userId = userResult.rows[0]?.user_id;
-    if (!userId) return;
+    if (!userId) {
+      console.warn('notifyOnboardingApproval: No user_id found for employee', employeeId);
+      return;
+    }
 
-    await query(
+    const result = await query(
       `INSERT INTO notifications (tenant_id, user_id, title, message, type, created_at)
-       VALUES ($1, $2, $3, $4, 'onboarding', now())`,
+       VALUES ($1, $2, $3, $4, 'onboarding', now())
+       RETURNING id`,
       [tenantId, userId, title, message]
     );
+    console.log('Onboarding approval notification sent:', { notificationId: result.rows[0]?.id, userId, employeeId });
   } catch (error) {
-    console.warn('Failed to send onboarding approval notification:', error.message);
+    console.error('Failed to send onboarding approval notification:', error.message, error.stack);
   }
 };
 
@@ -324,23 +332,26 @@ router.post('/:candidateId/background-check/documents/:docId/approve',
         [req.user.id, comment, docId]
       );
 
-      // Check if all required documents are approved
-      const requiredDocsResult = await query(
+      // Check if all documents are approved (check all linked documents, not just required)
+      const allDocsResult = await query(
         `SELECT COUNT(*) as total,
                 SUM(CASE WHEN verification_status = 'APPROVED' THEN 1 ELSE 0 END) as approved
          FROM background_check_documents
-         WHERE background_check_id = $1 AND is_required = true`,
+         WHERE background_check_id = $1`,
         [bgCheckId]
       );
 
-      const { total, approved } = requiredDocsResult.rows[0];
+      const { total, approved } = allDocsResult.rows[0];
+      // Update status if all documents are approved (at least 1 document exists and all are approved)
       if (parseInt(total) > 0 && parseInt(approved) === parseInt(total)) {
-        // All required documents approved, mark background check as completed
+        // All documents approved, mark background check as completed
+        // Use 'completed_green' as default (can be changed to amber/red if issues found)
         await query(
           `UPDATE background_checks
-           SET status = 'completed',
+           SET status = 'completed_green'::background_check_status_enum,
                completed_at = now(),
-               completed_by = $1
+               completed_by = $1,
+               updated_at = now()
            WHERE id = $2`,
           [req.user.id, bgCheckId]
         );

@@ -101,3 +101,4 @@ Write-Host "   kubectl logs -f deployment/payroll-api -n $NAMESPACE"
 Write-Host ""
 Write-Host "📖 For more information, see README.md" -ForegroundColor Cyan
 
+

@@ -12,7 +12,7 @@ import { format, startOfWeek, endOfWeek, isFuture, parseISO, addDays, isToday, i
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ReferenceLine, Area, AreaChart } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
-import { SmartMemo } from "@/components/dashboard/SmartMemo";
+import { SmartMemoEnhanced as SmartMemo } from "@/components/dashboard/SmartMemoEnhanced";
 import { AddressConsentModal } from "@/components/attendance/AddressConsentModal";
 import { useClockResultToast } from "@/components/attendance/ClockResultToast";
 import confetti from "canvas-confetti";
@@ -1127,6 +1127,8 @@ export default function Dashboard() {
               if (window.location.pathname.includes('calendar')) {
                 window.location.reload();
               }
+              // Trigger calendar refresh for TeamSchedule
+              window.dispatchEvent(new CustomEvent('calendar-events-updated'));
             }}
           />
         </div>
