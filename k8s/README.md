@@ -273,3 +273,4 @@ kubectl delete namespace hr-suite
 - [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
 - [cert-manager](https://cert-manager.io/) (for automatic TLS certificates)
 
+

@@ -1048,7 +1048,10 @@ export default function Timesheets() {
     try {
       const date = new Date(trimmed);
       if (!isNaN(date.getTime())) {
-        return format(date, 'HH:mm');
+        // Ensure we're formatting in local time, not UTC
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        return `${hours}:${minutes}`;
       }
     } catch {
       // ignore

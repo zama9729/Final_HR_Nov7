@@ -69,3 +69,4 @@ kubectl apply -f secrets.yaml
 4. **Update domain names** in ingress.yaml
 5. **Review resource limits** in deployments based on your needs
 
+

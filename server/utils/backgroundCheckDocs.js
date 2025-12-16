@@ -33,7 +33,7 @@ export async function linkDocumentsToBackgroundCheck(backgroundCheckId, employee
       $1,
       d.id,
       d.id,
-      COALESCE(d.is_required, true),
+      true,
       'PENDING',
       'pending',
       now(),

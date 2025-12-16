@@ -10,7 +10,7 @@ import { ShieldAlert, Users, TrendingUp, Target, Activity, AlertTriangle, Megaph
 import { api } from "@/lib/api";
 import { format, formatDistanceToNow } from "date-fns";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
-import { SmartMemo } from "@/components/dashboard/SmartMemo";
+import { SmartMemoEnhanced as SmartMemo } from "@/components/dashboard/SmartMemoEnhanced";
 
 type KpiTrend = "up" | "down" | "flat";
 

@@ -9,11 +9,42 @@ export interface ParsedEntry {
   endDateTime: Date;
   title: string;
   sourceText: string;
+  mentions?: MentionReference[]; // Mentions in this entry
+}
+
+export interface MentionReference {
+  employee_id: string;
+  user_id: string;
+  mention_text: string; // The @mention text (e.g., "@Summie")
+  start_index: number; // Position in original text
+  end_index: number;
 }
 
 export interface ReminderCommand {
   remindAt: Date;
   rawText: string;
+}
+
+/**
+ * Extract @mentions from text
+ * Returns array of mention objects with text and position
+ */
+export function extractMentions(text: string): Array<{ text: string; startIndex: number; endIndex: number }> {
+  const mentions: Array<{ text: string; startIndex: number; endIndex: number }> = [];
+  // Match @ followed by word characters (letters, numbers, underscore)
+  // This will match @John, @JohnDoe, @John123, etc.
+  const mentionRegex = /@(\w+)/g;
+  let match;
+  
+  while ((match = mentionRegex.exec(text)) !== null) {
+    mentions.push({
+      text: match[0], // Full match including @
+      startIndex: match.index,
+      endIndex: match.index + match[0].length
+    });
+  }
+  
+  return mentions;
 }
 
 /**
@@ -198,6 +229,7 @@ export function extractReminders(text: string, baseDate: Date = new Date()): {
   
   return { cleanedText, reminders };
 }
+
 
 
 

@@ -394,7 +394,10 @@ export default function BackgroundChecks() {
       setSelectedAttachment(null);
       setAttachmentAction(null);
       setAttachmentComment("");
-      fetchReport(activeReportId);
+      // Refresh the report to show updated status
+      await fetchReport(activeReportId);
+      // Also refresh the background checks list to show updated status
+      fetchChecks();
     } catch (error: any) {
       toast({
         title: "Unable to update",
@@ -412,12 +415,13 @@ export default function BackgroundChecks() {
       const result = await api.getBackgroundCheckReport(id, { legacy: true });
       setReport(result);
     } catch (error: any) {
+      console.error("Error fetching background check report:", error);
       toast({
         title: "Unable to fetch report",
         description: error?.message || "Please try again.",
         variant: "destructive",
       });
-      setActiveReportId(null);
+      // Don't close the dialog on error - let user see the error and try again
       setReport(null);
     } finally {
       setReportLoading(false);
@@ -543,7 +547,7 @@ export default function BackgroundChecks() {
                             : "Candidate"}
                         </h3>
                         <Badge className={`${statusClass(check.status)} text-white capitalize`}>
-                          {check.status.replace(/_/g, " ")}
+                          {check.status?.startsWith('completed_') ? 'Completed' : check.status.replace(/_/g, " ")}
                         </Badge>
                         <Badge variant="outline">{check.type}</Badge>
                       </div>
@@ -705,17 +709,22 @@ export default function BackgroundChecks() {
           if (!open) closeReport();
         }}
       >
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col p-0">
+          <div className="px-6 pt-6 pb-4 flex-shrink-0">
             <DialogTitle>Background Check Report</DialogTitle>
-            <DialogDescription>Timeline of actions and every document submitted for this check.</DialogDescription>
-          </DialogHeader>
+            <DialogDescription className="mt-2">
+              {activeReportId ? `Report ID: ${activeReportId.substring(0, 8)}...` : 'Timeline of actions and every document submitted for this check.'}
+            </DialogDescription>
+          </div>
           {reportLoading ? (
-            <div className="py-10 text-center text-muted-foreground">Loading report…</div>
+            <div className="py-10 text-center text-muted-foreground px-6">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+              Loading report…
+            </div>
           ) : report ? (
-            <div className="grid gap-6 md:grid-cols-[1fr,1.3fr] max-h-[75vh] overflow-y-auto pr-1">
-              <div className="space-y-4">
-                <div className="rounded border bg-muted/30 p-3 space-y-1">
+            <div className="grid gap-6 md:grid-cols-[1fr,1.3fr] flex-1 min-h-0 px-6" style={{ height: 'calc(90vh - 200px)' }}>
+              <div className="space-y-4 flex flex-col min-h-0 overflow-hidden">
+                <div className="rounded border bg-muted/30 p-3 space-y-1 flex-shrink-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-semibold">
                       {report.employee_profile
@@ -723,7 +732,7 @@ export default function BackgroundChecks() {
                         : "Candidate"}
                     </h3>
                     <Badge className={`${statusClass(report.status)} text-white capitalize`}>
-                      {report.status.replace(/_/g, " ")}
+                      {report.status?.startsWith('completed_') ? 'Completed' : report.status.replace(/_/g, " ")}
                     </Badge>
                     <Badge variant="outline">{report.type}</Badge>
                   </div>
@@ -734,21 +743,22 @@ export default function BackgroundChecks() {
                 </div>
 
                 {report.result_summary && (
-                  <div className="rounded border bg-muted/40 p-3 text-xs">
+                  <div className="rounded border bg-muted/40 p-3 text-xs flex-shrink-0">
                     <p className="text-[10px] tracking-wide text-muted-foreground uppercase mb-1">Result summary</p>
                     <pre className="whitespace-pre-wrap">{JSON.stringify(report.result_summary, null, 2)}</pre>
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm font-semibold">
+                <div className="space-y-2 flex flex-col min-h-0 flex-1">
+                  <div className="flex items-center justify-between text-sm font-semibold flex-shrink-0">
                     <span>Timeline</span>
                     <span className="text-xs text-muted-foreground">
                       {report.events?.length ? `${report.events.length} entries` : "No events"}
                     </span>
                   </div>
-                  <ScrollArea className="max-h-[280px] rounded border bg-background">
-                    <div className="p-3 text-sm space-y-3">
+                  <div className="flex-1 min-h-0 rounded border bg-background overflow-hidden">
+                    <ScrollArea className="h-full">
+                      <div className="p-3 text-sm space-y-3 pr-4">
                       {report.events && report.events.length > 0 ? (
                         report.events.map((event) => (
                           <div key={event.id} className="border-l-2 border-primary/60 pl-3">
@@ -762,21 +772,22 @@ export default function BackgroundChecks() {
                       ) : (
                         <p className="text-muted-foreground text-sm text-center py-6">No events recorded.</p>
                       )}
-                    </div>
-                  </ScrollArea>
+                      </div>
+                    </ScrollArea>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm font-semibold">
-                  <span>Documents</span>
-                  <span className="text-xs text-muted-foreground">
-                    {report.attachments?.length ? `${report.attachments.length} files` : "No files"}
-                  </span>
-                </div>
-                {report.attachments && report.attachments.length > 0 ? (
-                  <ScrollArea className="max-h-[65vh] pr-2">
-                    <div className="space-y-3">
+              <div className="space-y-2 flex flex-col min-h-0 overflow-hidden" style={{ height: '100%' }}>
+                  <div className="flex items-center justify-between text-sm font-semibold flex-shrink-0">
+                    <span>Documents</span>
+                    <span className="text-xs text-muted-foreground">
+                      {report.attachments?.length ? `${report.attachments.length} files` : "No files"}
+                    </span>
+                  </div>
+                  {report.attachments && report.attachments.length > 0 ? (
+                    <ScrollArea className="flex-1 min-h-0" style={{ height: 'calc(100% - 2rem)' }}>
+                      <div className="space-y-3 pr-4 pb-2">
                       {report.attachments.map((doc, index) => {
                         const decision = (doc.decision || doc.status || "pending").toUpperCase();
                         const canAct = !!report.employee_id && (decision === "PENDING" || decision === "HOLD");
@@ -842,8 +853,8 @@ export default function BackgroundChecks() {
                           </div>
                         );
                       })}
-                    </div>
-                  </ScrollArea>
+                      </div>
+                    </ScrollArea>
                 ) : (
                   <div className="rounded border bg-muted/20 p-4 text-sm text-muted-foreground">
                     No documents have been linked to this background check.
@@ -851,14 +862,26 @@ export default function BackgroundChecks() {
                 )}
               </div>
             </div>
+          ) : activeReportId ? (
+            <div className="py-10 text-center px-6">
+              <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <p className="text-lg font-semibold mb-2">Unable to load report</p>
+              <p className="text-sm text-muted-foreground mb-4">
+                There was an error fetching the background check report. Please try again.
+              </p>
+              <Button onClick={() => activeReportId && fetchReport(activeReportId)} variant="outline">
+                <Loader2 className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+            </div>
           ) : (
-            <div className="py-10 text-center text-muted-foreground">Select a background check to view details.</div>
+            <div className="py-10 text-center text-muted-foreground px-6">Select a background check to view details.</div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={closeReport}>
+          <div className="px-6 pb-6 pt-4 flex-shrink-0 border-t">
+            <Button variant="outline" onClick={closeReport} className="w-full sm:w-auto">
               Close
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
