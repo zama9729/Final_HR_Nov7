@@ -14,6 +14,8 @@ How to run o nthe Kubernetes ---
 
  kubectl port-forward -n hr-suite svc/payroll-frontend-service 8081:80
 
+ kubectl port-forward -n hr-suite svc/minio-service 9000:9000 9001:9001
+
 -----------
 
 kubectl get pods,svc -n hr-suite
