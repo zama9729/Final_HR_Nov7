@@ -618,22 +618,18 @@ export default function Dashboard() {
       const today = new Date();
       const nextWeek = addDays(today, 7);
       
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/scheduling/employee/${employeeId.id}/shifts?start_date=${format(today, 'yyyy-MM-dd')}&end_date=${format(nextWeek, 'yyyy-MM-dd')}`,
-        { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } }
+      const data = await api.get(
+        `/api/scheduling/employee/${employeeId.id}/shifts?start_date=${format(
+          today,
+          'yyyy-MM-dd'
+        )}&end_date=${format(nextWeek, 'yyyy-MM-dd')}`
       );
-
-      if (response.ok) {
-        const data = await response.json();
-        const sorted = (data.shifts || []).sort((a: UpcomingShift, b: UpcomingShift) => {
-          const dateCompare = new Date(a.shift_date).getTime() - new Date(b.shift_date).getTime();
-          if (dateCompare !== 0) return dateCompare;
-          return a.start_time.localeCompare(b.start_time);
-        });
-        setUpcomingShifts(sorted);
-      } else {
-        setUpcomingShifts([]);
-      }
+      const sorted = (data.shifts || []).sort((a: UpcomingShift, b: UpcomingShift) => {
+        const dateCompare = new Date(a.shift_date).getTime() - new Date(b.shift_date).getTime();
+        if (dateCompare !== 0) return dateCompare;
+        return a.start_time.localeCompare(b.start_time);
+      });
+      setUpcomingShifts(sorted);
     } catch (error) {
       console.error('Error fetching upcoming shifts:', error);
     } finally {
@@ -659,25 +655,12 @@ export default function Dashboard() {
       const today = startOfDay(new Date());
       const fromDate = subDays(today, 13); // 14 days including today
 
-      const resp = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/v1/attendance/employee/${employeeId.id}/timesheet?from=${format(
+      const data = await api.get(
+        `/api/v1/attendance/employee/${employeeId.id}/timesheet?from=${format(
           fromDate,
           'yyyy-MM-dd',
-        )}&to=${format(today, 'yyyy-MM-dd')}`,
-        {
-          headers: {
-            Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}`,
-          },
-        },
+        )}&to=${format(today, 'yyyy-MM-dd')}`
       );
-
-      if (!resp.ok) {
-        console.error('Error fetching attendance trends:', await resp.text());
-        setAttendanceTrends([]);
-        return;
-      }
-
-      const data = await resp.json();
       const entries = Array.isArray(data.entries) ? data.entries : [];
 
       // Aggregate hours per day for this employee

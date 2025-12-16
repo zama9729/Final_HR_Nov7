@@ -16,8 +16,7 @@ export default function ProfileSkills() {
       try {
         const me = await api.getEmployeeId();
         setEmployeeId(me.id);
-        const s = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/employees/${me.id}/skills`, { headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } })
-          .then(r => r.json());
+        const s = await api.get(`/api/v1/employees/${me.id}/skills`);
         setSkills(s);
       } catch {}
     })();
@@ -25,13 +24,8 @@ export default function ProfileSkills() {
 
   const addSkill = async () => {
     if (!employeeId || !form.name) return;
-    const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/employees/${employeeId}/skills`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` },
-      body: JSON.stringify(form)
-    });
-    const data = await resp.json();
-    if (resp.ok) setSkills(prev => [data, ...prev]);
+    const data = await api.post(`/api/v1/employees/${employeeId}/skills`, form);
+    if (data) setSkills(prev => [data, ...prev]);
   };
 
   return (

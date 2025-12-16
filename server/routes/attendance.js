@@ -595,7 +595,7 @@ router.get('/employee/:employee_id/timesheet', authenticateToken, async (req, re
       LEFT JOIN attendance_events ae ON ae.id = te.attendance_event_id
       LEFT JOIN attendance_upload_rows aur ON aur.id = te.attendance_upload_row_id
       WHERE te.employee_id = $1
-        AND te.source IN ('api', 'upload')
+        AND te.source IN ('api', 'upload', 'punch')
         AND te.work_date >= $2
         AND te.work_date <= $3
         AND te.tenant_id = $4
