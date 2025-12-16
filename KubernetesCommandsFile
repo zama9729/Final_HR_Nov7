@@ -1,0 +1,26 @@
+How to run o nthe Kubernetes --- 
+
+1 - install Kubernetes ctl on youre device 
+2 - Once done try running. 
+3 - Create app (using name space i have used hr-suite)
+4 - using command such as ---     kubectl create namespace hr-suite
+5 - Please use Powershell and run them in seperate shell windows ---- 
+
+ kubectl port-forward -n hr-suite svc/frontend-service 8080:80
+
+ kubectl port-forward -n hr-suite svc/api-service 3001:3001
+
+ kubectl port-forward -n hr-suite svc/payroll-api-service 4000:4000
+
+ kubectl port-forward -n hr-suite svc/payroll-frontend-service 8081:80
+
+-----------
+
+kubectl get pods,svc -n hr-suite
+kubectl rollout restart deploy -n hr-suite
+
+
+
+
+
+
