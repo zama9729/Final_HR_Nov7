@@ -23,6 +23,7 @@ data:
   REDIS_PORT: "6379"
   MINIO_ENABLED: "true"
   MINIO_ENDPOINT: "http://minio-service:9000"
+  MINIO_PUBLIC_URL: "http://localhost:9000"
   MINIO_BUCKET: "hr-docs"
   DOCS_STORAGE_DRIVER: "s3"
   DOCS_STORAGE_BUCKET: "hr-docs"
