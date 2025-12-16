@@ -531,13 +531,13 @@ router.get("/history", async (req: Request, res: Response) => {
           p.first_name || ' ' || p.last_name, 
           p.first_name, 
           p.last_name, 
-          e.email,
+          p.email,
           'Unknown'
         ) as employee_name,
-        COALESCE(p.email, ev.email, e.email, 'N/A') as email
+        COALESCE(p.email, ev.email, 'N/A') as email
       FROM employee_reimbursements r
       LEFT JOIN employees e ON e.id = r.employee_id
-      LEFT JOIN profiles p ON p.id = e.user_id OR p.email = e.email
+      LEFT JOIN profiles p ON p.id = e.user_id
       LEFT JOIN payroll_employee_view ev ON ev.employee_id::text = r.employee_id::text AND ev.org_id = r.org_id
       WHERE r.org_id = $1
     `;
@@ -626,7 +626,7 @@ router.get("/history", async (req: Request, res: Response) => {
       }
       
       if (employee_id) {
-        queryStr += ` AND (e.employee_code ILIKE $${fallbackIndex} OR e.email ILIKE $${fallbackIndex})`;
+        queryStr += ` AND (e.employee_code ILIKE $${fallbackIndex} OR p.email ILIKE $${fallbackIndex})`;
         fallbackParams.push(`%${employee_id}%`);
         fallbackIndex++;
       }
@@ -636,7 +636,7 @@ router.get("/history", async (req: Request, res: Response) => {
           p.first_name || ' ' || p.last_name ILIKE $${fallbackIndex} 
           OR p.first_name ILIKE $${fallbackIndex} 
           OR p.last_name ILIKE $${fallbackIndex} 
-          OR e.email ILIKE $${fallbackIndex}
+          OR p.email ILIKE $${fallbackIndex}
         )`;
         fallbackParams.push(`%${employee_name}%`);
         fallbackIndex++;

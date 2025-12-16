@@ -15,7 +15,8 @@ const getInitialTheme = (): Theme => {
   if (typeof window === "undefined") return "light";
   const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
   if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  // Default to light mode instead of following system preference
+  return "light";
 };
 
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
@@ -28,17 +29,8 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
 
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (event: MediaQueryListEvent) => {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) {
-        setThemeState(event.matches ? "dark" : "light");
-      }
-    };
-    media.addEventListener("change", handler);
-    return () => media.removeEventListener("change", handler);
-  }, []);
+  // Removed system preference listener - app now defaults to light mode
+  // Users can still manually toggle theme if needed
 
   const value = useMemo(
     () => ({
