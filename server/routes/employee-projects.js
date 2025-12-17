@@ -4,10 +4,47 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Ensure employee_projects table and key columns exist (for environments where migrations didn't run)
+let employeeProjectsSchemaEnsured = false;
+async function ensureEmployeeProjectsSchema() {
+  if (employeeProjectsSchemaEnsured) return;
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS employee_projects (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+        project_name TEXT NOT NULL,
+        role TEXT,
+        start_date DATE,
+        end_date DATE,
+        technologies TEXT[],
+        description TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      ALTER TABLE employee_projects
+        ADD COLUMN IF NOT EXISTS tenant_id UUID,
+        ADD COLUMN IF NOT EXISTS technologies TEXT[],
+        ADD COLUMN IF NOT EXISTS description TEXT,
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+      CREATE INDEX IF NOT EXISTS idx_emp_projects_employee ON employee_projects(employee_id);
+    `);
+    employeeProjectsSchemaEnsured = true;
+    console.log('[employee-projects] Schema ensured');
+  } catch (error) {
+    console.error('Failed to ensure employee_projects schema:', error);
+  }
+}
+
 // Get employee projects - returns active project allocations (for Dashboard) or past projects (for Profile)
 // Query param ?type=past returns past projects, otherwise returns active allocations
 router.get('/employees/:id/projects', authenticateToken, async (req, res) => {
   try {
+    await ensureEmployeeProjectsSchema();
     const { id } = req.params;
     const { type } = req.query; // 'past' for past projects, otherwise active allocations
     const empRes = await query('SELECT tenant_id, user_id FROM employees WHERE id = $1', [id]);
@@ -84,19 +121,77 @@ router.get('/employees/:id/projects', authenticateToken, async (req, res) => {
 
 router.post('/employees/:id/projects', authenticateToken, async (req, res) => {
   try {
+    await ensureEmployeeProjectsSchema();
     const { id } = req.params;
-    const { project_name, role, start_date, end_date, technologies, description } = req.body || {};
+    const {
+      project_name,
+      role,
+      start_date,
+      end_date,
+      technologies,
+      description,
+    } = req.body || {};
     if (!project_name) return res.status(400).json({ error: 'project_name required' });
     
     // Get employee info and check permissions
-    const empRes = await query('SELECT tenant_id, user_id FROM employees WHERE id = $1', [id]);
+    const empRes = await query(
+      'SELECT tenant_id, user_id FROM employees WHERE id = $1',
+      [id],
+    );
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    const { tenant_id: tenant, user_id: empUserId } = empRes.rows[0];
-    
+    const { tenant_id: empTenantId, user_id: empUserId } = empRes.rows[0];
+
+    // Ensure employee has a tenant; backfill from profile or token org_id if needed
+    let tenant = empTenantId;
+
+    // 1) Try employee's profile.tenant_id
+    if (!tenant && empUserId) {
+      const profRes = await query(
+        'SELECT tenant_id FROM profiles WHERE id = $1',
+        [empUserId],
+      );
+      const profTenant = profRes.rows[0]?.tenant_id;
+      if (profTenant) {
+        await query('UPDATE employees SET tenant_id = $1 WHERE id = $2', [
+          profTenant,
+          id,
+        ]);
+        tenant = profTenant;
+      }
+    }
+
+    // 2) Fallback to org_id from auth token / tenant context if still missing
+    if (!tenant) {
+      const tokenOrgId = (req as any).orgId || (req.user as any)?.org_id;
+      if (tokenOrgId) {
+        tenant = tokenOrgId;
+        // Persist tenant on employee and (if possible) profile for future queries
+        await query('UPDATE employees SET tenant_id = $1 WHERE id = $2', [
+          tenant,
+          id,
+        ]);
+        if (empUserId) {
+          await query('UPDATE profiles SET tenant_id = $1 WHERE id = $2', [
+            tenant,
+            empUserId,
+          ]);
+        }
+      }
+    }
+
+    if (!tenant) {
+      return res
+        .status(400)
+        .json({ error: 'Employee has no tenant/organization assigned' });
+    }
+
     // Check permissions
-    const reqProfile = await query('SELECT tenant_id FROM profiles WHERE id = $1', [req.user.id]);
+    const reqProfile = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [req.user.id],
+    );
     const reqTenant = reqProfile.rows[0]?.tenant_id;
     if (!reqTenant || reqTenant !== tenant) {
       return res.status(403).json({ error: 'Unauthorized: different organization' });
@@ -111,12 +206,34 @@ router.post('/employees/:id/projects', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized: can only edit own past projects' });
     }
     
-    const result = await withClient(async (client) => client.query(
-      `INSERT INTO employee_projects (employee_id, project_name, role, start_date, end_date, technologies, description)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-        RETURNING *`,
-      [id, project_name, role || null, start_date || null, end_date || null, Array.isArray(technologies) ? technologies : [], description || null]
-    ), tenant);
+    const result = await withClient(
+      async (client) =>
+        client.query(
+          `INSERT INTO employee_projects (
+             employee_id,
+             tenant_id,
+             project_name,
+             role,
+             start_date,
+             end_date,
+             technologies,
+             description
+           )
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           RETURNING *`,
+          [
+            id,
+            tenant,
+            project_name,
+            role || null,
+            start_date || null,
+            end_date || null,
+            Array.isArray(technologies) ? technologies : [],
+            description || null,
+          ],
+        ),
+      tenant,
+    );
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error saving past project:', error);
@@ -127,6 +244,7 @@ router.post('/employees/:id/projects', authenticateToken, async (req, res) => {
 // Update past project
 router.put('/employees/:id/projects/:projectId', authenticateToken, async (req, res) => {
   try {
+    await ensureEmployeeProjectsSchema();
     const { id, projectId } = req.params;
     const { project_name, role, start_date, end_date, technologies, description } = req.body || {};
     
@@ -197,6 +315,7 @@ router.put('/employees/:id/projects/:projectId', authenticateToken, async (req, 
 // Delete past project
 router.delete('/employees/:id/projects/:projectId', authenticateToken, async (req, res) => {
   try {
+    await ensureEmployeeProjectsSchema();
     const { id, projectId } = req.params;
     
     // Get employee info and check permissions

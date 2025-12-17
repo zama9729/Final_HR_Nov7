@@ -4,6 +4,22 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Ensure optional columns used by calendar (like date_of_birth) exist
+let onboardingDobEnsured = false;
+async function ensureOnboardingDobColumn() {
+  if (onboardingDobEnsured) return;
+  try {
+    await query(`
+      ALTER TABLE onboarding_data
+      ADD COLUMN IF NOT EXISTS date_of_birth DATE
+    `);
+    onboardingDobEnsured = true;
+    console.log('[calendar] Ensured onboarding_data.date_of_birth column exists');
+  } catch (error) {
+    console.error('Failed to ensure onboarding_data.date_of_birth column:', error);
+  }
+}
+
 // Get calendar data for projects/assignments
 // Supports filters: employee_id, project_id, start_date, end_date, view_type ('employee' or 'organization')
 router.get('/', authenticateToken, async (req, res) => {
@@ -430,19 +446,12 @@ router.get('/', authenticateToken, async (req, res) => {
       }
     });
 
-    // Fetch birthdays (if date_of_birth column exists in onboarding_data)
+    // Fetch birthdays (ensure date_of_birth column exists in onboarding_data)
     let birthdayEvents = [];
     try {
-      // Check if date_of_birth column exists first
-      const columnCheck = await query(`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'onboarding_data' 
-          AND column_name = 'date_of_birth'
-          AND table_schema = 'public'
-      `);
-      
-      if (columnCheck.rows.length > 0) {
+      // Ensure column exists (no-op if already there)
+      await ensureOnboardingDobColumn();
+
         let birthdayQuery = `
           SELECT 
             e.id as employee_id,
@@ -467,8 +476,8 @@ router.get('/', authenticateToken, async (req, res) => {
           birthdayParams.push(employee_id);
         }
         
-        const birthdayRes = await query(birthdayQuery, birthdayParams);
-      
+      const birthdayRes = await query(birthdayQuery, birthdayParams);
+    
       // Generate birthday events for the current year within the date range
       const currentYear = new Date().getFullYear();
       birthdayRes.rows.forEach(emp => {
@@ -514,7 +523,6 @@ router.get('/', authenticateToken, async (req, res) => {
           });
         }
       });
-      }
     } catch (error) {
       console.error('Error fetching birthdays:', error);
       // Continue without birthdays if there's an error

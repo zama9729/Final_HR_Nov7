@@ -274,3 +274,5 @@ kubectl delete namespace hr-suite
 - [cert-manager](https://cert-manager.io/) (for automatic TLS certificates)
 
 
+
+

@@ -70,3 +70,5 @@ kubectl apply -f secrets.yaml
 5. **Review resource limits** in deployments based on your needs
 
 
+
+

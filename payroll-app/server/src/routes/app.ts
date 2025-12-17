@@ -33,6 +33,22 @@ const proofUpload = multer({
   },
 });
 
+// Ensure payroll_items has optional metadata column used for payslip details
+let payrollItemsSchemaEnsured = false;
+async function ensurePayrollItemsSchema() {
+  if (payrollItemsSchemaEnsured) return;
+  try {
+    await query(`
+      ALTER TABLE payroll_items
+      ADD COLUMN IF NOT EXISTS metadata JSONB
+    `);
+    payrollItemsSchemaEnsured = true;
+    console.log("[PAYROLL] Ensured payroll_items.metadata column exists");
+  } catch (e: any) {
+    console.error("[PAYROLL] Failed to ensure payroll_items schema:", e.message);
+  }
+}
+
 // Multer for bulk salary import
 const salaryImportUpload = multer({
   storage: multer.memoryStorage(),
@@ -3595,6 +3611,7 @@ appRouter.get("/payroll-cycles/:cycleId/preview", requireAuth, async (req, res) 
   }
 
   try {
+    await ensurePayrollItemsSchema();
     // Get payroll cycle
     const cycleResult = await query(
       "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",
@@ -4348,6 +4365,7 @@ appRouter.post("/payroll-cycles/:cycleId/save", requireAuth, async (req, res) =>
   }
 
   try {
+    await ensurePayrollItemsSchema();
     // Get payroll cycle
     const cycleResult = await query(
       "SELECT * FROM payroll_cycles WHERE id = $1 AND tenant_id = $2",

@@ -28,9 +28,12 @@ router.get('/', authenticateToken, setTenantContext, async (req, res) => {
     let idx = 1;
 
     if (team_id && team_id !== 'all') {
+      // Include events for the team OR events with no team_id (organization-wide events)
+      // Also include shared events that might be relevant to team members
       where += ` AND (team_id = $${++idx} OR team_id IS NULL)`;
       params.push(team_id);
     }
+    // When team_id is 'all' or not specified, show all organization events (no team filter)
 
     if (start_date) {
       where += ` AND end_date >= $${++idx}::date`;
@@ -42,14 +45,66 @@ router.get('/', authenticateToken, setTenantContext, async (req, res) => {
     }
 
     const result = await query(
-      `SELECT *
+      `SELECT 
+         id,
+         tenant_id,
+         team_id,
+         employee_id,
+         title,
+         event_type,
+         start_date,
+         end_date,
+         start_time,
+         end_time,
+         notes,
+         created_by,
+         created_at,
+         updated_at,
+         is_shared,
+         shared_with_employee_ids,
+         memo_id
        FROM team_schedule_events
        ${where}
        ORDER BY start_date ASC, COALESCE(start_time, '00:00'::time) ASC`,
       params,
     );
 
-    res.json({ events: result.rows });
+    // Ensure shared_with_employee_ids is properly formatted as an array
+    const events = result.rows.map(ev => {
+      let sharedIds = [];
+      if (ev.shared_with_employee_ids) {
+        if (Array.isArray(ev.shared_with_employee_ids)) {
+          sharedIds = ev.shared_with_employee_ids;
+        } else if (typeof ev.shared_with_employee_ids === 'string') {
+          // PostgreSQL array format: "{uuid1,uuid2}" or "{uuid1, uuid2}"
+          try {
+            const cleaned = ev.shared_with_employee_ids.replace(/[{}]/g, '');
+            sharedIds = cleaned ? cleaned.split(',').map((id) => id.trim()).filter(Boolean) : [];
+          } catch (e) {
+            console.warn('Failed to parse shared_with_employee_ids:', ev.shared_with_employee_ids);
+            sharedIds = [];
+          }
+        }
+      }
+      
+      return {
+        ...ev,
+        shared_with_employee_ids: sharedIds,
+      };
+    });
+
+    console.log(`[TeamScheduleEvents] Returning ${events.length} events for tenant ${tenantId}, team_id: ${team_id || 'all'}`);
+    if (events.length > 0) {
+      console.log('[TeamScheduleEvents] Sample event:', {
+        id: events[0].id,
+        title: events[0].title,
+        employee_id: events[0].employee_id,
+        is_shared: events[0].is_shared,
+        shared_with_employee_ids: events[0].shared_with_employee_ids,
+      });
+    }
+
+    res.json({ events });
   } catch (error) {
     console.error('Error fetching team schedule events:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch events' });
