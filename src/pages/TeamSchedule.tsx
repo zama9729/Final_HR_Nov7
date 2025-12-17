@@ -141,13 +141,15 @@ export default function TeamSchedule() {
       const allEmployees = await api.get('/api/employees?status=active&limit=1000');
       const employeesAsMembers: TeamMember[] = (allEmployees.employees || allEmployees || []).map((emp: any) => ({
         id: emp.id,
-        employee_id: emp.id,
+        employee_id: emp.id, // This should match the employee_id in team_schedule_events
         employee_name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || emp.email || emp.employee_id,
         employee_email: emp.email,
         employee_id_display: emp.employee_id,
         position: emp.position,
         department: emp.department,
       }));
+      console.log('[TeamSchedule] Fetched employees:', employeesAsMembers.length);
+      console.log('[TeamSchedule] Sample employee IDs:', employeesAsMembers.slice(0, 3).map(m => ({ id: m.id, employee_id: m.employee_id, name: m.employee_name })));
       setMembers(employeesAsMembers);
     } catch (error) {
       console.error("Failed to fetch all employees:", error);
@@ -312,21 +314,42 @@ export default function TeamSchedule() {
         start_date: start,
         end_date: end,
       });
-      const persistedMapped: TeamScheduleEvent[] = (persisted?.events || []).map((ev: any) => ({
-        id: ev.id,
-        type: (ev.event_type || "event") as EventType,
-        title: ev.title,
-        start_date: ev.start_date,
-        end_date: ev.end_date,
-        start_time: ev.start_time,
-        end_time: ev.end_time,
-        team_id: ev.team_id,
-        employee_id: ev.employee_id,
-        is_shared: ev.is_shared || false,
-        shared_with_employee_ids: ev.shared_with_employee_ids || [],
-      }));
+      console.log('[TeamSchedule] Fetched team schedule events:', persisted);
+      console.log('[TeamSchedule] Events count:', persisted?.events?.length || 0);
+      const persistedMapped: TeamScheduleEvent[] = (persisted?.events || []).map((ev: any) => {
+        // Parse shared_with_employee_ids - it might be a PostgreSQL array string or already an array
+        let sharedIds: string[] = [];
+        if (ev.shared_with_employee_ids) {
+          if (Array.isArray(ev.shared_with_employee_ids)) {
+            sharedIds = ev.shared_with_employee_ids;
+          } else if (typeof ev.shared_with_employee_ids === 'string') {
+            // PostgreSQL array format: "{uuid1,uuid2}" or "{uuid1, uuid2}"
+            try {
+              const cleaned = ev.shared_with_employee_ids.replace(/[{}]/g, '');
+              sharedIds = cleaned ? cleaned.split(',').map((id: string) => id.trim()).filter(Boolean) : [];
+            } catch (e) {
+              console.warn('Failed to parse shared_with_employee_ids:', ev.shared_with_employee_ids);
+              sharedIds = [];
+            }
+          }
+        }
+        
+        return {
+          id: ev.id,
+          type: (ev.event_type || "event") as EventType,
+          title: ev.title,
+          start_date: ev.start_date,
+          end_date: ev.end_date,
+          start_time: ev.start_time,
+          end_time: ev.end_time,
+          team_id: ev.team_id,
+          employee_id: ev.employee_id,
+          is_shared: ev.is_shared || false,
+          shared_with_employee_ids: sharedIds,
+        };
+      });
 
-      // Load holidays from calendar API (ignore projects/birthdays for this view)
+      // Load all calendar events (shifts, team events, holidays, etc.)
       try {
         const calendarData = await api.get(`/api/calendar?start_date=${start}&end_date=${end}&view_type=organization`);
         const calendarEvents: TeamScheduleEvent[] = [];
@@ -334,7 +357,7 @@ export default function TeamSchedule() {
         (calendarData.events || []).forEach((ev: any) => {
           const resourceType = ev.resource?.type;
           
-          // Only include holidays; skip projects/assignments/birthdays
+          // Include holidays, shifts, and team events
           if (resourceType === 'holiday') {
             calendarEvents.push({
               id: ev.id,
@@ -347,14 +370,84 @@ export default function TeamSchedule() {
               team_id: null,
               employee_id: null,
             });
+          } else if (resourceType === 'shift') {
+            // Include shifts from schedule_assignments
+            const startDate = ev.start?.split('T')[0] || ev.start;
+            const endDate = ev.end?.split('T')[0] || ev.end || startDate;
+            const startTime = ev.start?.includes('T') ? ev.start.split('T')[1]?.substring(0, 5) : null;
+            const endTime = ev.end?.includes('T') ? ev.end.split('T')[1]?.substring(0, 5) : null;
+            
+            calendarEvents.push({
+              id: ev.id,
+              type: 'shift',
+              title: ev.title || 'Shift',
+              start_date: startDate,
+              end_date: endDate,
+              start_time: startTime,
+              end_time: endTime,
+              team_id: null,
+              employee_id: ev.resource?.employee_id || null,
+            });
+          } else if (resourceType === 'team_event') {
+            // Include team schedule events from calendar API
+            calendarEvents.push({
+              id: ev.id,
+              type: (ev.resource?.event_type || 'event') as EventType,
+              title: ev.title,
+              start_date: ev.resource?.start_date || ev.start?.split('T')[0] || ev.start,
+              end_date: ev.resource?.end_date || ev.end?.split('T')[0] || ev.end || ev.start?.split('T')[0] || ev.start,
+              start_time: ev.resource?.start_time || (ev.start?.includes('T') ? ev.start.split('T')[1]?.substring(0, 5) : null),
+              end_time: ev.resource?.end_time || (ev.end?.includes('T') ? ev.end.split('T')[1]?.substring(0, 5) : null),
+              team_id: ev.resource?.team_id || null,
+              employee_id: ev.resource?.employee_id || null,
+              is_shared: false, // Will be set from persistedMapped if it's a shared event
+              shared_with_employee_ids: [],
+            });
           }
         });
         
-        setEvents([...mapped, ...persistedMapped, ...calendarEvents]);
+        // Merge all events, avoiding duplicates
+        // Note: calendar API returns team events with ID prefix "team_event_", 
+        // while getTeamScheduleEvents returns them with original IDs
+        // We'll use persistedMapped for team_schedule_events (more complete data)
+        // and calendarEvents for shifts and holidays
+        const eventMap = new Map<string, TeamScheduleEvent>();
+        
+        // First add time-off events
+        mapped.forEach(ev => {
+          eventMap.set(ev.id, ev);
+        });
+        
+        // Then add persisted team schedule events (these have complete data including is_shared)
+        persistedMapped.forEach(ev => {
+          eventMap.set(ev.id, ev);
+        });
+        
+        // Finally add calendar events (shifts, holidays, and any team events not already included)
+        calendarEvents.forEach(ev => {
+          // Skip team events that are already in persistedMapped (check by removing "team_event_" prefix)
+          if (ev.id.startsWith('team_event_')) {
+            const originalId = ev.id.replace('team_event_', '');
+            if (eventMap.has(originalId)) {
+              return; // Skip duplicate
+            }
+          }
+          // Skip if already exists
+          if (!eventMap.has(ev.id)) {
+            eventMap.set(ev.id, ev);
+          }
+        });
+        
+        const finalEvents = Array.from(eventMap.values());
+        console.log('[TeamSchedule] Final events after merge:', finalEvents.length);
+        console.log('[TeamSchedule] Sample events:', finalEvents.slice(0, 3));
+        setEvents(finalEvents);
       } catch (calendarError) {
-        console.error("Failed to load calendar events (birthdays, holidays, projects):", calendarError);
+        console.error("Failed to load calendar events:", calendarError);
         // Continue with just team events if calendar fails
-        setEvents([...mapped, ...persistedMapped]);
+        const fallbackEvents = [...mapped, ...persistedMapped];
+        console.log('[TeamSchedule] Fallback events:', fallbackEvents.length);
+        setEvents(fallbackEvents);
       }
     } catch (error) {
       console.error("Failed to seed time off / team events:", error);
@@ -687,13 +780,25 @@ export default function TeamSchedule() {
                               const dateStr = format(day, "yyyy-MM-dd");
                               const isWeekend = day.getDay() === 0 || day.getDay() === 6;
                               const dayEvents = events.filter(
-                                (ev) =>
-                                  coversDate(ev, dateStr) &&
-                                  (
-                                    ev.employee_id === member.employee_id ||
-                                    (ev.is_shared && ev.shared_with_employee_ids?.includes(member.employee_id)) ||
-                                    (!!ev.team_id && selectedTeamId !== "all" && ev.team_id === selectedTeamId)
-                                  ),
+                                (ev) => {
+                                  if (!coversDate(ev, dateStr)) return false;
+                                  
+                                  // Event belongs to this employee
+                                  if (ev.employee_id === member.employee_id) return true;
+                                  
+                                  // Event is shared with this employee
+                                  if (ev.is_shared && Array.isArray(ev.shared_with_employee_ids)) {
+                                    if (ev.shared_with_employee_ids.includes(member.employee_id)) return true;
+                                  }
+                                  
+                                  // Event belongs to the selected team (when a specific team is selected)
+                                  if (!!ev.team_id && selectedTeamId !== "all" && ev.team_id === selectedTeamId) return true;
+                                  
+                                  // For organization-wide view ("all"), show all events for visible members
+                                  if (selectedTeamId === "all" && ev.employee_id === member.employee_id) return true;
+                                  
+                                  return false;
+                                }
                               );
 
                               const isHoliday = dayEvents.some(ev => ev.type === "holiday");
@@ -939,13 +1044,13 @@ export default function TeamSchedule() {
         </div>
       </div>
 
-      {/* Simple add-event dialog (local only for now) */}
+      {/* Add-event dialog: create schedule for specific employees or whole team */}
       <Dialog open={newEventOpen} onOpenChange={setNewEventOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add to team schedule</DialogTitle>
+            <DialogTitle>Add schedule event</DialogTitle>
             <DialogDescription>
-              This adds a local schedule entry. Backend saving and drag-to-resize will come in a later step.
+              Create an event for one or more employees, or for an entire team for the selected day.
             </DialogDescription>
           </DialogHeader>
           <div className="px-4 py-3 space-y-4 max-h-[70vh] overflow-y-auto">
@@ -989,9 +1094,11 @@ export default function TeamSchedule() {
             </div>
             {isManagerLike && visibleMembers.length > 0 && (
               <div className="space-y-2">
-                <Label>Invite employees (optional)</Label>
+                <Label>Target employees (optional)</Label>
                 <p className="text-[11px] text-muted-foreground">
-                  Select one or more team members to add this event to their row. If you leave this empty, the event will apply to the whole team.
+                  Select one or more people to add this event to their row.
+                  If you leave this empty and a specific team is selected in the filter,
+                  the event will apply to the whole team instead.
                 </p>
                 <div className="max-h-32 overflow-y-auto border rounded-md px-2 py-1.5 space-y-1 bg-muted/40">
                   {visibleMembers.map((m) => {

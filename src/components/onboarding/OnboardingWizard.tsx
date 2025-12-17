@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
@@ -567,24 +568,44 @@ export function OnboardingWizard() {
                 <h3 className="font-semibold text-lg">Grades / Levels</h3>
                 <div className="flex flex-col gap-2">
                   <div className="flex gap-2">
-                    <Select
-                      value={newGrade.name}
-                      onValueChange={(value) => {
-                        const match = gradeDefaults.find((g) => g.name === value);
-                        setNewGrade({ name: value, level: match?.level ?? 1 });
-                      }}
-                    >
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Select grade" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {gradeDefaults.map((g) => (
-                          <SelectItem key={g.name} value={g.name}>
-                            {g.name} (Level {g.level})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex-1 relative">
+                      <Input
+                        type="text"
+                        placeholder="Enter custom grade (e.g., SDE1, SDE2, etc.)"
+                        value={newGrade.name}
+                        onChange={(e) => setNewGrade({ ...newGrade, name: e.target.value })}
+                        className="pr-20"
+                      />
+                      {newGrade.name && (
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-6 text-xs">
+                                Quick select
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-48 p-2">
+                              <div className="space-y-1">
+                                <div className="text-xs font-medium mb-2 text-muted-foreground">Common grades:</div>
+                                {gradeDefaults.map((g) => (
+                                  <Button
+                                    key={g.name}
+                                    variant="ghost"
+                                    size="sm"
+                                    className="w-full justify-start h-8 text-xs"
+                                    onClick={() => {
+                                      setNewGrade({ name: g.name, level: g.level });
+                                    }}
+                                  >
+                                    {g.name} (Level {g.level})
+                                  </Button>
+                                ))}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      )}
+                    </div>
                     <Input
                       type="number"
                       placeholder="Level"
@@ -592,12 +613,12 @@ export function OnboardingWizard() {
                       onChange={(e) => setNewGrade({ ...newGrade, level: parseInt(e.target.value) || 1 })}
                       className="w-24"
                     />
-                    <Button onClick={addGrade} size="icon">
+                    <Button onClick={addGrade} size="icon" disabled={!newGrade.name.trim()}>
                       <Plus className="h-4 w-4" />
                     </Button>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Pick a grade and adjust the level if needed.
+                    Enter your custom grade name (e.g., SDE1, SDE2, L1, L2, etc.) and set the level. Use "Quick select" for common options.
                   </div>
                 </div>
                 <div className="space-y-2">

@@ -3,6 +3,22 @@ import { query } from "../db.js";
 
 const router = Router();
 
+// Ensure payroll audit_logs table has expected columns (details JSONB)
+let auditLogsSchemaEnsured = false;
+async function ensureAuditLogsSchema() {
+  if (auditLogsSchemaEnsured) return;
+  try {
+    await query(`
+      ALTER TABLE audit_logs
+      ADD COLUMN IF NOT EXISTS details JSONB
+    `);
+    auditLogsSchemaEnsured = true;
+    console.log("[AUDIT_LOGS] Ensured audit_logs.details column exists");
+  } catch (e: any) {
+    console.error("[AUDIT_LOGS] Failed to ensure audit_logs schema:", e.message);
+  }
+}
+
 // Helper to get organization id from tenantId
 const getOrganizationId = async (tenantId: string): Promise<string | null> => {
   try {
@@ -32,6 +48,8 @@ const getOrganizationId = async (tenantId: string): Promise<string | null> => {
 // Get audit logs with filtering
 router.get("/", async (req: Request, res: Response) => {
   try {
+    await ensureAuditLogsSchema();
+
     const tenantId = (req as any).tenantId as string;
 
     if (!tenantId) {

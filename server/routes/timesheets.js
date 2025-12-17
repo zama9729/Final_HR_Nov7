@@ -714,8 +714,14 @@ router.get('/', authenticateToken, async (req, res) => {
         hasMissingPunches = true;
       }
 
-      // Use hours from timesheet entry if available, otherwise calculate
+      // Use hours from timesheet entry if available (prefer sum of all entries for the day)
+      // If multiple entries exist, clockEntry.hours is already the sum
+      // Otherwise calculate from time difference
       const finalHours = existing?.hours_worked ?? clockEntry?.hours ?? hoursWorked;
+      
+      // Ensure finalHours is a valid number
+      const numericHours = typeof finalHours === 'number' ? finalHours : (typeof finalHours === 'string' ? parseFloat(finalHours) : null);
+      const validatedHours = (numericHours !== null && !isNaN(numericHours) && numericHours >= 0) ? numericHours : null;
 
       rows.push({
         work_date: dateKey,
@@ -724,7 +730,8 @@ router.get('/', authenticateToken, async (req, res) => {
         manual_in: manualIn,
         manual_out: manualOut,
         notes: existing?.notes || existing?.description || null,
-        hours_worked: finalHours,
+        hours_worked: validatedHours,
+        hours: validatedHours, // Also include as 'hours' for frontend compatibility
         source,
         has_missing_punches: hasMissingPunches,
       });

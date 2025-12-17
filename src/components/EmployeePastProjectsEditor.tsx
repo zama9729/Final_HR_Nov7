@@ -5,18 +5,32 @@ import { Textarea } from '@/components/ui/textarea';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 
-export default function EmployeePastProjectsEditor({ employeeId, canEdit = false }: { employeeId: string; canEdit?: boolean }) {
+export default function EmployeePastProjectsEditor({
+  employeeId,
+  canEdit = false,
+}: {
+  employeeId: string;
+  canEdit?: boolean;
+}) {
   const [items, setItems] = useState<any[]>([]);
-  const [form, setForm] = useState({ project_name: '', role: '', start_date: '', end_date: '', technologies: '', description: '' });
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    project_name: '',
+    role: '',
+    start_date: '',
+    end_date: '',
+    technologies: '',
+    description: '',
+  });
 
   const load = async () => {
     if (!employeeId) return;
     try {
-      const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/employees/${employeeId}/projects`, { 
-        headers: { Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` } 
-      });
-      const data = await resp.json();
-      if (resp.ok && Array.isArray(data)) {
+      // Use API client and explicitly request past projects
+      const data = await api.get(
+        `/api/v1/employees/${employeeId}/projects?type=past`,
+      );
+      if (Array.isArray(data)) {
         setItems(data);
       } else {
         console.error('Failed to load past projects:', data);
@@ -27,15 +41,47 @@ export default function EmployeePastProjectsEditor({ employeeId, canEdit = false
       setItems([]);
     }
   };
-  useEffect(() => { if (employeeId) load(); }, [employeeId]);
+
+  useEffect(() => {
+    if (employeeId) load();
+  }, [employeeId]);
 
   const add = async () => {
-    const body = { ...form, technologies: form.technologies ? form.technologies.split(',').map(t => t.trim()) : [] };
-    const resp = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/employees/${employeeId}/projects`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.token || localStorage.getItem('auth_token')}` }, body: JSON.stringify(body)
-    });
-    const data = await resp.json();
-    if (resp.ok) setItems(prev => [data, ...prev]);
+    if (!employeeId || !form.project_name.trim()) return;
+    setSaving(true);
+    try {
+      const body = {
+        ...form,
+        technologies: form.technologies
+          ? form.technologies.split(',').map((t) => t.trim())
+          : [],
+      };
+
+      const data = await api.request(
+        `/api/v1/employees/${employeeId}/projects`,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+      );
+
+      if (data) {
+        setItems((prev) => [data, ...prev]);
+        // Clear form after successful add
+        setForm({
+          project_name: '',
+          role: '',
+          start_date: '',
+          end_date: '',
+          technologies: '',
+          description: '',
+        });
+      }
+    } catch (error) {
+      console.error('Error adding past project:', error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -49,8 +95,19 @@ export default function EmployeePastProjectsEditor({ employeeId, canEdit = false
             <Input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
             <Input type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} />
             <Input placeholder="Technologies (comma-separated)" value={form.technologies} onChange={e => setForm({ ...form, technologies: e.target.value })} className="col-span-2" />
-            <Textarea placeholder="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="col-span-2" />
-            <div className="col-span-2"><Button onClick={add}>Add</Button></div>
+            <Textarea
+              placeholder="Description"
+              value={form.description}
+              onChange={(e) =>
+                setForm({ ...form, description: e.target.value })
+              }
+              className="col-span-2"
+            />
+            <div className="col-span-2">
+              <Button onClick={add} disabled={saving || !form.project_name}>
+                {saving ? 'Saving...' : 'Add'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

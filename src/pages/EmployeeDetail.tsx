@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Progress as ProgressBar } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format, differenceInCalendarDays } from 'date-fns';
 import { DocumentReviewPanel } from '@/components/hr/DocumentReviewPanel';
 import { BackgroundCheckPanel } from '@/components/hr/BackgroundCheckPanel';
@@ -352,11 +353,12 @@ export default function EmployeeDetail() {
     }
   }, [searchParams]);
 
-  const canEdit = userRole && ['hr', 'ceo', 'director', 'admin'].includes(userRole);
-  // Allow viewing: HR/CEO/Director can view anyone, Managers can view anyone (backend will enforce team restriction), Employees can view their own
+  // Only HR-family roles and CEO can edit core employee details (including assigning reporting manager)
+  const canEdit = userRole && ['hr', 'hrbp', 'hradmin', 'ceo'].includes(userRole);
+  // Allow viewing: HR/CEO can view anyone, Managers can view anyone (backend will enforce team restriction), Employees can view their own
   const canView = canEdit || userRole === 'manager' || (userRole === 'employee' && myEmployeeId && id === myEmployeeId);
   const isViewingOtherUser = myEmployeeId && id !== myEmployeeId;
-  const isViewingAsManager = ['manager', 'hr', 'ceo', 'director', 'admin'].includes(userRole || '');
+  const isViewingAsManager = ['manager', 'hr', 'ceo'].includes(userRole || '');
 
   // Utility function to mask sensitive numbers (show only last 4 digits)
   const maskNumber = (value: string | undefined | null, showLastDigits: number = 4): string => {
@@ -680,15 +682,52 @@ export default function EmployeeDetail() {
                     </div>
                   </div>
                   
-                  {employee.reporting_manager && (
-                    <div className="pt-4 border-t">
+                  <div className="pt-4 border-t space-y-1">
+                    <div className="flex items-center justify-between">
                       <Label className="text-muted-foreground">Reporting Manager</Label>
-                      <p className="font-medium">
-                        {employee.reporting_manager.first_name} {employee.reporting_manager.last_name}
-                        {employee.reporting_manager.position && ` - ${employee.reporting_manager.position}`}
-                      </p>
+                      {canEdit && (
+                        <span className="text-[11px] text-muted-foreground">
+                          Only HR / CEO can change
+                        </span>
+                      )}
                     </div>
-                  )}
+                    {canEdit ? (
+                      <Select
+                        value={formData.reportingManagerId}
+                        onValueChange={(value) =>
+                          setFormData((prev) => ({ ...prev, reportingManagerId: value }))
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue
+                            placeholder={
+                              managers.length === 0
+                                ? 'No managers available'
+                                : 'Select reporting manager'
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">None</SelectItem>
+                          {managers.map((mgr) => (
+                            <SelectItem key={mgr.id} value={mgr.id}>
+                              {mgr.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="font-medium">
+                        {employee.reporting_manager
+                          ? `${employee.reporting_manager.first_name} ${employee.reporting_manager.last_name}${
+                              employee.reporting_manager.position
+                                ? ` - ${employee.reporting_manager.position}`
+                                : ''
+                            }`
+                          : 'N/A'}
+                      </p>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 

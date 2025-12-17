@@ -1077,19 +1077,41 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Update employee (HR/CEO only)
+// Helper: send a simple in-app notification to an employee's user account
+async function sendEmployeeNotification(tenantId, employeeId, { title, message, type = 'org' }) {
+  try {
+    if (!tenantId || !employeeId) return;
+
+    const empResult = await query(
+      'SELECT user_id FROM employees WHERE id = $1 AND tenant_id = $2',
+      [employeeId, tenantId]
+    );
+    const userId = empResult.rows[0]?.user_id;
+    if (!userId) return;
+
+    await query(
+      `INSERT INTO notifications (tenant_id, user_id, title, message, type, created_at)
+       VALUES ($1, $2, $3, $4, $5, now())`,
+      [tenantId, userId, title, message, type]
+    );
+  } catch (error) {
+    console.error('Failed to send employee notification:', error);
+  }
+}
+
+// Update employee (HR/CEO only – includes assigning reporting manager)
 router.patch('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Check role - only HR/CEO/Director can update
+    // Check role - only HR-family roles and CEO can update core employee data (including reporting manager)
     const roleResult = await query(
       'SELECT role FROM user_roles WHERE user_id = $1',
       [req.user.id]
     );
     const userRole = roleResult.rows[0]?.role;
     
-    if (!userRole || !['hr', 'director', 'ceo'].includes(userRole)) {
+    if (!userRole || !['hr', 'hrbp', 'hradmin', 'ceo'].includes(userRole)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
@@ -1250,6 +1272,45 @@ router.patch('/:id', authenticateToken, async (req, res) => {
           }
           if (reportingManagerId !== undefined && oldValues.reporting_manager_id !== newValues.reporting_manager_id) {
             diff.reporting_manager_id = { old: oldValues.reporting_manager_id, new: newValues.reporting_manager_id };
+
+            // Send notifications when reporting manager changes
+            try {
+              const oldMgrId = oldValues.reporting_manager_id || null;
+              const newMgrId = newValues.reporting_manager_id || null;
+
+              // Notify the employee about the change
+              await sendEmployeeNotification(tenantId, id, {
+                title: 'Reporting manager updated',
+                message: oldMgrId && newMgrId && oldMgrId !== newMgrId
+                  ? 'Your reporting manager has been changed.'
+                  : newMgrId && !oldMgrId
+                  ? 'A reporting manager has been assigned to you.'
+                  : !newMgrId && oldMgrId
+                  ? 'Your reporting manager assignment has been removed.'
+                  : 'Your reporting manager details have been updated.',
+                type: 'org',
+              });
+
+              // Notify the new reporting manager
+              if (newMgrId && newMgrId !== oldMgrId) {
+                await sendEmployeeNotification(tenantId, newMgrId, {
+                  title: 'New direct report assigned',
+                  message: 'You have been assigned as reporting manager for a team member.',
+                  type: 'org',
+                });
+              }
+
+              // Notify the previous reporting manager (if any) that they are no longer manager
+              if (oldMgrId && oldMgrId !== newMgrId) {
+                await sendEmployeeNotification(tenantId, oldMgrId, {
+                  title: 'Reporting line updated',
+                  message: 'A team member is no longer assigned to you as a direct report.',
+                  type: 'org',
+                });
+              }
+            } catch (notifyError) {
+              console.error('Failed to send reporting manager change notifications:', notifyError);
+            }
           }
           
           if (Object.keys(diff).length > 0) {

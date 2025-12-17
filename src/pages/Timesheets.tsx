@@ -786,20 +786,29 @@ export default function Timesheets() {
         if (!Array.isArray(entryArray)) return sum;
         const dayTotal = entryArray.reduce((daySum, entry) => {
           if (!entry || typeof entry !== 'object') return daySum;
+          // Skip holiday entries as they don't count toward hours
+          if (entry.is_holiday) return daySum;
+          
+          // Prefer hours_worked, fallback to hours
           let hours = 0;
-          if (typeof entry.hours === 'number') {
+          if (typeof entry.hours_worked === 'number' && !isNaN(entry.hours_worked)) {
+            hours = entry.hours_worked;
+          } else if (typeof entry.hours === 'number' && !isNaN(entry.hours)) {
             hours = entry.hours;
+          } else if (typeof entry.hours_worked === 'string') {
+            hours = parseFloat(entry.hours_worked) || 0;
           } else if (typeof entry.hours === 'string') {
             hours = parseFloat(entry.hours) || 0;
           } else {
             hours = 0;
           }
-          return daySum + hours;
+          // Ensure hours is non-negative
+          return daySum + Math.max(0, hours);
         }, 0);
         return sum + dayTotal;
       }, 0);
       const result = Number(total);
-      return Number.isNaN(result) ? 0 : result;
+      return Number.isNaN(result) ? 0 : Math.max(0, result);
     } catch (error) {
       console.error('Error calculating total:', error);
       return 0;

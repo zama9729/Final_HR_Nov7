@@ -5,6 +5,60 @@ import { setTenantContext } from '../middleware/tenant.js';
 import { audit } from '../utils/auditLog.js';
 import { applyPromotion } from '../services/promotion-service.js';
 
+// Ensure promotions schema exists (for environments where migration didn't run)
+let promotionsSchemaEnsured = false;
+async function ensurePromotionsSchema() {
+  if (promotionsSchemaEnsured) return;
+  try {
+    // Create enum type if missing
+    await query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'promotion_status') THEN
+          CREATE TYPE promotion_status AS ENUM ('DRAFT','PENDING_APPROVAL','APPROVED','REJECTED');
+        END IF;
+      END
+      $$;
+    `);
+
+    // Create promotions table if missing (simplified version of migration)
+    await query(`
+      CREATE TABLE IF NOT EXISTS promotions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        appraisal_id UUID REFERENCES performance_reviews(id) ON DELETE SET NULL,
+        old_designation TEXT,
+        old_grade TEXT,
+        old_department_id UUID REFERENCES org_branches(id) ON DELETE SET NULL,
+        old_ctc NUMERIC(12, 2),
+        new_designation TEXT NOT NULL,
+        new_grade TEXT,
+        new_department_id UUID REFERENCES org_branches(id) ON DELETE SET NULL,
+        new_ctc NUMERIC(12, 2),
+        reason_text TEXT,
+        recommendation_by_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+        approved_by_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+        status promotion_status NOT NULL DEFAULT 'DRAFT',
+        effective_date DATE NOT NULL,
+        rejected_at TIMESTAMP WITH TIME ZONE,
+        rejection_reason TEXT,
+        applied BOOLEAN DEFAULT false,
+        applied_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+        approved_at TIMESTAMP WITH TIME ZONE,
+        CONSTRAINT valid_effective_date CHECK (effective_date >= DATE(created_at))
+      );
+    `);
+
+    promotionsSchemaEnsured = true;
+    console.log('[promotions] Schema ensured');
+  } catch (error) {
+    console.error('Failed to ensure promotions schema:', error);
+  }
+}
+
 // Helper to send notification to employee
 async function notifyEmployee(tenantId, employeeId, title, message, type = 'promotion') {
   try {
@@ -40,6 +94,7 @@ async function getTenantId(userId) {
 // GET /api/promotions - List promotions (HR/Admin/Manager)
 router.get('/', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
+    await ensurePromotionsSchema();
     const tenantId = await getTenantId(req.user.id);
     if (!tenantId) {
       return res.status(403).json({ error: 'No organization found' });
@@ -114,6 +169,7 @@ router.get('/', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'a
 // GET /api/promotions/:id - Get single promotion
 router.get('/:id', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
+    await ensurePromotionsSchema();
     const tenantId = await getTenantId(req.user.id);
     if (!tenantId) {
       return res.status(403).json({ error: 'No organization found' });
@@ -161,6 +217,7 @@ router.get('/:id', authenticateToken, setTenantContext, requireRole('hr', 'ceo',
 // POST /api/promotions - Create promotion
 router.post('/', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
+    await ensurePromotionsSchema();
     const tenantId = await getTenantId(req.user.id);
     if (!tenantId) {
       return res.status(403).json({ error: 'No organization found' });
@@ -267,6 +324,7 @@ router.post('/', authenticateToken, setTenantContext, requireRole('hr', 'ceo', '
 // PATCH /api/promotions/:id - Update promotion (only if DRAFT or PENDING_APPROVAL)
 router.patch('/:id', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
+    await ensurePromotionsSchema();
     const tenantId = await getTenantId(req.user.id);
     if (!tenantId) {
       return res.status(403).json({ error: 'No organization found' });
@@ -332,6 +390,7 @@ router.patch('/:id', authenticateToken, setTenantContext, requireRole('hr', 'ceo
 // POST /api/promotions/:id/submit - Submit for approval
 router.post('/:id/submit', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director', 'manager'), async (req, res) => {
   try {
+    await ensurePromotionsSchema();
     const tenantId = await getTenantId(req.user.id);
     if (!tenantId) {
       return res.status(403).json({ error: 'No organization found' });
@@ -362,6 +421,7 @@ router.post('/:id/submit', authenticateToken, setTenantContext, requireRole('hr'
 // POST /api/promotions/:id/approve - Approve promotion
 router.post('/:id/approve', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
   try {
+    await ensurePromotionsSchema();
     const tenantId = await getTenantId(req.user.id);
     if (!tenantId) {
       return res.status(403).json({ error: 'No organization found' });
@@ -432,6 +492,7 @@ router.post('/:id/approve', authenticateToken, setTenantContext, requireRole('hr
 // POST /api/promotions/:id/reject - Reject promotion
 router.post('/:id/reject', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin', 'director'), async (req, res) => {
   try {
+    await ensurePromotionsSchema();
     const tenantId = await getTenantId(req.user.id);
     if (!tenantId) {
       return res.status(403).json({ error: 'No organization found' });
