@@ -80,14 +80,17 @@ export default function Teams() {
     setLoading(true);
     try {
       const type = activeTab === 'functional' ? 'FUNCTIONAL' : 'PROJECT';
-      const data = await api.getTeams({ type, search: searchQuery || undefined, active: true });
-      setTeams(data);
+      const data = await api.getTeams({ type, search: searchQuery || undefined });
+      console.log('[Teams] Fetched teams:', data);
+      setTeams(Array.isArray(data) ? data : []);
     } catch (error: any) {
+      console.error('[Teams] Error fetching teams:', error);
       toast({
         title: 'Error',
         description: error.message || 'Failed to fetch teams',
         variant: 'destructive',
       });
+      setTeams([]);
     } finally {
       setLoading(false);
     }

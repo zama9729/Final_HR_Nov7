@@ -55,39 +55,34 @@ const EVENT_TYPE_CONFIG: Record<string, { icon: any; color: string; bgColor: str
 
 export default function AnimatedHistoryTimeline({ events, loading = false }: AnimatedHistoryTimelineProps) {
   const [animatedEvents, setAnimatedEvents] = useState<EmployeeEvent[]>([]);
-  const [lineProgress, setLineProgress] = useState<Record<string, number>>({});
   const timelineRef = useRef<HTMLDivElement>(null);
   const dotRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
-  // Sort events by date (newest first)
+  // Sort events by date (oldest first - chronological order)
   const sortedEvents = [...events].sort((a, b) => {
-    return new Date(b.event_date).getTime() - new Date(a.event_date).getTime();
+    const dateA = new Date(a.event_date).getTime();
+    const dateB = new Date(b.event_date).getTime();
+    // If dates are the same, use created_at as tiebreaker
+    if (dateA === dateB) {
+      return new Date(a.created_at || a.event_date).getTime() - new Date(b.created_at || b.event_date).getTime();
+    }
+    return dateA - dateB;
   });
 
   useEffect(() => {
-    if (loading || sortedEvents.length === 0) return;
+    if (loading || sortedEvents.length === 0) {
+      setAnimatedEvents([]);
+      return;
+    }
 
     // Reset animation state
     setAnimatedEvents([]);
-    setLineProgress({});
 
     // Animate events appearing one by one
     sortedEvents.forEach((event, index) => {
       setTimeout(() => {
         setAnimatedEvents((prev) => [...prev, event]);
       }, index * 150); // 150ms delay between each event
-    });
-
-    // Animate connecting lines
-    sortedEvents.forEach((event, index) => {
-      if (index < sortedEvents.length - 1) {
-        setTimeout(() => {
-          setLineProgress((prev) => ({
-            ...prev,
-            [event.id]: 100,
-          }));
-        }, index * 150 + 200);
-      }
     });
   }, [events, loading]);
 
@@ -111,7 +106,10 @@ export default function AnimatedHistoryTimeline({ events, loading = false }: Ani
 
   return (
     <div ref={timelineRef} className="relative">
-      <div className="space-y-6">
+      {/* Vertical timeline line - continuous line from top to bottom */}
+      <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-gray-200"></div>
+      
+      <div className="space-y-6 relative pl-4">
         {sortedEvents.map((event, index) => {
           const config = EVENT_TYPE_CONFIG[event.event_type] || {
             icon: Briefcase,
@@ -121,45 +119,26 @@ export default function AnimatedHistoryTimeline({ events, loading = false }: Ani
           };
           const Icon = config.icon;
           const isVisible = animatedEvents.some((e) => e.id === event.id);
-          const isLast = index === sortedEvents.length - 1;
-          const lineProgressValue = lineProgress[event.id] || 0;
 
           return (
             <div key={event.id} className="relative flex gap-4">
-              {/* Timeline line and dot */}
-              <div className="flex flex-col items-center">
-                {/* Dot */}
+              {/* Timeline dot - positioned on the vertical line */}
+              <div className="relative flex-shrink-0" style={{ width: '48px' }}>
+                {/* Dot - centered on the vertical line at left-6 (24px) */}
                 <div
                   ref={(el) => {
                     if (el) dotRefs.current.set(event.id, el);
                   }}
-                  className={`relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 border-white shadow-md transition-all duration-500 ${
+                  className={`absolute z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 border-white shadow-md transition-all duration-500 ${
                     isVisible ? 'scale-100 opacity-100' : 'scale-0 opacity-0'
                   } ${config.bgColor}`}
                   style={{
                     transitionDelay: `${index * 150}ms`,
+                    left: '0px', // Align with vertical line (left-6 = 24px, dot is 48px wide, so center at 24px = left-0 of 48px container)
                   }}
                 >
                   <Icon className={`h-5 w-5 ${config.color}`} />
                 </div>
-
-                {/* Connecting line */}
-                {!isLast && (
-                  <div
-                    className="relative mt-2 w-0.5 bg-gray-200"
-                    style={{ height: 'calc(100% + 1.5rem)' }}
-                  >
-                    <div
-                      className={`absolute top-0 left-0 w-full bg-gradient-to-b from-blue-400 to-blue-600 transition-all duration-700 ease-out ${
-                        lineProgressValue > 0 ? 'opacity-100' : 'opacity-0'
-                      }`}
-                      style={{
-                        height: `${lineProgressValue}%`,
-                        transitionDelay: `${index * 150 + 200}ms`,
-                      }}
-                    />
-                  </div>
-                )}
               </div>
 
               {/* Event card */}
@@ -199,4 +178,3 @@ export default function AnimatedHistoryTimeline({ events, loading = false }: Ani
     </div>
   );
 }
-

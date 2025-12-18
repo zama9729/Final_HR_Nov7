@@ -176,10 +176,13 @@ router.get('/', authenticateToken, setTenantContext, async (req, res) => {
     `);
     if (activeColCheck.rows.length > 0 && active !== undefined) {
       if (active === 'true' || active === true) {
-        filters.push('t.is_active = true');
-      } else {
+        filters.push('(t.is_active = true OR t.is_active IS NULL)');
+      } else if (active === 'false' || active === false) {
         filters.push('t.is_active = false');
       }
+    } else {
+      // If is_active column doesn't exist, don't filter by it
+      // This allows teams without the column to still be shown
     }
     
     if (search) {
@@ -237,6 +240,7 @@ router.get('/', authenticateToken, setTenantContext, async (req, res) => {
       orgId
     );
     
+    console.log(`[Teams API] OrgId: ${orgId}, Found ${result.rows.length} teams, Filters: ${filters.join(' AND ')}`);
     res.json({ teams: result.rows });
   } catch (error) {
     console.error('Error fetching teams:', error);
