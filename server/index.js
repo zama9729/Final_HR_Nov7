@@ -329,6 +329,49 @@ createPool().then(async () => {
     console.error('Error ensuring manager roles:', error);
   }
 
+  // Ensure employee_event_type enum includes probation events
+  // Use DO block with exception handling since PostgreSQL doesn't support IF NOT EXISTS for ALTER TYPE
+  try {
+    await dbQuery(`
+      DO $$ 
+      BEGIN
+        -- Add PROBATION_START
+        BEGIN
+          ALTER TYPE employee_event_type ADD VALUE 'PROBATION_START';
+        EXCEPTION WHEN OTHERS THEN
+          -- Value might already exist or other error, check message
+          IF SQLERRM NOT LIKE '%already exists%' AND SQLERRM NOT LIKE '%duplicate%' THEN
+            RAISE;
+          END IF;
+        END;
+        
+        -- Add PROBATION_END
+        BEGIN
+          ALTER TYPE employee_event_type ADD VALUE 'PROBATION_END';
+        EXCEPTION WHEN OTHERS THEN
+          IF SQLERRM NOT LIKE '%already exists%' AND SQLERRM NOT LIKE '%duplicate%' THEN
+            RAISE;
+          END IF;
+        END;
+        
+        -- Add ANNIVERSARY (used in history timeline)
+        BEGIN
+          ALTER TYPE employee_event_type ADD VALUE 'ANNIVERSARY';
+        EXCEPTION WHEN OTHERS THEN
+          IF SQLERRM NOT LIKE '%already exists%' AND SQLERRM NOT LIKE '%duplicate%' THEN
+            RAISE;
+          END IF;
+        END;
+      END $$;
+    `);
+    console.log('[Migration] Ensured employee_event_type enum includes PROBATION_START, PROBATION_END, and ANNIVERSARY.');
+  } catch (error) {
+    // If enum doesn't exist yet, that's okay - it will be created by the migration
+    if (!error.message.includes('type "employee_event_type" does not exist')) {
+      console.error('[Migration] Failed to ensure employee_event_type enum values:', error.message);
+    }
+  }
+
   // Ensure probation policy migration runs
   try {
     await dbQuery(`

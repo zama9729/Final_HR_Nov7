@@ -72,6 +72,8 @@ router.post('/backfill', authenticateToken, setTenantContext, requireRole('hr', 
     // 2. Are not terminated/on_hold/resigned
     // 3. Have been with company longer than probation period
     // 4. Either don't have probation record, or probation is not completed, or employee is not confirmed
+    // Query employees - use a safer approach to avoid enum casting errors with empty strings
+    // First get all employees, then filter in JavaScript to avoid PostgreSQL enum casting issues
     const employeesResult = await query(
       `SELECT 
          e.id as employee_id,
@@ -89,14 +91,6 @@ router.post('/backfill', authenticateToken, setTenantContext, requireRole('hr', 
          AND e.join_date IS NOT NULL
          AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
          AND (e.join_date + INTERVAL '1 day' * $2) < CURRENT_DATE
-         AND (
-           -- No probation record exists
-           p.id IS NULL
-           -- OR probation record exists but status is not 'completed'
-           OR (p.status IS DISTINCT FROM 'completed')
-           -- OR probation is completed but employee status is not 'confirmed'
-           OR (p.status = 'completed' AND COALESCE(e.status, '') != 'confirmed' AND COALESCE(e.probation_status, '') != 'completed')
-         )
        ORDER BY e.join_date ASC`,
       [tenantId, probationDays]
     );
@@ -140,6 +134,7 @@ router.post('/backfill', authenticateToken, setTenantContext, requireRole('hr', 
 
     for (const emp of employees) {
       try {
+
         const joinDate = new Date(emp.join_date);
         const probationEndDate = new Date(joinDate);
         probationEndDate.setDate(probationEndDate.getDate() + probationDays);
@@ -164,16 +159,21 @@ router.post('/backfill', authenticateToken, setTenantContext, requireRole('hr', 
         // Create or update probation record
         if (emp.probation_id) {
           // Update existing probation record
-          await query(
-            `UPDATE probations 
-             SET status = 'completed',
-                 completed_at = $1,
-                 updated_at = now()
-             WHERE id = $2`,
-            [confirmationDate, emp.probation_id]
-          );
+          // Check if current status is valid before updating
+          const currentStatus = emp.probation_status_record_text || emp.probation_status_record;
+          if (currentStatus && currentStatus !== '' && currentStatus !== 'completed') {
+            await query(
+              `UPDATE probations 
+               SET status = 'completed'::probation_status_enum,
+                   completed_at = $1,
+                   updated_at = now()
+               WHERE id = $2`,
+              [confirmationDate, emp.probation_id]
+            );
+          }
         } else {
           // Create new probation record
+          // Ensure all required fields are provided and not empty strings
           const probationResult = await query(
             `INSERT INTO probations (
               tenant_id, employee_id, probation_start, probation_end,
@@ -181,7 +181,7 @@ router.post('/backfill', authenticateToken, setTenantContext, requireRole('hr', 
               is_eligible_for_perks, requires_mid_probation_review,
               auto_confirm_at_end, probation_notice_days, completed_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, 'completed', $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::probation_status_enum, $8, $9, $10, $11, $12)
             RETURNING *`,
             [
               tenantId,
@@ -189,11 +189,12 @@ router.post('/backfill', authenticateToken, setTenantContext, requireRole('hr', 
               joinDate,
               probationEndDate,
               probationDays,
-              policy.allowed_leave_days,
+              policy.allowed_leave_days || 0,
+              'completed', // status enum value - explicitly cast to enum
               true, // is_eligible_for_perks
-              policy.requires_mid_probation_review,
-              policy.auto_confirm_at_end,
-              policy.probation_notice_days,
+              policy.requires_mid_probation_review || false,
+              policy.auto_confirm_at_end || false,
+              policy.probation_notice_days || 0,
               confirmationDate,
             ]
           );
@@ -201,10 +202,13 @@ router.post('/backfill', authenticateToken, setTenantContext, requireRole('hr', 
         }
 
         // Update employee status
+        // Use 'completed' for probation_status enum to match auto-confirm service
+        // Valid enum values: 'in_probation', 'extended', 'completed', 'failed', 'confirmed'
+        // Use a single UPDATE with COALESCE to handle NULL/empty string cases
         await query(
           `UPDATE employees 
            SET status = 'confirmed',
-               probation_status = 'completed',
+               probation_status = 'completed'::probation_status_enum,
                updated_at = now()
            WHERE id = $1`,
           [emp.employee_id]
