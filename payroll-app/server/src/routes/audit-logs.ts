@@ -3,17 +3,19 @@ import { query } from "../db.js";
 
 const router = Router();
 
-// Ensure payroll audit_logs table has expected columns (details JSONB)
+// Ensure payroll audit_logs table has expected columns (details JSONB, entity_type, entity_id)
 let auditLogsSchemaEnsured = false;
 async function ensureAuditLogsSchema() {
   if (auditLogsSchemaEnsured) return;
   try {
     await query(`
       ALTER TABLE audit_logs
-      ADD COLUMN IF NOT EXISTS details JSONB
+      ADD COLUMN IF NOT EXISTS details JSONB,
+      ADD COLUMN IF NOT EXISTS entity_type TEXT,
+      ADD COLUMN IF NOT EXISTS entity_id UUID
     `);
     auditLogsSchemaEnsured = true;
-    console.log("[AUDIT_LOGS] Ensured audit_logs.details column exists");
+    console.log("[AUDIT_LOGS] Ensured audit_logs.details, entity_type, entity_id columns exist");
   } catch (e: any) {
     console.error("[AUDIT_LOGS] Failed to ensure audit_logs schema:", e.message);
   }

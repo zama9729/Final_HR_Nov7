@@ -1248,7 +1248,8 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
        pev.ifsc_code as bank_ifsc,
        pev.uan_number,
        pev.pf_number,
-       pov.company_name as tenant_name
+       pov.company_name as tenant_name,
+       pov.logo_url as tenant_logo_url
       FROM payroll_employee_payslip_view pepv
       LEFT JOIN payroll_employee_view pev ON pepv.employee_id = pev.employee_id AND pepv.org_id = pev.org_id
       LEFT JOIN payroll_organization_view pov ON pepv.org_id = pov.org_id
@@ -1317,37 +1318,60 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     const contentWidth = pageWidth - (margin * 2);
 
     // ===== HEADER SECTION =====
-    // Company Logo Area (left side)
-    const logoPath = path.join(__dirname, '../../public/logo.png');
-    let logoLoaded = false;
+    // Company Logo Area (left side) - prefer organization's logo_url, fallback to local logo.png
+    let logoPlaced = false;
 
-    if (fs.existsSync(logoPath)) {
+    if (payslip.tenant_logo_url) {
       try {
-        doc.image(logoPath, margin, margin, { width: 120 });
-        logoLoaded = true;
+        const resp = await fetch(payslip.tenant_logo_url as string);
+        if (resp.ok) {
+          const arrayBuffer = await resp.arrayBuffer();
+          const logoBuffer = Buffer.from(arrayBuffer);
+          doc.image(logoBuffer, margin, margin, { width: 120 });
+          logoPlaced = true;
+        }
       } catch (e) {
-        console.error("Error loading logo:", e);
+        console.error("[PAYSLIP] Failed to load tenant logo from URL:", e);
       }
     }
 
-    if (!logoLoaded) {
-      doc.fontSize(16).font('Helvetica-Bold').fillColor('#DC2626');
-      doc.text('ZARAVYA', margin, margin);
+    if (!logoPlaced) {
+      const logoPath = path.join(__dirname, '../../public/logo.png');
+      if (fs.existsSync(logoPath)) {
+        try {
+          doc.image(logoPath, margin, margin, { width: 120 });
+          logoPlaced = true;
+        } catch (e) {
+          console.error("Error loading fallback logo:", e);
+        }
+      }
     }
-
-    doc.fontSize(8).font('Helvetica').fillColor('#000000');
-    doc.text('INFORMATION DESTILLED', margin, margin + 50);
 
     // Company Name and Details (right side)
     const companyName = payslip.tenant_name || 'COMPANY NAME';
     doc.fontSize(12).font('Helvetica-Bold').fillColor('#000000');
     doc.text(companyName.toUpperCase(), margin + 200, margin, { width: 300, align: 'right' });
 
-    // Company Address (placeholder - can be added to tenants table)
+    // Fetch organization's registered address from HR organizations table (if available)
+    let orgAddress: string | null = null;
+    try {
+      const addrRes = await query(
+        "SELECT registered_address FROM organizations WHERE id = $1",
+        [tenantId]
+      );
+      orgAddress = addrRes.rows[0]?.registered_address || null;
+    } catch (err: any) {
+      console.error("[PAYSLIP] Failed to load organization address:", err.message);
+    }
+
+    // Company Address: use registered_address if present, otherwise skip
     doc.fontSize(8).font('Helvetica');
-    doc.text('Mezzenine Floor, Block D, Cyber Gateway, Hitech City,', margin + 200, margin + 20, { width: 300, align: 'right' });
-    doc.text('Madhapur, Hyderabad - 500081', margin + 200, margin + 32, { width: 300, align: 'right' });
-    doc.text('www.zaravya.com', margin + 200, margin + 44, { width: 300, align: 'right' });
+    if (orgAddress && orgAddress.trim().length > 0) {
+      const lines = orgAddress.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      lines.forEach((line, idx) => {
+        doc.text(line, margin + 200, margin + 20 + idx * 12, { width: 300, align: 'right' });
+      });
+    }
 
     // Title
     doc.moveDown(3);
@@ -1544,11 +1568,14 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     doc.y = summaryY + summaryRowHeight + 20;
 
     // ===== FOOTER =====
-    doc.moveDown(2);
+    // Place disclaimer at bottom-center of the page
+    const footerText = 'This is computer generated pay slip, does not require signature.';
     doc.fontSize(8).font('Helvetica').fillColor('#666666');
     doc.text(
-      'This is computer generated pay slip, does not require signature.',
-      { align: 'center' }
+      footerText,
+      margin,
+      pageHeight - margin - 20,
+      { width: contentWidth, align: 'center' }
     );
     doc.fillColor('#000000'); // Reset to black
 
@@ -4768,10 +4795,11 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
 
     const cycle = cycleResult.rows[0];
 
-    // Only allow processing of approved or pending_approval cycles
-    if (!['approved', 'pending_approval'].includes(cycle.status)) {
+    // Allow processing from draft, pending_approval, or approved.
+    // Draft cycles will be transitioned to 'processing' as part of this handler.
+    if (!['draft', 'approved', 'pending_approval'].includes(cycle.status)) {
       return res.status(400).json({
-        error: `Cannot process payroll. Current status is '${cycle.status}'. Only 'pending_approval' or 'approved' payroll can be processed.`
+        error: `Cannot process payroll. Current status is '${cycle.status}'. Only 'draft', 'pending_approval' or 'approved' payroll can be processed.`
       });
     }
     const payrollMonth = cycle.month;
@@ -4792,12 +4820,12 @@ appRouter.post("/payroll-cycles/:cycleId/process", requireAuth, async (req, res)
     };
 
     // Get all active employees who were employed by the payroll month
-    // Include employees with NULL status (similar to preview endpoint)
+    // Use unified payroll_employee_view to avoid schema drift on employees table
     const employeesResult = await query(
-      `SELECT e.id, e.full_name, e.email, e.employee_id
-       FROM employees e
-       WHERE e.tenant_id = $1 
-         AND (e.status = 'active' OR e.status IS NULL)
+      `SELECT e.employee_id as id, e.full_name, e.email, e.employee_id
+       FROM payroll_employee_view e
+       WHERE e.org_id = $1
+         AND (e.employment_status = 'active' OR e.employment_status IS NULL)
          AND (e.date_of_joining IS NULL OR e.date_of_joining <= $2)
        ORDER BY e.date_of_joining ASC`,
       [tenantId, payrollMonthEnd.toISOString()]
