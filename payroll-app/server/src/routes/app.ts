@@ -10,6 +10,10 @@ import ExcelJS from "exceljs";
 import reimbursementsRouter from "./reimbursements.js";
 import reimbursementRunsRouter from "./reimbursement-runs.js";
 import auditLogsRouter from "./audit-logs.js";
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 const PROOFS_DIRECTORY =
@@ -1231,27 +1235,25 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     const payslipResult = await query(
       `
       SELECT 
-        pev.*,
-        ev.full_name,
-        ev.employee_code,
-        ev.email,
-        ev.designation,
-        ev.department,
-        ev.date_of_joining,
-        ev.pan_number,
-        ev.bank_account_number,
-        ev.ifsc_code AS bank_ifsc,
-        ev.bank_name,
-        pc.month,
-        pc.year,
-        pc.payday,
-        o.name AS tenant_name
-      FROM payroll_employee_payslip_view pev
-      JOIN payroll_cycles pc ON pc.id = pev.payroll_cycle_id
-      JOIN organizations o ON o.id = pev.org_id
-      JOIN payroll_employee_view ev ON ev.employee_id = pev.employee_id AND ev.org_id = pev.org_id
-      WHERE pev.payslip_id = $1 
-        AND pev.org_id = $2
+       pepv.*,
+       pev.full_name,
+       pev.employee_code,
+       pev.email,
+       pev.designation,
+       pev.department,
+       pev.date_of_joining,
+       pev.pan_number,
+       pev.bank_account_number,
+       pev.bank_name,
+       pev.ifsc_code as bank_ifsc,
+       pev.uan_number,
+       pev.pf_number,
+       pov.company_name as tenant_name
+      FROM payroll_employee_payslip_view pepv
+      LEFT JOIN payroll_employee_view pev ON pepv.employee_id = pev.employee_id AND pepv.org_id = pev.org_id
+      LEFT JOIN payroll_organization_view pov ON pepv.org_id = pov.org_id
+      WHERE pepv.payslip_id = $1 
+        AND pepv.org_id = $2
       `,
       [payslipId, tenantId]
     );
@@ -1315,11 +1317,26 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     const contentWidth = pageWidth - (margin * 2);
 
     // ===== HEADER SECTION =====
-    // Company Logo Area (left side - placeholder for logo)
-    doc.fontSize(16).font('Helvetica-Bold').fillColor('#DC2626'); // Red color
-    doc.text('ZARAVYA', margin, margin);
+    // Company Logo Area (left side)
+    const logoPath = path.join(__dirname, '../../public/logo.png');
+    let logoLoaded = false;
+
+    if (fs.existsSync(logoPath)) {
+      try {
+        doc.image(logoPath, margin, margin, { width: 120 });
+        logoLoaded = true;
+      } catch (e) {
+        console.error("Error loading logo:", e);
+      }
+    }
+
+    if (!logoLoaded) {
+      doc.fontSize(16).font('Helvetica-Bold').fillColor('#DC2626');
+      doc.text('ZARAVYA', margin, margin);
+    }
+
     doc.fontSize(8).font('Helvetica').fillColor('#000000');
-    doc.text('INFORMATION DESTILLED', margin, margin + 20);
+    doc.text('INFORMATION DESTILLED', margin, margin + 50);
 
     // Company Name and Details (right side)
     const companyName = payslip.tenant_name || 'COMPANY NAME';
@@ -1355,51 +1372,54 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     // Left Column - Row 1
     doc.fontSize(9).font('Helvetica');
     doc.text('Employee No:', margin + 5, tableStartY + 3);
-    doc.font('Helvetica-Bold').text(payslip.employee_code || 'N/A', margin + 80, tableStartY + 3);
+    doc.font('Helvetica-Bold').text(payslip.employee_code || 'N/A', margin + 100, tableStartY + 3);
 
     // Left Column - Row 2
     doc.font('Helvetica').text('Employee Name:', margin + 5, tableStartY + rowHeight + 3);
-    doc.font('Helvetica-Bold').text(payslip.full_name || 'N/A', margin + 80, tableStartY + rowHeight + 3);
+    doc.font('Helvetica-Bold').text(payslip.full_name || 'N/A', margin + 100, tableStartY + rowHeight + 3);
 
     // Left Column - Row 3
     doc.font('Helvetica').text('Designation:', margin + 5, tableStartY + rowHeight * 2 + 3);
-    doc.font('Helvetica-Bold').text(payslip.designation || 'N/A', margin + 80, tableStartY + rowHeight * 2 + 3);
+    doc.font('Helvetica-Bold').text(payslip.designation || 'N/A', margin + 100, tableStartY + rowHeight * 2 + 3);
 
     // Left Column - Row 4
     doc.font('Helvetica').text('DOI:', margin + 5, tableStartY + rowHeight * 3 + 3);
-    doc.font('Helvetica-Bold').text(formatDate(payslip.date_of_joining), margin + 80, tableStartY + rowHeight * 3 + 3);
+    doc.font('Helvetica-Bold').text(formatDate(payslip.date_of_joining), margin + 100, tableStartY + rowHeight * 3 + 3);
 
     // Left Column - Row 5
     doc.font('Helvetica').text('EPF No.:', margin + 5, tableStartY + rowHeight * 4 + 3);
-    doc.font('Helvetica-Bold').text('N/A', margin + 80, tableStartY + rowHeight * 4 + 3); // EPF not in schema
+    doc.font('Helvetica-Bold').text(payslip.pf_number || 'N/A', margin + 100, tableStartY + rowHeight * 4 + 3);
 
     // Left Column - Row 6
     doc.font('Helvetica').text('Total Working Days:', margin + 5, tableStartY + rowHeight * 5 + 3);
-    doc.font('Helvetica-Bold').text(totalWorkingDays.toString(), margin + 80, tableStartY + rowHeight * 5 + 3);
+    doc.font('Helvetica-Bold').text(totalWorkingDays.toString(), margin + 100, tableStartY + rowHeight * 5 + 3);
 
     // Right Column - Row 1
-    doc.font('Helvetica').text('PAN:', margin + col1Width + 5, tableStartY + 3);
-    doc.font('Helvetica-Bold').text(payslip.pan_number || 'N/A', margin + col1Width + 60, tableStartY + 3);
+    const rightColLabelX = margin + col1Width + 5;
+    const rightColValueX = margin + col1Width + 110;
+
+    doc.font('Helvetica').text('PAN:', rightColLabelX, tableStartY + 3);
+    doc.font('Helvetica-Bold').text(payslip.pan_number || 'N/A', rightColValueX, tableStartY + 3);
 
     // Right Column - Row 2
-    doc.font('Helvetica').text('Bank Name:', margin + col1Width + 5, tableStartY + rowHeight + 3);
-    doc.font('Helvetica-Bold').text(payslip.bank_name || 'N/A', margin + col1Width + 60, tableStartY + rowHeight + 3);
+    doc.font('Helvetica').text('Bank Name:', rightColLabelX, tableStartY + rowHeight + 3);
+    doc.font('Helvetica-Bold').text(payslip.bank_name || 'N/A', rightColValueX, tableStartY + rowHeight + 3);
 
     // Right Column - Row 3
-    doc.font('Helvetica').text('Bank Account Number:', margin + col1Width + 5, tableStartY + rowHeight * 2 + 3);
-    doc.font('Helvetica-Bold').text(payslip.bank_account_number || 'N/A', margin + col1Width + 60, tableStartY + rowHeight * 2 + 3);
+    doc.font('Helvetica').text('Bank Account Number:', rightColLabelX, tableStartY + rowHeight * 2 + 3);
+    doc.font('Helvetica-Bold').text(payslip.bank_account_number || 'N/A', rightColValueX, tableStartY + rowHeight * 2 + 3);
 
     // Right Column - Row 4
-    doc.font('Helvetica').text('Gross Salary:', margin + col1Width + 5, tableStartY + rowHeight * 3 + 3);
-    doc.font('Helvetica-Bold').text(formatCurrency(gross), margin + col1Width + 60, tableStartY + rowHeight * 3 + 3);
+    doc.font('Helvetica').text('Gross Salary:', rightColLabelX, tableStartY + rowHeight * 3 + 3);
+    doc.font('Helvetica-Bold').text(formatCurrency(gross), rightColValueX, tableStartY + rowHeight * 3 + 3);
 
     // Right Column - Row 5
-    doc.font('Helvetica').text('UAN:', margin + col1Width + 5, tableStartY + rowHeight * 4 + 3);
-    doc.font('Helvetica-Bold').text('N/A', margin + col1Width + 60, tableStartY + rowHeight * 4 + 3); // UAN not in schema
+    doc.font('Helvetica').text('UAN:', rightColLabelX, tableStartY + rowHeight * 4 + 3);
+    doc.font('Helvetica-Bold').text(payslip.uan_number || 'N/A', rightColValueX, tableStartY + rowHeight * 4 + 3);
 
     // Right Column - Row 6
-    doc.font('Helvetica').text('Total Paid Days:', margin + col1Width + 5, tableStartY + rowHeight * 5 + 3);
-    doc.font('Helvetica-Bold').text(totalPaidDays.toString(), margin + col1Width + 60, tableStartY + rowHeight * 5 + 3);
+    doc.font('Helvetica').text('Total Paid Days:', rightColLabelX, tableStartY + rowHeight * 5 + 3);
+    doc.font('Helvetica-Bold').text(totalPaidDays.toString(), rightColValueX, tableStartY + rowHeight * 5 + 3);
 
     doc.y = tableStartY + rowHeight * numRows + 10;
 
@@ -1408,21 +1428,41 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     doc.moveDown(0.5);
 
     // ===== EARNINGS AND DEDUCTIONS TABLE =====
-    const earningsDeductionsY = doc.y;
+    const earningsDeductionsY = doc.y + 10;
     const earningsColWidth = contentWidth / 2;
     const itemColWidth = earningsColWidth / 2;
     const amountColWidth = earningsColWidth / 2;
     const maxRows = Math.max(8, 8); // Max rows for earnings and deductions
 
-    // Table header
+    // 1. Main Headers
     doc.rect(margin, earningsDeductionsY, earningsColWidth, 20).stroke();
     doc.rect(margin + earningsColWidth, earningsDeductionsY, earningsColWidth, 20).stroke();
     doc.fontSize(10).font('Helvetica-Bold');
-    doc.text('EARNINGS', margin + earningsColWidth / 2, earningsDeductionsY + 5, { width: earningsColWidth, align: 'center' });
-    doc.text('DEDUCTIONS', margin + earningsColWidth + earningsColWidth / 2, earningsDeductionsY + 5, { width: earningsColWidth, align: 'center' });
+    doc.text('EARNINGS', margin, earningsDeductionsY + 5, { width: earningsColWidth, align: 'center' });
+    doc.text('DEDUCTIONS', margin + earningsColWidth, earningsDeductionsY + 5, { width: earningsColWidth, align: 'center' });
 
-    // Draw vertical line in middle
-    doc.moveTo(margin + earningsColWidth, earningsDeductionsY).lineTo(margin + earningsColWidth, earningsDeductionsY + 20 * (maxRows + 1)).stroke();
+    // 2. Sub-Headers
+    const subHeaderY = earningsDeductionsY + 20;
+
+    // Grey background
+    doc.fillColor('#f0f0f0');
+    doc.rect(margin, subHeaderY, contentWidth, 20).fill();
+    doc.fillColor('#000000'); // Reset to black
+
+    // Borders for sub-headers
+    doc.rect(margin, subHeaderY, itemColWidth, 20).stroke();
+    doc.rect(margin + itemColWidth, subHeaderY, amountColWidth, 20).stroke();
+    doc.rect(margin + earningsColWidth, subHeaderY, itemColWidth, 20).stroke();
+    doc.rect(margin + earningsColWidth + itemColWidth, subHeaderY, amountColWidth, 20).stroke();
+
+    doc.fontSize(9).font('Helvetica-Bold');
+    doc.text('Component', margin + 5, subHeaderY + 5, { width: itemColWidth - 10, align: 'left' });
+    doc.text('Amount (Rs)', margin + itemColWidth, subHeaderY + 5, { width: amountColWidth - 5, align: 'right' });
+    doc.text('Component', margin + earningsColWidth + 5, subHeaderY + 5, { width: itemColWidth - 10, align: 'left' });
+    doc.text('Amount (Rs)', margin + earningsColWidth + itemColWidth, subHeaderY + 5, { width: amountColWidth - 5, align: 'right' });
+
+    // Vertical line in middle
+    doc.moveTo(margin + earningsColWidth, earningsDeductionsY).lineTo(margin + earningsColWidth, subHeaderY + 20 + (maxRows * 20)).stroke();
 
     // Earnings rows
     const earningsItems = [
@@ -1448,34 +1488,35 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
 
     // Draw earnings table
     for (let i = 0; i < maxRows; i++) {
-      const rowY = earningsDeductionsY + 20 + (i * 20);
+      const rowY = subHeaderY + 20 + (i * 20);
       doc.rect(margin, rowY, itemColWidth, 20).stroke();
       doc.rect(margin + itemColWidth, rowY, amountColWidth, 20).stroke();
 
       if (earningsItems[i]) {
         doc.fontSize(8).font('Helvetica');
-        doc.text(earningsItems[i].label, margin + 2, rowY + 5, { width: itemColWidth - 4 });
+        doc.text(earningsItems[i].label, margin + 5, rowY + 5, { width: itemColWidth - 10 });
         doc.font('Helvetica-Bold');
-        doc.text(formatCurrency(earningsItems[i].amount), margin + itemColWidth + 2, rowY + 5, { width: amountColWidth - 4, align: 'right' });
+        doc.text(formatCurrency(earningsItems[i].amount), margin + itemColWidth, rowY + 5, { width: amountColWidth - 5, align: 'right' });
       }
     }
 
     // Draw deductions table
     for (let i = 0; i < maxRows; i++) {
-      const rowY = earningsDeductionsY + 20 + (i * 20);
+      const rowY = subHeaderY + 20 + (i * 20);
       doc.rect(margin + earningsColWidth, rowY, itemColWidth, 20).stroke();
       doc.rect(margin + earningsColWidth + itemColWidth, rowY, amountColWidth, 20).stroke();
 
       if (deductionsItems[i]) {
         doc.fontSize(8).font('Helvetica');
-        doc.text(deductionsItems[i].label, margin + earningsColWidth + 2, rowY + 5, { width: itemColWidth - 4 });
+        doc.text(deductionsItems[i].label, margin + earningsColWidth + 5, rowY + 5, { width: itemColWidth - 10 });
         doc.font('Helvetica-Bold');
-        doc.text(formatCurrency(deductionsItems[i].amount), margin + earningsColWidth + itemColWidth + 2, rowY + 5, { width: amountColWidth - 4, align: 'right' });
+        doc.text(formatCurrency(deductionsItems[i].amount), margin + earningsColWidth + itemColWidth, rowY + 5, { width: amountColWidth - 5, align: 'right' });
       }
     }
 
     // Summary section
-    const summaryY = earningsDeductionsY + 20 * (maxRows + 1) + 10;
+    // Header(20) + SubHeader(20) + Rows(maxRows * 20)
+    const summaryY = earningsDeductionsY + 40 + (maxRows * 20) + 10;
     const summaryRowHeight = 25;
 
     // Total Earnings
@@ -1490,8 +1531,11 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     const totalDeductions = Number(payslip.deductions) || 0;
     doc.text(formatCurrency(totalDeductions), margin + contentWidth / 3 + 5, summaryY + 8, { width: contentWidth / 3 - 10, align: 'right' });
 
-    // Net Salary
+    // Net Salary (Highlighted with thicker border)
+    doc.lineWidth(1.5); // Thicker border
     doc.rect(margin + (contentWidth / 3) * 2, summaryY, contentWidth / 3, summaryRowHeight).stroke();
+    doc.lineWidth(1); // Reset
+
     doc.fontSize(12);
     doc.text('Net Salary', margin + (contentWidth / 3) * 2 + 5, summaryY + 8, { width: contentWidth / 3 - 10 });
     const netSalary = Number(payslip.net_salary) || 0;
