@@ -484,7 +484,27 @@ export default function OrganizationRules() {
                     }
                   }}
                 >
-                  Run Backfill
+                  Run Probation Backfill
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      const result = await api.backfillAnniversaryEvents();
+                      toast({
+                        title: 'Anniversary Backfill Complete',
+                        description: `Created ${result.processed} anniversary events, ${result.skipped} skipped`,
+                      });
+                    } catch (error: any) {
+                      toast({
+                        title: 'Error',
+                        description: error.message || 'Failed to run anniversary backfill',
+                        variant: 'destructive',
+                      });
+                    }
+                  }}
+                >
+                  Run Anniversary Backfill
                 </Button>
                 <Button onClick={handleSave} disabled={saving}>
                   {saving ? (
