@@ -869,11 +869,16 @@ appRouter.get("/employees/me", requireAuth, async (req, res) => {
     );
   }
 
-  // Note: With HR view, employee records come directly from HR system
-  // No need to auto-create records - they should already exist in HR
-  // If not found, it means the employee doesn't exist in HR system
+  // Normalize status field for frontend:
+  // - employment_status (from payroll_employee_view) → status (used in EmployeePortal overview)
+  const row = emp.rows[0] || null;
+  if (row && !row.status && row.employment_status) {
+    (row as any).status = row.employment_status;
+  }
 
-  return res.json({ employee: emp.rows[0] || null });
+  // Note: With HR view, employee records come directly from HR system
+  // If not found, it means the employee doesn't exist in HR system
+  return res.json({ employee: row });
 });
 
 appRouter.get("/payslips", requireAuth, async (req, res) => {

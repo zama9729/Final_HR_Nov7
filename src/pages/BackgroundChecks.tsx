@@ -179,7 +179,20 @@ export default function BackgroundChecks() {
     try {
       setEmployeesLoading(true);
       const data = await api.getEmployees();
-      const list = Array.isArray(data) ? data : data?.employees || [];
+      const rawList = Array.isArray(data) ? data : data?.employees || [];
+      // Normalize employees so we always have first_name, last_name, email for search/display,
+      // and ensure we only see employees from the current tenant (handled server-side).
+      const list: EmployeeOption[] = rawList.map((emp: any) => {
+        const profile = emp.profiles || {};
+        return {
+          id: emp.id,
+          employee_id: emp.employee_id || emp.employee_code || "",
+          first_name: profile.first_name || emp.first_name || "",
+          last_name: profile.last_name || emp.last_name || "",
+          email: profile.email || emp.email || "",
+          department: emp.department || "",
+        };
+      });
       setEmployees(list);
     } catch (error: any) {
       toast({
