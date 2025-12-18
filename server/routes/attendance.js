@@ -48,6 +48,41 @@ async function ensureTimesheetSourceConstraint() {
   }
 }
 
+// Ensure auto clock-out columns exist
+let autoClockOutColumnsEnsured = false;
+async function ensureAutoClockOutColumns() {
+  if (autoClockOutColumnsEnsured) return;
+  try {
+    await query(`
+      -- Add is_auto_clockout column to attendance_events
+      ALTER TABLE attendance_events
+      ADD COLUMN IF NOT EXISTS is_auto_clockout BOOLEAN NOT NULL DEFAULT false;
+
+      -- Add auto clock-out columns to clock_punch_sessions
+      ALTER TABLE clock_punch_sessions
+      ADD COLUMN IF NOT EXISTS is_auto_clockout BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS auto_clockout_reason TEXT;
+
+      -- Create index for faster queries on open sessions
+      CREATE INDEX IF NOT EXISTS idx_clock_punch_sessions_open 
+      ON clock_punch_sessions(tenant_id, employee_id, clock_out_at) 
+      WHERE clock_out_at IS NULL AND is_auto_clockout IS NOT TRUE;
+
+      -- Create index for auto clock-out events
+      CREATE INDEX IF NOT EXISTS idx_attendance_events_auto_clockout 
+      ON attendance_events(tenant_id, employee_id, is_auto_clockout, raw_timestamp) 
+      WHERE is_auto_clockout = true;
+    `);
+    autoClockOutColumnsEnsured = true;
+    console.log('[Attendance] Ensured auto clock-out columns exist');
+  } catch (err) {
+    console.error('[Attendance] Failed to ensure auto clock-out columns:', err.message);
+  }
+}
+
+// Run on module load
+ensureAutoClockOutColumns();
+
 async function getTenantIdForUser(userId) {
   const tenantResult = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
   return tenantResult.rows[0]?.tenant_id || null;
@@ -371,7 +406,7 @@ router.get('/punch/status', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Employee record not found' });
     }
 
-    const [openSessionResult, sessionsResult, lastEventResult, settingsResult] = await Promise.all([
+    const [openSessionResult, sessionsResult, lastEventResult, settingsResult, yesterdayAutoClockOut] = await Promise.all([
       query(
         `SELECT * FROM clock_punch_sessions
          WHERE tenant_id = $1 AND employee_id = $2 AND clock_out_at IS NULL
@@ -400,12 +435,26 @@ router.get('/punch/status', authenticateToken, async (req, res) => {
          FROM org_attendance_settings
          WHERE org_id = $1`,
         [tenantId]
+      ),
+      // Get yesterday's auto clock-out if exists
+      query(
+        `SELECT cps.clock_out_at, cps.is_auto_clockout, cps.auto_clockout_reason
+         FROM clock_punch_sessions cps
+         WHERE cps.tenant_id = $1 
+           AND cps.employee_id = $2
+           AND cps.is_auto_clockout = true
+           AND DATE(cps.clock_out_at) = CURRENT_DATE - INTERVAL '1 day'
+         ORDER BY cps.clock_out_at DESC
+         LIMIT 1`,
+        [tenantId, employeeId]
       )
     ]);
 
     const settings = settingsResult.rows[0] || {};
     const captureMethod = settings.capture_method || 'timesheets';
     const isClockMode = captureMethod === 'clock_in_out';
+
+    const yesterdayAutoClockOutData = yesterdayAutoClockOut.rows[0] || null;
 
     res.json({
       tenant_id: tenantId,
@@ -417,7 +466,12 @@ router.get('/punch/status', authenticateToken, async (req, res) => {
       is_clocked_in: openSessionResult.rows.length > 0,
       open_session: openSessionResult.rows[0] || null,
       sessions: sessionsResult.rows,
-      last_event: lastEventResult.rows[0] || null
+      last_event: lastEventResult.rows[0] || null,
+      yesterday_auto_clockout: yesterdayAutoClockOutData ? {
+        clock_out_at: yesterdayAutoClockOutData.clock_out_at,
+        is_auto_clockout: yesterdayAutoClockOutData.is_auto_clockout,
+        reason: yesterdayAutoClockOutData.auto_clockout_reason
+      } : null
     });
   } catch (error) {
     console.error('Punch status error:', error);
@@ -884,29 +938,37 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
     let resolvedLon = lon ? parseFloat(lon) : null;
     let resolvedAddress = address_text || null;
 
-    // Geocode if we have address but no coordinates
-    if (!resolvedLat || !resolvedLon) {
-      if (resolvedAddress) {
-        try {
-          const geocoded = await geocodeAddress(resolvedAddress);
-          resolvedLat = geocoded.lat;
-          resolvedLon = geocoded.lon;
-          resolvedAddress = geocoded.formatted_address || resolvedAddress;
-        } catch (error) {
-          console.warn('Geocoding failed:', error.message);
-          // Continue without coordinates
-        }
-      }
+    // Geocode if we have address but no coordinates (non-blocking, skip if not critical)
+    // Only do this if geofencing is enabled and we need coordinates for branch resolution
+    const needsGeocoding = !resolvedLat || !resolvedLon;
+    if (needsGeocoding && resolvedAddress) {
+      // Skip geocoding for faster response - use address as-is
+      // Geocoding can be done asynchronously later if needed
+      console.log('[Clock] Skipping geocoding for faster response');
     }
 
-    // Reverse geocode if we have coordinates but no address
+    // Reverse geocode if we have coordinates but no address (non-blocking)
     if (resolvedLat && resolvedLon && !resolvedAddress) {
-      try {
-        resolvedAddress = await reverseGeocode(resolvedLat, resolvedLon);
-      } catch (error) {
-        console.warn('Reverse geocoding failed:', error.message);
-        resolvedAddress = `${resolvedLat}, ${resolvedLon}`;
-      }
+      // Skip reverse geocoding for faster response - use coordinates as-is
+      resolvedAddress = `${resolvedLat}, ${resolvedLon}`;
+      // Optionally do reverse geocoding asynchronously later (store for async update)
+      const latForAsync = resolvedLat;
+      const lonForAsync = resolvedLon;
+      const empIdForAsync = employeeId;
+      const punchTimeForAsync = punchTime;
+      setImmediate(async () => {
+        try {
+          const address = await reverseGeocode(latForAsync, lonForAsync);
+          if (address) {
+            await query(
+              `UPDATE attendance_events SET address_text = $1 WHERE employee_id = $2 AND raw_timestamp = $3 ORDER BY created_at DESC LIMIT 1`,
+              [address, empIdForAsync, punchTimeForAsync]
+            );
+          }
+        } catch (error) {
+          console.warn('[Clock] Async reverse geocoding failed:', error.message);
+        }
+      });
     }
 
     // Resolve branch from coordinates using geofences
@@ -999,13 +1061,13 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
       }
     }
 
-    // Create attendance event
+    // Create attendance event with work_type included (combine INSERT and UPDATE)
     const eventResult = await query(
       `INSERT INTO attendance_events (
         tenant_id, employee_id, raw_timestamp, event_type, device_id,
         lat, lon, address_text, capture_method, consent, consent_ts,
-        work_location_branch_id, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        work_location_branch_id, work_type, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING id, raw_timestamp, event_type`,
       [
         userTenantId,
@@ -1020,6 +1082,7 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
         consent,
         consentTs,
         resolvedBranchId,
+        workType,
         req.user.id
       ]
     );
@@ -1027,37 +1090,33 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
     const event = eventResult.rows[0];
     let pairedTimesheetEntryId = null;
 
-    // Update work_type on the event
-    await query(
-      `UPDATE attendance_events SET work_type = $1 WHERE id = $2`,
-      [workType, event.id]
-    );
+    // Persist punch for realtime timesheet calculations (async, non-blocking)
+    setImmediate(async () => {
+      try {
+        await query(
+          `INSERT INTO punches (
+            tenant_id, employee_id, type, "timestamp", timestamp_local, source, created_by
+          ) VALUES ($1,$2,$3,$4, ($4 AT TIME ZONE 'Asia/Kolkata'), $5, $6)`,
+          [
+            userTenantId,
+            employeeId,
+            action,
+            punchTime,
+            finalCaptureMethod || 'unknown',
+            req.user.id,
+          ],
+        );
 
-    // Persist punch for realtime timesheet calculations (Asia/Kolkata)
-    try {
-      await query(
-        `INSERT INTO punches (
-          tenant_id, employee_id, type, "timestamp", timestamp_local, source, created_by
-        ) VALUES ($1,$2,$3,$4, ($4 AT TIME ZONE 'Asia/Kolkata'), $5, $6)`,
-        [
-          userTenantId,
+        await handlePunchEvent({
+          tenantId: userTenantId,
           employeeId,
-          action,
-          punchTime,
-          finalCaptureMethod || 'unknown',
-          req.user.id,
-        ],
-      );
-
-      await handlePunchEvent({
-        tenantId: userTenantId,
-        employeeId,
-        punch: { type: action, timestamp: punchTime.toISOString() },
-      });
-    } catch (punchError) {
-      console.error('[Clock] Failed to record realtime punch:', punchError);
-      // Continue – do not fail clock action only because realtime layer failed
-    }
+          punch: { type: action, timestamp: punchTime.toISOString() },
+        });
+      } catch (punchError) {
+        console.error('[Clock] Failed to record realtime punch:', punchError);
+        // Continue – do not fail clock action only because realtime layer failed
+      }
+    });
 
     // Handle clock in
     if (action === 'IN') {
@@ -1249,28 +1308,7 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
       );
     }
 
-    // Emit event for analytics (placeholder - can be extended with event emitter)
-    // Event: attendance.clocked
-
-    // Audit log
-    await query(
-      `INSERT INTO attendance_audit_logs (tenant_id, actor_id, action, object_type, object_id, details)
-       VALUES ($1, $2, 'clock_${action.toLowerCase()}', 'attendance_event', $3, $4)`,
-      [
-        userTenantId,
-        req.user.id,
-        event.id,
-        JSON.stringify({
-          action,
-          work_type: workType,
-          resolved_branch_id: resolvedBranchId,
-          capture_method: finalCaptureMethod,
-          consent,
-          has_coordinates: !!(resolvedLat && resolvedLon)
-        })
-      ]
-    );
-
+    // Return response immediately for instant feedback
     res.json({
       status: 'ok',
       entry_id: event.id,
@@ -1279,6 +1317,31 @@ router.post('/clock', authenticateToken, punchRateLimit, async (req, res) => {
       message: action === 'IN'
         ? `Clocked in - ${workType}`
         : `Clocked out - ${workType}`
+    });
+
+    // Audit log (async, non-blocking)
+    setImmediate(async () => {
+      try {
+        await query(
+          `INSERT INTO attendance_audit_logs (tenant_id, actor_id, action, object_type, object_id, details)
+           VALUES ($1, $2, 'clock_${action.toLowerCase()}', 'attendance_event', $3, $4)`,
+          [
+            userTenantId,
+            req.user.id,
+            event.id,
+            JSON.stringify({
+              action,
+              work_type: workType,
+              resolved_branch_id: resolvedBranchId,
+              capture_method: finalCaptureMethod,
+              consent,
+              has_coordinates: !!(resolvedLat && resolvedLon)
+            })
+          ]
+        );
+      } catch (auditError) {
+        console.error('[Clock] Failed to write audit log:', auditError);
+      }
     });
   } catch (error) {
     const status = error.statusCode || 500;
