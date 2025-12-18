@@ -8,7 +8,12 @@ const router = express.Router();
 // GET /api/analytics - General analytics overview
 router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
-    const orgId = req.orgId;
+    const orgId = req.orgId || req.user?.org_id;
+
+    if (!orgId) {
+      console.error('[Analytics] No orgId found for user:', req.user?.id);
+      return res.status(403).json({ error: 'No organization found. Please ensure you are properly authenticated.' });
+    }
 
     // Employee growth over time
     const employeeGrowthResult = await queryWithOrg(
@@ -31,7 +36,8 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
        FROM employees e
        LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
        LEFT JOIN departments d ON d.id = ea.department_id AND d.org_id = $1
-       WHERE e.tenant_id = $1 AND e.status = 'active'
+       WHERE e.tenant_id = $1 
+         AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
        GROUP BY d.name
        ORDER BY value DESC`,
       [orgId],
@@ -102,7 +108,9 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
          AVG(s.level) as avg_level
        FROM skills s
        JOIN employees e ON e.id = s.employee_id
-       WHERE s.tenant_id = $1 AND e.tenant_id = $1 AND e.status = 'active'
+       WHERE s.tenant_id = $1 
+         AND e.tenant_id = $1 
+         AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
        GROUP BY s.name
        ORDER BY count DESC
        LIMIT 10`,
@@ -111,31 +119,56 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
     );
 
     // Overall stats - ensure all subqueries are properly scoped
+    // Use COALESCE to handle NULL status as 'active' and exclude only terminated/on_hold/resigned
     const overallResult = await queryWithOrg(
       `SELECT 
-         (SELECT COUNT(*) FROM employees WHERE tenant_id = $1 AND status = 'active') as total_employees,
+         (SELECT COUNT(*) FROM employees 
+          WHERE tenant_id = $1 
+            AND COALESCE(status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')) as total_employees,
          (SELECT COUNT(DISTINCT e.id) FROM employees e 
-          WHERE e.tenant_id = $1 AND e.status = 'active'
-          AND (e.id IN (SELECT reporting_manager_id FROM employees WHERE reporting_manager_id IS NOT NULL AND tenant_id = $1)
-               OR e.user_id IN (SELECT ur.user_id FROM user_roles ur 
-                                 JOIN employees emp ON emp.user_id = ur.user_id 
-                                 WHERE ur.role = 'manager' AND emp.tenant_id = $1))) as manager_count,
+          WHERE e.tenant_id = $1 
+            AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
+          AND (
+            e.id IN (
+              SELECT DISTINCT reporting_manager_id 
+              FROM employees 
+              WHERE reporting_manager_id IS NOT NULL 
+                AND tenant_id = $1
+                AND COALESCE(status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
+            )
+            OR EXISTS (
+              SELECT 1 FROM user_roles ur 
+              JOIN employees emp ON emp.user_id = ur.user_id 
+              WHERE ur.user_id = e.user_id
+                AND ur.role = 'manager' 
+                AND emp.tenant_id = $1
+                AND COALESCE(emp.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
+            )
+          )) as manager_count,
          (SELECT COUNT(DISTINCT lr.employee_id) FROM leave_requests lr
           JOIN employees emp ON emp.id = lr.employee_id
-          WHERE lr.tenant_id = $1 AND emp.tenant_id = $1
-          AND lr.status = 'approved'
-          AND CURRENT_DATE BETWEEN lr.start_date AND lr.end_date) as employees_on_leave,
-         (SELECT COUNT(*) FROM projects WHERE org_id = $1 AND status = 'open') as active_projects,
-         (SELECT COUNT(*) FROM projects WHERE org_id = $1 AND status = 'open') as project_count,
+          WHERE lr.tenant_id = $1 
+            AND emp.tenant_id = $1
+            AND lr.status = 'approved'
+            AND CURRENT_DATE BETWEEN lr.start_date AND lr.end_date) as employees_on_leave,
+         (SELECT COUNT(*) FROM projects WHERE org_id = $1) as project_count,
+         (SELECT COUNT(*) FROM projects WHERE org_id = $1 AND (status IS NULL OR status = 'open' OR status = 'active')) as active_projects,
          (SELECT COUNT(*) FROM leave_requests WHERE tenant_id = $1 AND status = 'pending') as pending_leaves,
          (SELECT COUNT(*) FROM teams WHERE org_id = $1) as total_teams,
          (SELECT COUNT(*) FROM assignments a 
           JOIN projects p ON p.id = a.project_id 
-          WHERE p.org_id = $1 AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)) as active_assignments`,
+          WHERE p.org_id = $1 
+            AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)) as active_assignments`,
       [orgId],
       orgId
     );
 
+    const overall = overallResult.rows[0] || {};
+    
+    // Log for debugging
+    console.log(`[Analytics] OrgId: ${orgId}, Total Employees: ${overall.total_employees}, Managers: ${overall.manager_count}, Projects: ${overall.project_count}, Teams: ${overall.total_teams}, On Leave: ${overall.employees_on_leave}`);
+    console.log(`[Analytics] Overall data:`, JSON.stringify(overall, null, 2));
+    
     res.json({
       employeeGrowth: employeeGrowthResult.rows,
       departmentData: departmentResult.rows,
@@ -143,7 +176,7 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
       attendanceData: attendanceResult.rows,
       projectUtilization: projectResult.rows,
       topSkills: skillsResult.rows,
-      overall: overallResult.rows[0] || {},
+      overall: overall,
     });
   } catch (error) {
     console.error('Analytics overview error:', error);
@@ -155,7 +188,12 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
 router.get('/attendance/overview', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
     const { from, to, branch_id } = req.query;
-    const orgId = req.orgId;
+    const orgId = req.orgId || req.user?.org_id;
+
+    if (!orgId) {
+      console.error('[Analytics Overview] No orgId found for user:', req.user?.id);
+      return res.status(403).json({ error: 'No organization found. Please ensure you are properly authenticated.' });
+    }
 
     if (!from || !to) {
       return res.status(400).json({ error: 'from and to dates are required (YYYY-MM-DD)' });
@@ -171,15 +209,18 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
     // Build branch filter
     const branchFilter = branch_id ? 'AND ae.work_location_branch_id = $4' : '';
 
-    // Total employees
+    // Total employees - count ALL active employees, not just those with attendance events
     const totalEmployeesResult = await queryWithOrg(
-      `SELECT COUNT(DISTINCT e.id) as count
-       FROM employees e
-       WHERE e.tenant_id = $1 AND e.status = 'active'`,
+      `SELECT COUNT(*) as count
+       FROM employees
+       WHERE tenant_id = $1 
+         AND COALESCE(status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')`,
       [orgId],
       orgId
     );
     const totalEmployees = parseInt(totalEmployeesResult.rows[0]?.count || '0');
+    
+    console.log(`[Analytics Attendance Overview] OrgId: ${orgId}, Total Employees: ${totalEmployees}`);
 
     // Today's present count
     const today = new Date().toISOString().split('T')[0];
@@ -256,6 +297,45 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
     );
     const pendingApprovals = parseInt(pendingApprovalsResult.rows[0]?.count || '0');
 
+    // Get overall stats (managers, projects, skills, departments) for the response
+    const overallStatsResult = await queryWithOrg(
+      `SELECT 
+         (SELECT COUNT(DISTINCT e.id) FROM employees e 
+          WHERE e.tenant_id = $1 
+            AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
+          AND (
+            e.id IN (
+              SELECT DISTINCT reporting_manager_id 
+              FROM employees 
+              WHERE reporting_manager_id IS NOT NULL 
+                AND tenant_id = $1
+                AND COALESCE(status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
+            )
+            OR EXISTS (
+              SELECT 1 FROM user_roles ur 
+              JOIN employees emp ON emp.user_id = ur.user_id 
+              WHERE ur.user_id = e.user_id
+                AND ur.role = 'manager' 
+                AND emp.tenant_id = $1
+                AND COALESCE(emp.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
+            )
+          )) as manager_count,
+         (SELECT COUNT(*) FROM projects WHERE org_id = $1) as project_count,
+         (SELECT COUNT(DISTINCT s.name) FROM skills s
+          JOIN employees e ON e.id = s.employee_id
+          WHERE s.tenant_id = $1 
+            AND e.tenant_id = $1 
+            AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')) as skills_count,
+         (SELECT COUNT(DISTINCT d.id) FROM departments d
+          WHERE d.org_id = $1) as departments_count`,
+      [orgId],
+      orgId
+    );
+    
+    const overallStats = overallStatsResult.rows[0] || {};
+    
+    console.log(`[Analytics Attendance Overview] OrgId: ${orgId}, Total Employees: ${totalEmployees}, Managers: ${overallStats.manager_count}, Projects: ${overallStats.project_count}, Skills: ${overallStats.skills_count}, Departments: ${overallStats.departments_count}`);
+
     res.json({
       total_employees: totalEmployees,
       today_present: todayPresent,
@@ -264,6 +344,10 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
       wfo_percent: wfoPercent,
       wfh_percent: wfhPercent,
       pending_approvals: pendingApprovals,
+      manager_count: parseInt(overallStats.manager_count || '0'),
+      project_count: parseInt(overallStats.project_count || '0'),
+      skills_count: parseInt(overallStats.skills_count || '0'),
+      departments_count: parseInt(overallStats.departments_count || '0'),
     });
   } catch (error) {
     console.error('Analytics overview error:', error);
@@ -276,7 +360,12 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
 router.get('/approvals/pending', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
     const { from, to, manager_id, department_id } = req.query;
-    const orgId = req.orgId;
+    const orgId = req.orgId || req.user?.org_id;
+
+    if (!orgId) {
+      console.error('[Analytics Approvals] No orgId found for user:', req.user?.id);
+      return res.status(403).json({ error: 'No organization found. Please ensure you are properly authenticated.' });
+    }
 
     const fromDate = from ? new Date(from) : null;
     const toDate = to ? new Date(to) : null;
@@ -344,7 +433,12 @@ router.get('/approvals/pending', authenticateToken, setTenantContext, requireRol
 router.get('/attendance/histogram', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
     const { from, to, branch_id, team_id, department_id } = req.query;
-    const orgId = req.orgId;
+    const orgId = req.orgId || req.user?.org_id;
+
+    if (!orgId) {
+      console.error('[Analytics Histogram] No orgId found for user:', req.user?.id);
+      return res.status(403).json({ error: 'No organization found. Please ensure you are properly authenticated.' });
+    }
 
     if (!from || !to) {
       return res.status(400).json({ error: 'from and to dates are required' });
@@ -390,11 +484,12 @@ router.get('/attendance/histogram', authenticateToken, setTenantContext, require
       orgId
     );
 
-    // Get total employees for absent calculation
+    // Get total employees for absent calculation - count ALL active employees
     const totalEmployeesResult = await queryWithOrg(
-      `SELECT COUNT(DISTINCT e.id) as count
-       FROM employees e
-       WHERE e.tenant_id = $1 AND e.status = 'active'`,
+      `SELECT COUNT(*) as count
+       FROM employees
+       WHERE tenant_id = $1 
+         AND COALESCE(status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')`,
       [orgId],
       orgId
     );
@@ -449,7 +544,12 @@ router.get('/attendance/histogram', authenticateToken, setTenantContext, require
 router.get('/attendance/heatmap', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
     const { from, to, branch_id, group_by = 'department' } = req.query;
-    const orgId = req.orgId;
+    const orgId = req.orgId || req.user?.org_id;
+
+    if (!orgId) {
+      console.error('[Analytics Heatmap] No orgId found for user:', req.user?.id);
+      return res.status(403).json({ error: 'No organization found. Please ensure you are properly authenticated.' });
+    }
 
     if (!from || !to) {
       return res.status(400).json({ error: 'from and to dates are required' });
@@ -468,8 +568,8 @@ router.get('/attendance/heatmap', authenticateToken, setTenantContext, requireRo
       : 'ea.department_id, d.name';
 
     const groupJoin = group_by === 'team'
-      ? 'LEFT JOIN teams t ON t.id = ea.team_id'
-      : 'LEFT JOIN departments d ON d.id = ea.department_id';
+      ? 'LEFT JOIN teams t ON t.id = ea.team_id AND t.org_id = $1'
+      : 'LEFT JOIN departments d ON d.id = ea.department_id AND d.org_id = $1';
 
     // Pre-compute total employees per group (department or team) so we don't
     // accidentally treat "present employees" as the full denominator.
@@ -482,6 +582,7 @@ router.get('/attendance/heatmap', authenticateToken, setTenantContext, requireRo
              ON ea.employee_id = e.id
             AND ea.is_home = true
            WHERE e.tenant_id = $1
+             AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
            GROUP BY ea.team_id
          )`
       : `WITH group_totals AS (
@@ -492,6 +593,7 @@ router.get('/attendance/heatmap', authenticateToken, setTenantContext, requireRo
              ON ea.employee_id = e.id
             AND ea.is_home = true
            WHERE e.tenant_id = $1
+             AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
            GROUP BY ea.department_id
          )`;
 
@@ -545,7 +647,12 @@ router.get('/attendance/heatmap', authenticateToken, setTenantContext, requireRo
 router.get('/attendance/map', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
     const { from, to, branch_id, team_id } = req.query;
-    const orgId = req.orgId;
+    const orgId = req.orgId || req.user?.org_id;
+
+    if (!orgId) {
+      console.error('[Analytics Map] No orgId found for user:', req.user?.id);
+      return res.status(403).json({ error: 'No organization found. Please ensure you are properly authenticated.' });
+    }
 
     if (!from || !to) {
       return res.status(400).json({ error: 'from and to dates are required' });
@@ -607,7 +714,12 @@ router.get('/attendance/map', authenticateToken, setTenantContext, requireRole('
 router.get('/attendance/distribution', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
     const { from, to, branch_id, team_id } = req.query;
-    const orgId = req.orgId;
+    const orgId = req.orgId || req.user?.org_id;
+
+    if (!orgId) {
+      console.error('[Analytics Distribution] No orgId found for user:', req.user?.id);
+      return res.status(403).json({ error: 'No organization found. Please ensure you are properly authenticated.' });
+    }
 
     if (!from || !to) {
       return res.status(400).json({ error: 'from and to dates are required' });
@@ -643,6 +755,7 @@ router.get('/attendance/distribution', authenticateToken, setTenantContext, requ
        LEFT JOIN teams t ON t.id = ea.team_id AND t.org_id = $1
        LEFT JOIN departments d ON d.id = ea.department_id AND d.org_id = $1
        WHERE ae.tenant_id = $1
+         AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
          AND DATE(ae.raw_timestamp) >= $2
          AND DATE(ae.raw_timestamp) <= $3
          AND ae.event_type = 'IN'
@@ -700,7 +813,12 @@ router.get('/attendance/distribution', authenticateToken, setTenantContext, requ
 // GET /api/analytics/skills/network - Get skills network data for interactive graph
 router.get('/skills/network', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'director', 'admin'), async (req, res) => {
   try {
-    const orgId = req.orgId;
+    const orgId = req.orgId || req.user?.org_id;
+
+    if (!orgId) {
+      console.error('[Analytics Skills Network] No orgId found for user:', req.user?.id);
+      return res.status(403).json({ error: 'No organization found. Please ensure you are properly authenticated.' });
+    }
 
     // Get all skills with employee connections
     const skillsNetworkResult = await queryWithOrg(
@@ -719,7 +837,8 @@ router.get('/skills/network', authenticateToken, setTenantContext, requireRole('
        JOIN profiles p ON p.id = e.user_id AND p.tenant_id = $1
        LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
        LEFT JOIN departments d ON d.id = ea.department_id AND d.org_id = $1
-       WHERE s.tenant_id = $1 AND e.status = 'active'
+       WHERE s.tenant_id = $1 
+         AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
        ORDER BY s.name, s.level DESC`,
       [orgId],
       orgId
@@ -803,6 +922,11 @@ router.get('/skills/network', authenticateToken, setTenantContext, requireRole('
       departments: Array.from(skill.departments),
       size: Math.min(60, Math.max(20, skill.count * 4)),
     }));
+
+    console.log(`[Skills Network] OrgId: ${orgId}, Found ${skillNodes.size} skills, ${employeeSkillsMap.size} employees with skills, ${links.length} connections`);
+    if (skillNodes.size === 0) {
+      console.log(`[Skills Network] No skills found. Query returned ${skillsNetworkResult.rows.length} rows`);
+    }
 
     res.json({
       nodes,

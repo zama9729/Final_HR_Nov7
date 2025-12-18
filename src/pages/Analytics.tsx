@@ -151,10 +151,12 @@ export default function Analytics() {
       
       // Parse overall stats - ensure numbers are properly converted
       const overallData = data.overall || {};
+      console.log('[Analytics] Raw overall data from API:', overallData);
       const parsedOverall: Record<string, number> = {};
       for (const [key, value] of Object.entries(overallData)) {
         parsedOverall[key] = typeof value === 'string' ? Number.parseInt(value, 10) || 0 : Number(value) || 0;
       }
+      console.log('[Analytics] Parsed overall data:', parsedOverall);
       setOverall(parsedOverall);
 
       const department = (data.departmentData || []).map((row: any) => ({
@@ -265,8 +267,12 @@ export default function Analytics() {
 
   const totalEmployees = Number(overall.total_employees) || 0;
   const employeesOnLeave = Number(overall.employees_on_leave) || Number(overall.pending_leaves) || 0;
+  // Use project_count (all projects) as primary, fallback to active_projects if needed
   const projectCount = Number(overall.project_count) || Number(overall.active_projects) || 0;
-  const managerCount = Number(overall.manager_count) || Number(overall.total_managers) || 0;
+  // Use manager_count as primary (no fallback needed - backend always returns this)
+  const managerCount = Number(overall.manager_count) || 0;
+  
+  console.log('[Analytics] Computed values:', { totalEmployees, employeesOnLeave, projectCount, managerCount });
 
   if (loading) {
     return (
@@ -287,11 +293,13 @@ export default function Analytics() {
   const summaryHighlights = [
     {
       label: "Total teams",
-      value: formatNumber(overall.total_teams ?? branches.reduce((acc, branch) => acc + (branch.teams ?? 0), 0)),
+      value: formatNumber(Number(overall.total_teams) || branches.reduce((acc, branch) => acc + (branch.teams ?? 0), 0)),
     },
     { label: "Active projects", value: formatNumber(projectCount) },
     { label: "Office locations", value: formatNumber(positionedBranches.length) },
   ];
+  
+  console.log('[Analytics] Summary highlights:', summaryHighlights);
 
   const kpiCards = [
     {

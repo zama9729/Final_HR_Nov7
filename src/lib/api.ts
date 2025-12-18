@@ -953,6 +953,12 @@ class ApiClient {
     });
   }
 
+  async backfillAnniversaryEvents() {
+    return this.request('/api/anniversary/backfill', {
+      method: 'POST',
+    });
+  }
+
   async updateProbationPolicy(id: string, data: any) {
     return this.request(`/api/probation-policies/${id}`, {
       method: 'PUT',

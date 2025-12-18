@@ -72,6 +72,10 @@ interface OverviewData {
   wfo_percent: number;
   wfh_percent: number;
   pending_approvals: number;
+  manager_count?: number;
+  project_count?: number;
+  skills_count?: number;
+  departments_count?: number;
 }
 
 interface HistogramData {
@@ -175,11 +179,17 @@ export default function AttendanceAnalytics() {
       const from = format(dateRange.from, "yyyy-MM-dd");
       const to = format(dateRange.to, "yyyy-MM-dd");
 
+      console.log('[AttendanceAnalytics] Fetching data for:', { from, to });
+
       const [overviewRes, histogramRes, approvalsRes] = await Promise.all([
         api.getAttendanceOverview({ from, to }),
         api.getAttendanceHistogram({ from, to }),
         api.getPendingTimesheetApprovals({ from, to }),
       ]);
+
+      console.log('[AttendanceAnalytics] Overview:', overviewRes);
+      console.log('[AttendanceAnalytics] Histogram:', histogramRes);
+      console.log('[AttendanceAnalytics] Approvals:', approvalsRes);
 
       setOverview(overviewRes);
       setHistogram(histogramRes.histogram || []);
@@ -191,6 +201,8 @@ export default function AttendanceAnalytics() {
           to,
           group_by: "department",
         } as any);
+
+        console.log('[AttendanceAnalytics] Heatmap:', heatmapRes);
 
         const rows = Object.entries(
           (heatmapRes as any)?.heatmap || {}
@@ -216,10 +228,13 @@ export default function AttendanceAnalytics() {
 
         rows.sort((a, b) => b.averagePercentage - a.averagePercentage);
         setDepartmentPresence(rows.slice(0, 4));
-      } catch {
+        console.log('[AttendanceAnalytics] Department Presence:', rows.slice(0, 4));
+      } catch (heatmapError: any) {
+        console.error('[AttendanceAnalytics] Heatmap error:', heatmapError);
         setDepartmentPresence([]);
       }
     } catch (e: any) {
+      console.error('[AttendanceAnalytics] Fetch error:', e);
       toast({
         title: "Error",
         description: e?.message || "Failed to load analytics",

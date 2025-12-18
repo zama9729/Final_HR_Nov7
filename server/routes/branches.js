@@ -15,6 +15,7 @@ router.use(authenticateToken, requireRole('admin', 'hr', 'ceo', 'manager'), setT
 
 router.get('/', async (req, res) => {
   try {
+    console.log(`[Branches] Fetching branches for orgId: ${orgId}`);
     const { rows: branches } = await queryWithOrg(
       `SELECT 
          b.id, 
@@ -32,7 +33,9 @@ router.get('/', async (req, res) => {
          (SELECT COUNT(DISTINCT e.id) 
           FROM employees e
           JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
-          WHERE ea.branch_id = b.id AND e.status = 'active' AND e.tenant_id = $1) as employee_count,
+          WHERE ea.branch_id = b.id 
+            AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
+            AND e.tenant_id = $1) as employee_count,
          (SELECT COUNT(DISTINCT t.id)
           FROM teams t
           WHERE t.branch_id = b.id AND t.org_id = $1) as team_count
