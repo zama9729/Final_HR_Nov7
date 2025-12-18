@@ -303,23 +303,6 @@ export function SkillsNetworkGraph({ data, width = 800, height = 600 }: SkillsNe
         </Button>
       </div>
 
-      {/* Legend */}
-      <div className="absolute bottom-4 left-4 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm rounded-lg p-3 border border-slate-200 dark:border-slate-700 shadow-lg">
-        <div className="text-xs font-semibold mb-2 text-slate-700 dark:text-slate-300">Legend</div>
-        <div className="flex flex-col gap-2 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-indigo-500"></div>
-            <span className="text-slate-600 dark:text-slate-400">Skills (size = popularity)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-0.5 bg-slate-400"></div>
-            <span className="text-slate-600 dark:text-slate-400">Connections (thickness = shared employees)</span>
-          </div>
-          <div className="text-xs text-slate-500 dark:text-slate-500 mt-1">
-            Hover for employee count • Click for details • Drag to move • Scroll to zoom
-          </div>
-        </div>
-      </div>
 
       {/* Node Details Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

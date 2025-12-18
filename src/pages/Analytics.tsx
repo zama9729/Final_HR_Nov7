@@ -204,6 +204,8 @@ export default function Analytics() {
           };
         })
         .filter(Boolean) as BranchMarker[];
+      
+      console.log('[Analytics] Loaded branches:', formatted.length, formatted);
 
       setBranches(formatted);
       if (!selectedBranchId && formatted.length) {
@@ -290,16 +292,31 @@ export default function Analytics() {
   const activeTooltipBranch =
     positionedBranches.find((branch) => branch.id === (hoverBranchId || selectedBranch?.id)) || null;
 
+  // Calculate accurate summary highlights
+  const totalTeamsFromOverall = Number(overall.total_teams) || 0;
+  const totalTeamsFromBranches = branches.reduce((acc, branch) => acc + (branch.teams ?? 0), 0);
+  const totalTeams = totalTeamsFromOverall > 0 ? totalTeamsFromOverall : totalTeamsFromBranches;
+  
+  const totalProjects = projectCount;
+  const totalLocations = positionedBranches.length;
+  
   const summaryHighlights = [
     {
       label: "Total teams",
-      value: formatNumber(Number(overall.total_teams) || branches.reduce((acc, branch) => acc + (branch.teams ?? 0), 0)),
+      value: formatNumber(totalTeams),
     },
-    { label: "Active projects", value: formatNumber(projectCount) },
-    { label: "Office locations", value: formatNumber(positionedBranches.length) },
+    { label: "Active projects", value: formatNumber(totalProjects) },
+    { label: "Office locations", value: formatNumber(totalLocations) },
   ];
   
-  console.log('[Analytics] Summary highlights:', summaryHighlights);
+  console.log('[Analytics] Summary highlights:', {
+    totalTeams,
+    totalProjects,
+    totalLocations,
+    overall: overall,
+    branchesCount: branches.length,
+    positionedBranchesCount: positionedBranches.length
+  });
 
   const kpiCards = [
     {
@@ -513,7 +530,7 @@ export default function Analytics() {
               <p className="text-xs uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Global presence</p>
               <h2 className="text-2xl font-semibold text-slate-900 dark:text-white">Office footprint</h2>
               <p className="text-sm text-slate-600 dark:text-slate-300">
-                {formatNumber(overall.total_teams ?? 0)} teams across {formatNumber(positionedBranches.length)} locations
+                {formatNumber(Number(overall.total_teams) || 0)} teams across {formatNumber(positionedBranches.length)} locations
               </p>
             </div>
             {selectedBranch && (
