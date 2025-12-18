@@ -172,24 +172,63 @@ const teamCache = new Map();
     const headers = Object.keys(rows[0] || {});
     console.log('Auto-mapping columns. Available headers:', headers);
     const normalize = (s) => String(s || '').toLowerCase().replace(/\s+/g,'').replace(/[^a-z_]/g,'');
-    const nm = headers.reduce((acc, h) => { acc[normalize(h)] = h; return acc; }, {});
+    const nm = headers.reduce((acc, h) => { 
+      const norm = normalize(h);
+      // Handle duplicate columns (parser may append _1, _2, etc.)
+      if (acc[norm]) {
+        // If we already have this normalized key, check if it's a duplicate
+        const existing = acc[norm];
+        if (Array.isArray(existing)) {
+          existing.push(h);
+        } else {
+          acc[norm] = [existing, h];
+        }
+      } else {
+        acc[norm] = h;
+      }
+      return acc;
+    }, {});
+    
+    // Helper to get first match or handle arrays
+    const getCol = (keys) => {
+      for (const key of keys) {
+        const val = nm[key];
+        if (val) {
+          if (Array.isArray(val)) return val[0]; // Use first occurrence for name
+          return val;
+        }
+      }
+      return null;
+    };
+    
+    // Helper to get second match for duplicate columns (e.g., second 'departme' for code)
+    const getColSecond = (keys) => {
+      for (const key of keys) {
+        const val = nm[key];
+        if (val && Array.isArray(val) && val.length > 1) {
+          return val[1]; // Use second occurrence for code
+        }
+      }
+      return null;
+    };
+    
     mapping = {
-      first_name: nm.firstname || nm.first_name || nm['first-name'],
-      last_name: nm.lastname || nm.last_name || nm['last-name'],
-      email: nm.email,
-      employee_id: nm.employeeid || nm.employee_id,
-      department: nm.department,
-      role: nm.role,
-      designation: nm.designation || nm.position,
-      grade: nm.grade,
-      manager_email: nm.manageremail || nm.manager_email,
-      join_date: nm.joindate || nm.join_date,
-      work_location: nm.worklocation || nm.work_location,
-      phone: nm.phone,
-      branch_name: nm.branch || nm.branchname || nm.site,
-      branch_code: nm.branchcode || nm.branch_code,
-      department_code: nm.departmentcode || nm.department_code,
-      team_name: nm.team || nm.teamname
+      first_name: getCol(['firstname', 'first_name', 'first-name']),
+      last_name: getCol(['lastname', 'last_name', 'last-name']),
+      email: getCol(['email']),
+      employee_id: getCol(['employee', 'employeeid', 'employee_id']), // Support 'employee' column
+      department: getCol(['departme', 'department']), // Support 'departme' column (first occurrence)
+      role: getCol(['role']),
+      designation: getCol(['designation', 'position']),
+      grade: getCol(['grade']), // Grade/level (A4, A5, B1, etc.)
+      manager_email: getCol(['manager', 'manageremail', 'manager_email']), // Support 'manager' column
+      join_date: getCol(['joindate', 'join_date']),
+      work_location: getCol(['work_loca', 'worklocation', 'work_location']), // Support 'work_loca' column
+      phone: getCol(['phone']),
+      branch_name: getCol(['branch_na', 'branch', 'branchname', 'site']), // Support 'branch_na' column
+      branch_code: getCol(['branch_co', 'branchcode', 'branch_code']), // Support 'branch_co' column
+      department_code: getColSecond(['departme']) || getCol(['departmentcode', 'department_code']), // Use second 'departme' if duplicate, else look for explicit code column
+      team_name: getCol(['team_nam', 'team', 'teamname']) // Support 'team_nam' column
     };
     console.log('Auto-mapped columns:', mapping);
   }
@@ -236,7 +275,8 @@ const teamCache = new Map();
           branchName: row[mapping.branch_name] || null,
           branchCode: row[mapping.branch_code] || null,
           departmentCode: row[mapping.department_code] ? String(row[mapping.department_code]).trim() : null,
-          teamName: row[mapping.team_name] ? String(row[mapping.team_name]).trim() : null
+          teamName: row[mapping.team_name] ? String(row[mapping.team_name]).trim() : null,
+          phone: row[mapping.phone] ? String(row[mapping.phone]).trim() : null
         };
           
           console.log(`Processing row ${rowNum}:`, { firstName: rec.firstName, lastName: rec.lastName, email: rec.email, employeeId: rec.employeeId });
@@ -318,7 +358,7 @@ const teamCache = new Map();
         const userIdRes = await query('SELECT gen_random_uuid() id');
         const userId = userIdRes.rows[0].id;
         console.log(`Row ${rowNum}: Creating employee ${rec.email} for organization ${tenantId}`);
-        await query('INSERT INTO profiles (id, email, first_name, last_name, phone, tenant_id) VALUES ($1,$2,$3,$4,$5,$6)', [userId, rec.email, rec.firstName, rec.lastName, null, tenantId]);
+        await query('INSERT INTO profiles (id, email, first_name, last_name, phone, tenant_id) VALUES ($1,$2,$3,$4,$5,$6)', [userId, rec.email, rec.firstName, rec.lastName, rec.phone || null, tenantId]);
         
         // Create auth record with temporary password (user must change on first login)
         const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8).toUpperCase();

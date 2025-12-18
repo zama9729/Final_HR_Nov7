@@ -164,7 +164,11 @@ router.post('/employees/:id/projects', authenticateToken, async (req, res) => {
 
     // 2) Fallback to org_id from auth token / tenant context if still missing
     if (!tenant) {
-      const tokenOrgId = (req as any).orgId || (req.user as any)?.org_id;
+      const tokenOrgId =
+        (req.orgId) ||
+        (req.user && req.user.org_id) ||
+        null;
+
       if (tokenOrgId) {
         tenant = tokenOrgId;
         // Persist tenant on employee and (if possible) profile for future queries

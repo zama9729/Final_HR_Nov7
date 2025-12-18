@@ -10,6 +10,44 @@ import { geocodeAddress, reverseGeocode } from '../services/geocoding.js';
 
 const router = express.Router();
 
+// Ensure timesheet_entries.source CHECK constraint allows all sources used by attendance upload
+let timesheetSourceConstraintEnsured = false;
+async function ensureTimesheetSourceConstraint() {
+  if (timesheetSourceConstraintEnsured) return;
+  try {
+    await query(`
+      DO $$
+      BEGIN
+        -- Drop existing constraint if it exists
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.table_constraints
+          WHERE table_name = 'timesheet_entries'
+            AND constraint_type = 'CHECK'
+            AND constraint_name = 'timesheet_entries_source_check'
+        ) THEN
+          ALTER TABLE timesheet_entries DROP CONSTRAINT timesheet_entries_source_check;
+        END IF;
+
+        -- Recreate constraint with unified allowed set, including 'upload'
+        BEGIN
+          ALTER TABLE timesheet_entries
+            ADD CONSTRAINT timesheet_entries_source_check
+            CHECK (source IN ('punch', 'manual_edit', 'manual', 'import', 'api', 'upload'));
+        EXCEPTION
+          WHEN duplicate_object THEN
+            -- Constraint already exists with the desired definition; ignore
+            NULL;
+        END;
+      END $$;
+    `);
+    timesheetSourceConstraintEnsured = true;
+    console.log('[Attendance] Ensured timesheet_entries.source constraint allows upload/api/import/manual/punch');
+  } catch (err) {
+    console.error('[Attendance] Failed to ensure timesheet_entries.source constraint:', err.message);
+  }
+}
+
 async function getTenantIdForUser(userId) {
   const tenantResult = await query('SELECT tenant_id FROM profiles WHERE id = $1', [userId]);
   return tenantResult.rows[0]?.tenant_id || null;
@@ -399,6 +437,8 @@ router.post('/upload', authenticateToken, requireRole('hr', 'director', 'ceo', '
   });
 }, async (req, res) => {
   try {
+    // Ensure DB constraint is compatible with attendance upload before inserting any rows
+    await ensureTimesheetSourceConstraint();
     if (!req.file) {
       return res.status(400).json({ error: 'No file provided' });
     }
