@@ -77,6 +77,7 @@ import healthRoutes from './routes/health.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders } from './services/cron.js';
 import { scheduleReminderChecks } from './services/reminder-cron.js';
+import { scheduleAutoClockOutChecks } from './services/auto-clockout-cron.js';
 import { scheduleAssignmentSegmentation } from './services/assignment-segmentation.js';
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
 import { scheduleAutoLogout } from './services/attendance-auto-logout.js';
@@ -531,6 +532,7 @@ createPool().then(async () => {
   await scheduleTimesheetReminders();
   schedulePromotionApplication();
   scheduleReminderChecks();
+  scheduleAutoClockOutChecks();
   console.log('✅ Cron jobs scheduled');
 
   // SSL/HTTPS Configuration

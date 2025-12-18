@@ -34,6 +34,11 @@ interface ClockStatusResponse {
   is_clocked_in: boolean;
   open_session: ClockSession | null;
   sessions: ClockSession[];
+  yesterday_auto_clockout?: {
+    clock_out_at: string;
+    is_auto_clockout: boolean;
+    reason: string | null;
+  } | null;
 }
 
 const ClockInOut = () => {
@@ -203,17 +208,49 @@ const ClockInOut = () => {
     return `${hrs}h ${mins}m`;
   };
 
-  // Calculate WFH/WFO analytics
+  // Calculate WFH/WFO analytics - count unique days, not sessions
   const workTypeAnalytics = useMemo(() => {
     if (!status?.sessions || status.sessions.length === 0) {
       return { wfh: 0, wfo: 0, total: 0 };
     }
 
-    const wfh = status.sessions.filter((s) => s.work_type === "WFH").length;
-    const wfo = status.sessions.filter((s) => s.work_type === "WFO").length;
-    const total = status.sessions.length;
+    // Group sessions by date and determine work type for each day
+    const daysByWorkType = new Map<string, 'WFO' | 'WFH'>();
+    
+    status.sessions.forEach((session) => {
+      if (!session.work_type || !session.clock_in_at) return;
+      
+      // Extract date (YYYY-MM-DD) from clock_in_at
+      const date = new Date(session.clock_in_at).toISOString().split('T')[0];
+      
+      // For each date, use the work_type from the first session of that day
+      // If multiple sessions exist for the same day, prioritize WFO if any session is WFO
+      if (!daysByWorkType.has(date)) {
+        daysByWorkType.set(date, session.work_type as 'WFO' | 'WFH');
+      } else {
+        // If we already have this date, prioritize WFO (if current session is WFO, update it)
+        const currentType = daysByWorkType.get(date);
+        if (session.work_type === 'WFO' && currentType === 'WFH') {
+          daysByWorkType.set(date, 'WFO');
+        }
+      }
+    });
 
-    return { wfh, wfo, total };
+    // Count unique days by work type
+    let wfoDays = 0;
+    let wfhDays = 0;
+    
+    daysByWorkType.forEach((workType) => {
+      if (workType === 'WFO') {
+        wfoDays++;
+      } else {
+        wfhDays++;
+      }
+    });
+
+    const total = wfoDays + wfhDays;
+
+    return { wfh: wfhDays, wfo: wfoDays, total };
   }, [status?.sessions]);
 
   if (!isClockMode) {
@@ -364,6 +401,20 @@ const ClockInOut = () => {
               </Card>
             </div>
 
+            {status?.yesterday_auto_clockout && (
+              <Card className="border-amber-200 bg-amber-50/50">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-2 text-sm text-amber-800">
+                    <Clock className="h-4 w-4" />
+                    <span>
+                      Auto clocked out at {formatTime(status.yesterday_auto_clockout.clock_out_at)}
+                      {status.yesterday_auto_clockout.reason && ` - ${status.yesterday_auto_clockout.reason}`}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle>Recent sessions</CardTitle>
@@ -387,7 +438,16 @@ const ClockInOut = () => {
                         <TableRow key={session.id}>
                           <TableCell>{formatDate(session.clock_in_at)}</TableCell>
                           <TableCell>{formatTime(session.clock_in_at)}</TableCell>
-                          <TableCell>{formatTime(session.clock_out_at)}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              {formatTime(session.clock_out_at)}
+                              {(session as any).is_auto_clockout && (
+                                <span className="text-xs text-amber-600">
+                                  Auto clocked out
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>{formatDuration(session.duration_minutes)}</TableCell>
                           <TableCell>
                             {session.work_type ? (
