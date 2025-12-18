@@ -323,16 +323,23 @@ router.get('/', authenticateToken, async (req, res) => {
 // Get org chart structure (all active employees with profiles) - MUST be before /:id
 router.get('/org-chart', authenticateToken, async (req, res) => {
   try {
-    // Get user's tenant_id
-    const tenantResult = await query(
-      'SELECT tenant_id FROM profiles WHERE id = $1',
-      [req.user.id]
-    );
-    const tenantId = tenantResult.rows[0]?.tenant_id;
+    // Get user's tenant_id - try multiple sources
+    let tenantId = req.orgId || req.tenant_id;
+    
+    if (!tenantId) {
+      const tenantResult = await query(
+        'SELECT tenant_id FROM profiles WHERE id = $1',
+        [req.user.id]
+      );
+      tenantId = tenantResult.rows[0]?.tenant_id;
+    }
 
     if (!tenantId) {
+      console.error('[Org Chart] No tenant_id found for user:', req.user.id);
       return res.status(403).json({ error: 'No organization found' });
     }
+
+    console.log(`[Org Chart] Fetching org chart for tenant: ${tenantId}`);
 
     // Check if profile_picture_url column exists
     const columnCheck = await query(
@@ -347,6 +354,8 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
       ? `'profile_picture_url', p.profile_picture_url`
       : `'profile_picture_url', NULL::text`;
 
+    // More inclusive status filter - include active, confirmed, and NULL status employees
+    // Exclude only terminated, on_hold, and resigned
     const result = await query(
       `SELECT 
         e.*,
@@ -365,15 +374,30 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
       JOIN profiles p ON p.id = e.user_id
       LEFT JOIN org_designations d ON d.name = e.position AND d.organisation_id = $1
       LEFT JOIN org_reporting_lines rl ON rl.designation_id = d.id AND rl.organisation_id = $1
-      WHERE e.tenant_id = $1 AND e.status = 'active'
+      WHERE e.tenant_id = $1 
+        AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
       ORDER BY e.employee_id`,
       [tenantId]
     );
 
+    console.log(`[Org Chart] Found ${result.rows.length} employees for tenant ${tenantId}`);
+    
+    // Log sample if no results
+    if (result.rows.length === 0) {
+      const debugResult = await query(
+        `SELECT COUNT(*) as total, 
+                COUNT(CASE WHEN COALESCE(status, 'active') NOT IN ('terminated', 'on_hold', 'resigned') THEN 1 END) as active_count
+         FROM employees 
+         WHERE tenant_id = $1`,
+        [tenantId]
+      );
+      console.log(`[Org Chart] Debug - Total employees: ${debugResult.rows[0].total}, Active: ${debugResult.rows[0].active_count}`);
+    }
+
     res.json(result.rows);
   } catch (error) {
-    console.error('Error fetching org chart:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[Org Chart] Error fetching org chart:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch organization chart' });
   }
 });
 
@@ -940,6 +964,17 @@ router.post('/', authenticateToken, async (req, res) => {
       } catch (eventError) {
         console.error('Error creating joining event:', eventError);
         // Don't fail employee creation if event creation fails
+      }
+
+      // Create probation record based on active policy
+      try {
+        if (createdEmployee.join_date) {
+          const { createProbationRecordForEmployee } = await import('../utils/create-probation-record.js');
+          await createProbationRecordForEmployee(tenantId, createdEmployee.id, createdEmployee.join_date);
+        }
+      } catch (probationError) {
+        console.error('Error creating probation record:', probationError);
+        // Don't fail employee creation if probation creation fails
       }
 
       if (homeBranchId || homeDepartmentId || homeTeamId) {

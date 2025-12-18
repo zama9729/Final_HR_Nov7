@@ -84,6 +84,12 @@ router.post('/', authenticateToken, requireRole('hr', 'ceo', 'admin'), async (re
       requires_mid_probation_review = false,
       auto_confirm_at_end = false,
       probation_notice_days = 0,
+      confirmation_effective_rule = 'on_probation_end',
+      notify_employee = true,
+      notify_manager = true,
+      notify_hr = true,
+      allow_extension = false,
+      max_extension_days = 0,
       status = 'draft',
     } = req.body;
 
@@ -91,13 +97,28 @@ router.post('/', authenticateToken, requireRole('hr', 'ceo', 'admin'), async (re
       return res.status(400).json({ error: 'Name and probation_days are required' });
     }
 
+    if (probation_days < 1) {
+      return res.status(400).json({ error: 'Probation duration must be at least 1 day' });
+    }
+
+    if (allow_extension && max_extension_days < 0) {
+      return res.status(400).json({ error: 'Max extension days must be non-negative' });
+    }
+
+    if (!['on_probation_end', 'next_working_day'].includes(confirmation_effective_rule)) {
+      return res.status(400).json({ error: 'Invalid confirmation effective rule' });
+    }
+
     const { rows } = await query(
       `INSERT INTO probation_policies (
         tenant_id, name, probation_days, allowed_leave_days,
         requires_mid_probation_review, auto_confirm_at_end,
-        probation_notice_days, status, created_by
+        probation_notice_days, confirmation_effective_rule,
+        notify_employee, notify_manager, notify_hr,
+        allow_extension, max_extension_days,
+        status, created_by, updated_by
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *`,
       [
         tenantId,
@@ -107,9 +128,23 @@ router.post('/', authenticateToken, requireRole('hr', 'ceo', 'admin'), async (re
         requires_mid_probation_review,
         auto_confirm_at_end,
         probation_notice_days,
+        confirmation_effective_rule,
+        notify_employee,
+        notify_manager,
+        notify_hr,
+        allow_extension,
+        max_extension_days,
         status,
         req.user.id,
+        req.user.id,
       ]
+    );
+
+    // Create audit log
+    await query(
+      `INSERT INTO probation_policy_audit_logs (policy_id, tenant_id, actor_id, action, changes_json)
+       VALUES ($1, $2, $3, 'created', $4)`,
+      [rows[0].id, tenantId, req.user.id, JSON.stringify(rows[0])]
     );
 
     res.status(201).json({ policy: rows[0] });
@@ -135,6 +170,12 @@ router.put('/:id', authenticateToken, requireRole('hr', 'ceo', 'admin'), async (
       requires_mid_probation_review,
       auto_confirm_at_end,
       probation_notice_days,
+      confirmation_effective_rule,
+      notify_employee,
+      notify_manager,
+      notify_hr,
+      allow_extension,
+      max_extension_days,
       status,
       is_active,
     } = req.body;
@@ -186,6 +227,36 @@ router.put('/:id', authenticateToken, requireRole('hr', 'ceo', 'admin'), async (
         updateValues.push(req.user.id);
       }
     }
+    if (confirmation_effective_rule !== undefined) {
+      if (!['on_probation_end', 'next_working_day'].includes(confirmation_effective_rule)) {
+        return res.status(400).json({ error: 'Invalid confirmation effective rule' });
+      }
+      updateFields.push(`confirmation_effective_rule = $${paramCount++}`);
+      updateValues.push(confirmation_effective_rule);
+    }
+    if (notify_employee !== undefined) {
+      updateFields.push(`notify_employee = $${paramCount++}`);
+      updateValues.push(notify_employee);
+    }
+    if (notify_manager !== undefined) {
+      updateFields.push(`notify_manager = $${paramCount++}`);
+      updateValues.push(notify_manager);
+    }
+    if (notify_hr !== undefined) {
+      updateFields.push(`notify_hr = $${paramCount++}`);
+      updateValues.push(notify_hr);
+    }
+    if (allow_extension !== undefined) {
+      updateFields.push(`allow_extension = $${paramCount++}`);
+      updateValues.push(allow_extension);
+    }
+    if (max_extension_days !== undefined) {
+      if (max_extension_days < 0) {
+        return res.status(400).json({ error: 'Max extension days must be non-negative' });
+      }
+      updateFields.push(`max_extension_days = $${paramCount++}`);
+      updateValues.push(max_extension_days);
+    }
     if (is_active !== undefined) {
       updateFields.push(`is_active = $${paramCount++}`);
       updateValues.push(is_active);
@@ -195,7 +266,12 @@ router.put('/:id', authenticateToken, requireRole('hr', 'ceo', 'admin'), async (
       return res.status(400).json({ error: 'No fields to update' });
     }
 
+    // Get old values for audit log
+    const oldPolicy = checkResult.rows[0];
+    
     updateFields.push(`updated_at = now()`);
+    updateFields.push(`updated_by = $${paramCount++}`);
+    updateValues.push(req.user.id);
     updateValues.push(id, tenantId);
 
     const { rows } = await query(
@@ -205,6 +281,22 @@ router.put('/:id', authenticateToken, requireRole('hr', 'ceo', 'admin'), async (
        RETURNING *`,
       updateValues
     );
+
+    // Create audit log
+    const changes = {};
+    Object.keys(req.body).forEach(key => {
+      if (oldPolicy[key] !== rows[0][key]) {
+        changes[key] = { old: oldPolicy[key], new: rows[0][key] };
+      }
+    });
+    
+    if (Object.keys(changes).length > 0) {
+      await query(
+        `INSERT INTO probation_policy_audit_logs (policy_id, tenant_id, actor_id, action, changes_json)
+         VALUES ($1, $2, $3, 'updated', $4)`,
+        [id, tenantId, req.user.id, JSON.stringify(changes)]
+      );
+    }
 
     // If policy is being published, auto-create probation records for employees without probation
     if (status === 'published' && rows[0]) {

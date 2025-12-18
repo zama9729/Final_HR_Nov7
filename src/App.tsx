@@ -85,6 +85,7 @@ import AuditLogs from "./pages/AuditLogs";
 import OnboardingWizardPage from "./pages/OnboardingWizardPage";
 import OrganizationSetupEdit from "./pages/OrganizationSetupEdit";
 import OrganizationHierarchy from "./pages/OrganizationHierarchy";
+import OrganizationRules from "./pages/OrganizationRules";
 
 const queryClient = new QueryClient();
 
@@ -200,6 +201,7 @@ const App = () => (
             <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/settings/organization-setup" element={<ProtectedRoute allowedRoles={['hr','ceo','admin']}><OrganizationSetupEdit /></ProtectedRoute>} />
+            <Route path="/settings/organization-rules" element={<ProtectedRoute allowedRoles={['hr','ceo']}><OrganizationRules /></ProtectedRoute>} />
             <Route path="/appraisals" element={<ProtectedRoute allowedRoles={['manager', 'hr', 'director', 'ceo', 'admin']}><Appraisals /></ProtectedRoute>} />
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
             <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><ShiftManagement /></ProtectedRoute>} />

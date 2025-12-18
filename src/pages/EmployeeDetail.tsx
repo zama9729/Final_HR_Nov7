@@ -51,7 +51,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { format, differenceInCalendarDays } from 'date-fns';
 import { DocumentReviewPanel } from '@/components/hr/DocumentReviewPanel';
 import { BackgroundCheckPanel } from '@/components/hr/BackgroundCheckPanel';
-import { ProbationPanel } from '@/components/hr/ProbationPanel';
 import { TeamReportingSection } from '@/components/TeamReportingSection';
 
 // Helper component to display team members
@@ -624,10 +623,6 @@ export default function EmployeeDetail() {
                   <UserCheck className="mr-2 h-4 w-4" />
                   Background Check
                 </TabsTrigger>
-                <TabsTrigger value="probation">
-                  <Activity className="mr-2 h-4 w-4" />
-                  Probation
-                </TabsTrigger>
               </>
             )}
           </TabsList>
@@ -767,29 +762,6 @@ export default function EmployeeDetail() {
                 </CardContent>
               </Card>
 
-          {employee?.probation && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5" />
-                  Probation
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Status</span>
-                  <Badge variant="secondary">{employee.probation.status}</Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Ends</span>
-                  <span className="font-medium">{format(new Date(employee.probation.probation_end), 'MMM dd, yyyy')}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {differenceInCalendarDays(new Date(employee.probation.probation_end), new Date())} days remaining
-                </p>
-              </CardContent>
-            </Card>
-          )}
 
               {/* Financial Information */}
               {employee?.onboarding_data && (
@@ -1147,9 +1119,6 @@ export default function EmployeeDetail() {
               </TabsContent>
               <TabsContent value="background-check">
                 {employee?.id && <BackgroundCheckPanel employeeId={employee.id} />}
-              </TabsContent>
-              <TabsContent value="probation">
-                <ProbationPanel employeeId={employee.id} canEdit={isHrUser} />
               </TabsContent>
             </>
           )}
