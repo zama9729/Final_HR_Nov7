@@ -147,7 +147,7 @@ const recalculateEmployeePay = async (runId, employeeId) => {
     // For recalculation, we treat gross_pay_cents as the base and add all adjustments
     let taxableAdjustmentCents = 0;
     let nonTaxableAdjustmentCents = 0;
-    
+
     adjustmentsResult.rows.forEach((adj) => {
       const adjCents = Math.round(Number(adj.amount || 0) * 100);
       if (adj.is_taxable) {
@@ -766,8 +766,8 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
 
         pfCents = Math.round(pfAmount * 100);
 
-      // NOTE: Reimbursements are now processed separately via reimbursement_runs
-      // They are no longer included in payroll calculations
+        // NOTE: Reimbursements are now processed separately via reimbursement_runs
+        // They are no longer included in payroll calculations
 
         try {
           const financialYear = getFinancialYearForDate(run.pay_date);
@@ -781,19 +781,19 @@ router.post('/runs/:id/process', authenticateToken, requireCapability(CAPABILITI
       }
 
       const totalDeductionsCents = tdsCents + pfCents + otherDeductionsCents;
-      
+
       // Step C: Calculate base net pay
       // NOTE: Reimbursements are no longer included in payroll net pay calculation
       let baseNetPayCents = grossPayCents - totalDeductionsCents + nonTaxableAdjustmentCents;
-      
+
       // Step C: For regular runs, deduct already paid amount from previous partial_payment runs
       const previousPaidCents = alreadyPaidByEmployee.get(ts.employee_id) || 0;
       let finalNetPayCents = baseNetPayCents;
-      
+
       if (run.run_type === 'regular' && previousPaidCents > 0) {
         // Deduct the already paid amount
         finalNetPayCents = baseNetPayCents - previousPaidCents;
-        
+
         // Safety: Handle negative net pay gracefully
         if (finalNetPayCents < 0) {
           console.warn(
