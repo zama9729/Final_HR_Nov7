@@ -321,7 +321,23 @@ class ApiClient {
 
   // Branch hierarchy
   async getBranchHierarchy() {
-    return this.request('/api/branches');
+    try {
+      return await this.request('/api/branches');
+    } catch (error: any) {
+      const msg = (error?.message || "").toLowerCase();
+      const isForbidden =
+        msg.includes("insufficient permissions") ||
+        msg.includes("permission") ||
+        msg.includes("forbidden") ||
+        msg.includes("403");
+
+      if (isForbidden) {
+        // For roles that cannot view branches (e.g. employees), return an empty hierarchy
+        return { branches: [], departments: [], teams: [] };
+      }
+
+      throw error;
+    }
   }
 
   async getBranches() {
@@ -823,11 +839,6 @@ class ApiClient {
 
   async getBackgroundCheck(candidateId: string) {
     return this.request(`/api/onboarding/${candidateId}/background-check`);
-  }
-
-  // Public request method for custom endpoints (wrapper around private request)
-  async customRequest(endpoint: string, options: RequestInit = {}) {
-    return this.request(endpoint, options);
   }
 
   async getOnboardingDocuments(candidateId: string, params?: { status?: string; docType?: string }) {

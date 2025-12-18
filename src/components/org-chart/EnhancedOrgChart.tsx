@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ProfilePicture } from "@/components/ProfilePicture";
@@ -11,13 +11,31 @@ import {
 } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ChevronDown, Mail, Building2, Users, Search } from "lucide-react";
+import {
+  ChevronDown,
+  Mail,
+  Building2,
+  Users,
+  Search,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  MoreVertical,
+} from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 
 interface Assignment {
   assignment_id: string;
@@ -177,8 +195,9 @@ interface OrgChartNodeProps {
   onToggle: (nodeId: string) => void;
   isRoot?: boolean;
   expandedNodes: Set<string>;
-   selectedId?: string | null;
-   onSelect?: (node: TreeNode) => void;
+  selectedId?: string | null;
+  onSelect?: (node: TreeNode) => void;
+  managerName?: string | null;
 }
 
 function OrgChartNode({
@@ -190,6 +209,7 @@ function OrgChartNode({
   expandedNodes,
   selectedId,
   onSelect,
+  managerName,
 }: OrgChartNodeProps) {
   if (!node.profiles) return null;
 
@@ -216,92 +236,135 @@ function OrgChartNode({
               }}
             >
               <div
-                className={`
-                  relative w-32 h-32 rounded-full 
-                  bg-gradient-to-br from-white via-white to-slate-50
-                  dark:from-slate-800 dark:via-slate-800 dark:to-slate-900
-                  border-2 border-slate-200/60 dark:border-slate-700/60
-                  shadow-[0_8px_24px_rgba(15,23,42,0.12)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.3)]
-                  flex items-center justify-center
-                  transition-all duration-300
-                  hover:scale-105 hover:shadow-[0_12px_32px_rgba(15,23,42,0.18)] dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)]
-                  ${isRoot ? 'ring-4 ring-blue-200/50 dark:ring-blue-800/30' : ''}
-                  ${isSelected ? 'ring-4 ring-emerald-300/70 dark:ring-emerald-500/70 ring-offset-2 ring-offset-slate-50 dark:ring-offset-slate-900' : ''}
+                className={`relative w-64 rounded-2xl bg-white shadow-[0_10px_30px_rgba(15,23,42,0.12)] border border-slate-100
+                  transition-transform duration-200 ease-in-out hover:scale-[1.03] hover:shadow-[0_16px_40px_rgba(15,23,42,0.16)]
+                  ${isRoot ? "ring-2 ring-blue-200/70" : ""}
+                  ${isSelected ? "ring-2 ring-emerald-300/80" : ""}
                 `}
               >
-                {/* Profile Picture */}
-                <Avatar className="h-24 w-24 border-2 border-white dark:border-slate-700 shadow-inner">
-                  {node.profiles?.profile_picture_url ? (
-                    <ProfilePicture
-                      userId={node.id}
-                      src={node.profiles.profile_picture_url}
-                      className="h-full w-full object-cover"
-                      alt={fullName}
+                <div className="flex items-start gap-3 px-4 pt-3 pb-2">
+                  {/* Avatar */}
+                  <div className="relative">
+                    <Avatar className="h-12 w-12 border-2 border-white shadow-inner">
+                      {node.profiles?.profile_picture_url ? (
+                        <ProfilePicture
+                          userId={node.id}
+                          src={node.profiles.profile_picture_url}
+                          className="h-full w-full object-cover"
+                          alt={fullName}
+                        />
+                      ) : (
+                        <AvatarImage src={undefined} alt={fullName} />
+                      )}
+                      <AvatarFallback className="bg-gradient-to-br from-blue-100 to-indigo-100 text-blue-700 text-sm font-semibold">
+                        {initials || "?"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span
+                      className={`absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-white ${getPresenceColor(
+                        node.presence_status
+                      )}`}
                     />
-                  ) : (
-                    <AvatarImage src={undefined} alt={fullName} />
-                  )}
-                  <AvatarFallback className="bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900 dark:to-indigo-900 text-blue-700 dark:text-blue-200 text-lg font-semibold">
-                    {initials || "?"}
-                  </AvatarFallback>
-                </Avatar>
+                  </div>
 
-                {/* Presence Indicator */}
-                <div
-                  className={`
-                    absolute bottom-2 right-2 h-4 w-4 rounded-full border-2 border-white dark:border-slate-800
-                    ${getPresenceColor(node.presence_status)}
-                  `}
-                  title={getPresenceLabel(node.presence_status)}
-                />
+                  {/* Main info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#2E3A59]">
+                          {fullName || "Unnamed"}
+                        </p>
+                        {node.designation_name && (
+                          <p className="mt-0.5 text-[11px] font-semibold text-blue-600">
+                            Grade {node.designation_name}
+                          </p>
+                        )}
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          {department}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          {designation}
+                        </p>
+                      </div>
+
+                      {/* Quick menu */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-50 text-slate-500 shadow-sm transition hover:bg-slate-100"
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="Open actions"
+                          >
+                            <MoreVertical className="h-3.5 w-3.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelect?.(node);
+                            }}
+                          >
+                            View Profile
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                    {/* Email */}
+                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+                      <Mail className="h-3 w-3" />
+                      <span className="truncate" title={email}>
+                        {email}
+                      </span>
+                    </div>
+
+                    {/* Presence label */}
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span className="inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                        {getPresenceLabel(node.presence_status)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expand/Collapse */}
+                {hasChildren && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggle(node.id);
+                    }}
+                    className={`flex w-full items-center justify-center gap-1 border-t border-slate-100 bg-slate-50/60 px-2 py-1.5 text-[11px] text-slate-600 transition hover:bg-blue-50
+                      ${isExpanded ? "" : ""}
+                    `}
+                    aria-label={isExpanded ? "Collapse" : "Expand"}
+                  >
+                    <ChevronDown
+                      className={`h-3 w-3 transition-transform duration-200 ${
+                        isExpanded ? "rotate-180" : ""
+                      }`}
+                    />
+                    <span>
+                      {isExpanded ? "Hide direct reports" : "Show direct reports"}
+                    </span>
+                  </button>
+                )}
               </div>
-
-              {/* Name and Designation */}
-              <div className="mt-3 text-center space-y-1 min-w-[160px]">
-                <p className="font-semibold text-sm text-slate-900 dark:text-white leading-tight">
-                  {fullName || "Unnamed"}
-                </p>
-                <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                  {designation}
-                </p>
-                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  {department}
-                </p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                  {email}
-                </p>
-              </div>
-
-              {/* Expand/Collapse Arrow */}
-              {hasChildren && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggle(node.id);
-                  }}
-                  className={`
-                    mt-2 mx-auto w-8 h-8 rounded-full
-                    bg-white/90 dark:bg-slate-800/90
-                    border border-slate-200/60 dark:border-slate-700/60
-                    shadow-md
-                    flex items-center justify-center
-                    transition-all duration-300
-                    hover:bg-blue-50 dark:hover:bg-blue-900/30
-                    hover:border-blue-300 dark:hover:border-blue-700
-                    hover:scale-110
-                    ${isExpanded ? 'rotate-180' : ''}
-                  `}
-                  aria-label={isExpanded ? "Collapse" : "Expand"}
-                >
-                  <ChevronDown className="h-4 w-4 text-slate-600 dark:text-slate-300" />
-                </button>
-              )}
             </div>
           </TooltipTrigger>
-          <TooltipContent side="top" className="bg-slate-900/95 dark:bg-slate-800/95 text-white border-slate-700">
+          <TooltipContent
+            side="top"
+            className="bg-slate-900/95 text-white border-slate-700"
+          >
             <div className="space-y-1 text-xs">
               <p className="font-semibold">{fullName}</p>
               <p className="text-slate-300">{designation}</p>
+              {managerName && (
+                <p className="text-slate-300">
+                  Reports to: <span className="font-medium">{managerName}</span>
+                </p>
+              )}
               <div className="flex items-center gap-1 text-slate-400">
                 <Building2 className="h-3 w-3" />
                 <span>{department}</span>
@@ -312,10 +375,6 @@ function OrgChartNode({
                   <span>{branch}</span>
                 </div>
               )}
-              <div className="flex items-center gap-1 text-slate-400">
-                <Mail className="h-3 w-3" />
-                <span>{email}</span>
-              </div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -323,15 +382,13 @@ function OrgChartNode({
 
       {/* Children Container */}
       {hasChildren && (
-        <div className="mt-6 flex flex-col items-center relative">
+        <div className="mt-4 flex flex-col items-center relative">
           {/* Vertical Line */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-6 bg-gradient-to-b from-slate-300 dark:from-slate-600 to-transparent" />
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-10 bg-gradient-to-b from-slate-300 dark:from-slate-600 to-transparent" />
 
           {/* Expanded Children with Animation */}
           {isExpanded && (
-            <div
-              className="relative flex items-start gap-8 pt-6 animate-in fade-in slide-in-from-top-4 duration-500"
-            >
+            <div className="relative flex items-start gap-8 pt-6 animate-in fade-in slide-in-from-top-4 duration-500">
               {/* Horizontal Connector Line */}
               {node.children.length > 1 && (
                 <div
@@ -381,8 +438,11 @@ function OrgChartNode({
   );
 }
 
+interface EnhancedOrgChartProps {
+  searchQuery?: string;
+}
 
-export default function EnhancedOrgChart() {
+export default function EnhancedOrgChart({ searchQuery = "" }: EnhancedOrgChartProps) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -398,8 +458,18 @@ export default function EnhancedOrgChart() {
     team: "all",
   });
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
+  const selectedId = selectedNode?.id ?? null;
+
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const isPanningRef = useRef(false);
+  const lastPosRef = useRef({ x: 0, y: 0 });
+
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerSkills, setDrawerSkills] = useState<any[]>([]);
+  const [drawerProjects, setDrawerProjects] = useState<any[]>([]);
+  const [drawerCerts, setDrawerCerts] = useState<any[]>([]);
 
   // Expand all nodes by default
   useEffect(() => {
@@ -429,21 +499,38 @@ export default function EnhancedOrgChart() {
   };
 
   useEffect(() => {
-    loadOrgChart();
-    loadBranches();
+    const run = async () => {
+      try {
+        await loadOrgChart();
+        await loadBranches();
+      } catch (error) {
+        console.error("[OrgChart] Failed to load org chart:", error);
+        setEmployees([]);
+        setTree([]);
+        setLoading(false);
+      }
+    };
+    run();
   }, []);
 
   const loadOrgChart = async () => {
-    const [employeesData, designationsData] = await Promise.all([
-      fetchOrgStructure(),
-      api.getDesignations().catch(() => [] as Designation[]),
-    ]);
-    setEmployees(employeesData);
-    const safeDesignations = (designationsData as Designation[]) || [];
-    setDesignations(safeDesignations);
-    const orgTree = buildTree(employeesData, safeDesignations);
-    setTree(orgTree);
-    setLoading(false);
+    try {
+      const [employeesData, designationsData] = await Promise.all([
+        fetchOrgStructure(),
+        api.getDesignations().catch(() => [] as Designation[]),
+      ]);
+      setEmployees(employeesData);
+      const safeDesignations = (designationsData as Designation[]) || [];
+      setDesignations(safeDesignations);
+      const orgTree = buildTree(employeesData, safeDesignations);
+      setTree(orgTree);
+    } catch (error) {
+      console.error("[OrgChart] loadOrgChart error:", error);
+      setEmployees([]);
+      setTree([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const loadBranches = async () => {
@@ -466,7 +553,7 @@ export default function EnhancedOrgChart() {
   };
 
   const filteredEmployees = useMemo(() => {
-    const searchTerm = search.trim().toLowerCase();
+    const searchTerm = searchQuery.trim().toLowerCase();
     return employees.filter((emp) => {
       const home = emp.home_assignment;
       if (filters.branch !== "all" && home?.branch_id !== filters.branch) return false;
@@ -485,7 +572,7 @@ export default function EnhancedOrgChart() {
         department.includes(searchTerm)
       );
     });
-  }, [employees, filters, search]);
+  }, [employees, filters, searchQuery]);
 
   useEffect(() => {
     const orgTree = buildTree(filteredEmployees);
@@ -551,9 +638,94 @@ export default function EnhancedOrgChart() {
       ? []
       : hierarchy.teams.filter((team) => team.branch_id === filters.branch);
 
+  // Load lightweight profile extras for drawer (skills, projects, certifications)
+  useEffect(() => {
+    const loadExtras = async () => {
+      if (!selectedNode) {
+        setDrawerSkills([]);
+        setDrawerProjects([]);
+        setDrawerCerts([]);
+        return;
+      }
+      setDrawerLoading(true);
+      try {
+        const token = api.token || localStorage.getItem("auth_token") || "";
+        const base = import.meta.env.VITE_API_URL;
+        const empId = selectedNode.id;
+
+        const [skillsResp, projectsResp, certsResp] = await Promise.all([
+          fetch(`${base}/api/v1/employees/${empId}/skills`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => null),
+          fetch(`${base}/api/v1/employees/${empId}/projects?type=active`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => null),
+          fetch(`${base}/api/v1/employees/${empId}/certifications`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => null),
+        ]);
+
+        if (skillsResp && skillsResp.ok) {
+          const data = await skillsResp.json();
+          setDrawerSkills(Array.isArray(data) ? data : []);
+        } else {
+          setDrawerSkills([]);
+        }
+
+        if (projectsResp && projectsResp.ok) {
+          const data = await projectsResp.json();
+          const list = Array.isArray(data) ? data : data?.projects || [];
+          setDrawerProjects(list);
+        } else {
+          setDrawerProjects([]);
+        }
+
+        if (certsResp && certsResp.ok) {
+          const data = await certsResp.json();
+          setDrawerCerts(Array.isArray(data) ? data : []);
+        } else {
+          setDrawerCerts([]);
+        }
+      } catch (e) {
+        console.error("Failed to load org chart drawer data", e);
+        setDrawerSkills([]);
+        setDrawerProjects([]);
+        setDrawerCerts([]);
+      } finally {
+        setDrawerLoading(false);
+      }
+    };
+
+    loadExtras();
+  }, [selectedNode]);
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    isPanningRef.current = true;
+    lastPosRef.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isPanningRef.current) return;
+    const dx = event.clientX - lastPosRef.current.x;
+    const dy = event.clientY - lastPosRef.current.y;
+    lastPosRef.current = { x: event.clientX, y: event.clientY };
+    setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+  };
+
+  const handleMouseUp = () => {
+    isPanningRef.current = false;
+  };
+
+  const resetView = () => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  };
+
+  const showReset = scale !== 1 || offset.x !== 0 || offset.y !== 0;
+
   return (
     <div className="w-full space-y-6">
-      {/* Filters & Search */}
+      {/* Filters & Branch hierarchy */}
       <div className="flex flex-wrap gap-4 items-end px-6 pt-6">
         <div className="flex flex-col gap-2">
           <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Branch</p>
@@ -620,18 +792,6 @@ export default function EnhancedOrgChart() {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex-1 min-w-[220px] flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Search</p>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, role, or department"
-              className="pl-9 border-slate-200 dark:border-slate-700"
-            />
-          </div>
-        </div>
       </div>
 
       {/* Metrics Cards */}
@@ -648,8 +808,21 @@ export default function EnhancedOrgChart() {
       </div>
 
       {/* Org Chart Container */}
-      <div className="w-full overflow-auto pb-12" style={{ minHeight: '600px' }}>
-        <div className="inline-flex flex-col items-center gap-16 p-8 min-w-max">
+      <div
+        className="relative w-full overflow-hidden pb-12 rounded-b-[28px] bg-[#F9FBFF]"
+        style={{ minHeight: "600px" }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <div
+          className="inline-flex flex-col items-center gap-16 p-8 min-w-max transition-transform duration-75 ease-out"
+          style={{
+            transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+            transformOrigin: "center center",
+          }}
+        >
           {/* CEO at Top Center */}
           {ceoNode && (
             <OrgChartNode
@@ -660,7 +833,7 @@ export default function EnhancedOrgChart() {
               isRoot={true}
               expandedNodes={expandedNodes}
               selectedId={selectedId}
-              onSelect={(node) => setSelectedId(node.id)}
+              onSelect={(node) => setSelectedNode(node)}
             />
           )}
 
@@ -675,14 +848,219 @@ export default function EnhancedOrgChart() {
                   isExpanded={expandedNodes.has(root.id)}
                   onToggle={toggleNode}
                   expandedNodes={expandedNodes}
-                  selectedId={selectedId}
-                  onSelect={(node) => setSelectedId(node.id)}
+              selectedId={selectedId}
+              onSelect={(node) => setSelectedNode(node)}
                 />
               ))}
             </div>
           )}
         </div>
+
+        {/* Zoom controls (top-left) */}
+        <div className="pointer-events-auto absolute top-4 left-4 flex flex-col gap-2 rounded-full bg-white/90 p-1 shadow-md border border-slate-200">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 rounded-full hover:bg-blue-50"
+            onClick={() => setScale((s) => Math.min(1.8, s + 0.15))}
+          >
+            <ZoomIn className="h-4 w-4 text-slate-600" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 rounded-full hover:bg-blue-50"
+            onClick={() => setScale((s) => Math.max(0.4, s - 0.15))}
+          >
+            <ZoomOut className="h-4 w-4 text-slate-600" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 rounded-full hover:bg-blue-50"
+            onClick={resetView}
+          >
+            <Maximize2 className="h-4 w-4 text-slate-600" />
+          </Button>
+        </div>
+
+        {/* Legend & Back to top (top-right) */}
+        <div className="pointer-events-auto absolute top-4 right-4 flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 text-[11px] text-slate-600 shadow-md border border-slate-200">
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-green-500" /> Online
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-amber-500" /> Waiting for Onboarding
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-slate-500" /> Offline
+            </span>
+          </div>
+          {showReset && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-full bg-white/95 text-xs shadow-sm"
+              onClick={resetView}
+            >
+              Back to top
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Right-side info drawer */}
+      {selectedNode && selectedNode.profiles && (
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={() => setSelectedNode(null)}>
+          <div
+            className="h-full w-full max-w-md bg-white shadow-2xl px-5 py-6 overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase text-slate-500">Profile</p>
+                <p className="text-lg font-semibold text-slate-900">
+                  {`${selectedNode.profiles.first_name || ""} ${selectedNode.profiles.last_name || ""}`.trim() ||
+                    "Employee"}
+                </p>
+                <p className="text-sm text-slate-500">
+                  {selectedNode.position || "Employee"} ·{" "}
+                  {selectedNode.home_assignment?.department_name || selectedNode.department || "Unassigned"}
+                </p>
+              </div>
+
+              {/* About */}
+              <div className="rounded-xl border bg-slate-50 px-3 py-2">
+                <p className="mb-2 text-xs font-semibold uppercase text-slate-500">About</p>
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    {selectedNode.profiles.profile_picture_url ? (
+                      <ProfilePicture
+                        userId={selectedNode.id}
+                        src={selectedNode.profiles.profile_picture_url}
+                        className="h-full w-full object-cover"
+                        alt=""
+                      />
+                    ) : (
+                      <AvatarImage src={undefined} alt="" />
+                    )}
+                    <AvatarFallback>
+                      {(selectedNode.profiles.first_name?.[0] || "") +
+                        (selectedNode.profiles.last_name?.[0] || "")}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="space-y-1 text-sm">
+                    <p className="font-medium text-slate-900">{selectedNode.profiles.email}</p>
+                    <p className="text-xs text-slate-500">Employee ID: {selectedNode.employee_id}</p>
+                    {selectedNode.home_assignment?.branch_name && (
+                      <p className="text-xs text-slate-500">
+                        Branch: {selectedNode.home_assignment.branch_name}
+                      </p>
+                    )}
+                    {selectedNode.home_assignment?.team_name && (
+                      <p className="text-xs text-slate-500">
+                        Team: {selectedNode.home_assignment.team_name}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Presence</span>
+                  <Badge variant="outline" className="capitalize">
+                    {getPresenceLabel(selectedNode.presence_status)}
+                  </Badge>
+                </div>
+                {selectedNode.home_assignment?.branch_name && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Branch</span>
+                    <span className="font-medium text-slate-800">
+                      {selectedNode.home_assignment.branch_name}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Skills */}
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-500">Skills</span>
+                  {drawerLoading && (
+                    <span className="text-[11px] text-slate-400">Loading…</span>
+                  )}
+                </div>
+                {drawerSkills.length === 0 && !drawerLoading ? (
+                  <p className="text-xs text-slate-500">No skills listed yet.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {drawerSkills.slice(0, 6).map((s: any) => (
+                      <Badge
+                        key={s.id || s.name}
+                        variant="secondary"
+                        className="text-[11px]"
+                      >
+                        {s.name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Projects */}
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-500">Projects</span>
+                </div>
+                {drawerProjects.length === 0 && !drawerLoading ? (
+                  <p className="text-xs text-slate-500">No active projects found.</p>
+                ) : (
+                  <ul className="space-y-1 text-xs text-slate-600">
+                    {drawerProjects.slice(0, 4).map((p: any) => (
+                      <li key={p.id || p.name}>• {p.name || p.project_name}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Certifications */}
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-500">
+                    Certifications
+                  </span>
+                </div>
+                {drawerCerts.length === 0 && !drawerLoading ? (
+                  <p className="text-xs text-slate-500">No certifications recorded.</p>
+                ) : (
+                  <ul className="space-y-1 text-xs text-slate-600">
+                    {drawerCerts.slice(0, 4).map((c: any, idx: number) => (
+                      <li key={c.id || idx}>
+                        • {c.name}
+                        {c.issuer ? ` · ${c.issuer}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Upcoming leaves (placeholder – can be wired to leave APIs later) */}
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-500">
+                    Upcoming leaves
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  No upcoming leaves in the next 30 days.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
