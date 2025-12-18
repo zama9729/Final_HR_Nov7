@@ -70,6 +70,7 @@ import schedulingRoutes from './routes/scheduling.js';
 import rosterRoutes from './routes/roster.js';
 import probationRoutes from './routes/probation.js';
 import probationPoliciesRoutes from './routes/probation-policies.js';
+import probationBackfillRoutes from './routes/probation-backfill.js';
 import documentUploadRoutes from './routes/document-upload.js';
 import backgroundCheckRoutes from './routes/background-check.js';
 import employeeHistoryRoutes from './routes/employee-history.js';
@@ -82,6 +83,7 @@ import { scheduleAssignmentSegmentation } from './services/assignment-segmentati
 import { scheduleOffboardingJobs } from './services/offboarding-cron.js';
 import { scheduleAutoLogout } from './services/attendance-auto-logout.js';
 import { schedulePromotionApplication } from './services/promotion-cron.js';
+import { scheduleProbationAutoConfirmation } from './services/probation-auto-confirm-cron.js';
 import { createAttendanceTables } from './utils/createAttendanceTables.js';
 import { createSchedulingTables } from './utils/createSchedulingTables.js';
 import { ensureAdminRole } from './utils/runMigration.js';
@@ -203,7 +205,8 @@ app.use('/api/documents', authenticateToken, documentsRoutes);
 app.use('/api/offboarding', authenticateToken, offboardingRoutes);
 app.use('/api/rehire', authenticateToken, rehireRoutes);
 app.use('/api/audit-logs', authenticateToken, setTenantContext, auditLogsRoutes);
-app.use('/api/probation', authenticateToken, probationRoutes);
+app.use('/api/probation', authenticateToken, setTenantContext, probationRoutes);
+app.use('/api/probation', authenticateToken, setTenantContext, probationBackfillRoutes);
 app.use('/api/probation-policies', authenticateToken, setTenantContext, probationPoliciesRoutes);
 app.use('/api/setup', setupRoutes);
 app.use('/api/branches', branchesRoutes);
@@ -324,6 +327,59 @@ createPool().then(async () => {
     await ensureManagerRoles();
   } catch (error) {
     console.error('Error ensuring manager roles:', error);
+  }
+
+  // Ensure probation policy migration runs
+  try {
+    await dbQuery(`
+      ALTER TABLE probation_policies
+        ADD COLUMN IF NOT EXISTS confirmation_effective_rule TEXT DEFAULT 'on_probation_end' 
+          CHECK (confirmation_effective_rule IN ('on_probation_end', 'next_working_day')),
+        ADD COLUMN IF NOT EXISTS notify_employee BOOLEAN DEFAULT true,
+        ADD COLUMN IF NOT EXISTS notify_manager BOOLEAN DEFAULT true,
+        ADD COLUMN IF NOT EXISTS notify_hr BOOLEAN DEFAULT true,
+        ADD COLUMN IF NOT EXISTS allow_extension BOOLEAN DEFAULT false,
+        ADD COLUMN IF NOT EXISTS max_extension_days INTEGER DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES profiles(id);
+
+      CREATE TABLE IF NOT EXISTS probation_policy_audit_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        policy_id UUID REFERENCES probation_policies(id) ON DELETE CASCADE NOT NULL,
+        tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+        actor_id UUID REFERENCES profiles(id),
+        action TEXT NOT NULL,
+        changes_json JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT now()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_probation_policy_audit_policy 
+        ON probation_policy_audit_logs(policy_id);
+      CREATE INDEX IF NOT EXISTS idx_probation_policy_audit_tenant 
+        ON probation_policy_audit_logs(tenant_id);
+
+      CREATE TABLE IF NOT EXISTS probation_event_notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+        employee_id UUID REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
+        probation_id UUID REFERENCES probations(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL CHECK (event_type IN ('probation_start', 'probation_completion', 'auto_confirmation', 'probation_extension')),
+        notification_type TEXT NOT NULL CHECK (notification_type IN ('employee', 'manager', 'hr')),
+        recipient_id UUID REFERENCES profiles(id),
+        sent_at TIMESTAMPTZ,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed')),
+        error_message TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_probation_notifications_employee 
+        ON probation_event_notifications(employee_id);
+      CREATE INDEX IF NOT EXISTS idx_probation_notifications_status 
+        ON probation_event_notifications(status) 
+        WHERE status = 'pending';
+    `);
+    console.log('[Migration] Ensured probation policy enhancements exist.');
+  } catch (error) {
+    console.error('[Migration] Failed to ensure probation policy enhancements:', error);
   }
 
   // Initialize MinIO buckets
@@ -529,6 +585,7 @@ createPool().then(async () => {
   await scheduleOffboardingJobs();
   await scheduleAutoLogout();
   await scheduleProbationJobs();
+  scheduleProbationAutoConfirmation();
   await scheduleTimesheetReminders();
   schedulePromotionApplication();
   scheduleReminderChecks();

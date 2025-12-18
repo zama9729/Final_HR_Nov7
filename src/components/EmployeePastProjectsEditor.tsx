@@ -115,14 +115,26 @@ export default function EmployeePastProjectsEditor({
         <CardHeader><CardTitle>Past Projects</CardTitle></CardHeader>
         <CardContent>
           <div className="grid gap-2">
-            {items.map((p, i) => (
-              <div key={i} className="border rounded p-2 text-sm">
-                <div className="font-medium">{p.project_name} — {p.role || ''}</div>
-                <div className="text-muted-foreground">{p.start_date || '—'} → {p.end_date || '—'}</div>
-                <div className="text-muted-foreground">{(p.technologies || []).join(', ')}</div>
-                <div>{p.description}</div>
-              </div>
-            ))}
+            {items.map((p, i) => {
+              const formatDate = (dateStr: string | null | undefined) => {
+                if (!dateStr) return '—';
+                try {
+                  const date = new Date(dateStr);
+                  if (isNaN(date.getTime())) return dateStr;
+                  return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                } catch {
+                  return dateStr;
+                }
+              };
+              return (
+                <div key={i} className="border rounded p-2 text-sm">
+                  <div className="font-medium">{p.project_name} — {p.role || ''}</div>
+                  <div className="text-muted-foreground">{formatDate(p.start_date)} → {formatDate(p.end_date)}</div>
+                  <div className="text-muted-foreground">{(p.technologies || []).join(', ')}</div>
+                  <div>{p.description}</div>
+                </div>
+              );
+            })}
             {items.length === 0 && <div className="text-sm text-muted-foreground">No past projects yet.</div>}
           </div>
         </CardContent>

@@ -206,5 +206,55 @@ router.get('/history/events/:eventId', authenticateToken, setTenantContext, asyn
   }
 });
 
+// POST /api/me/history/ensure-joining - Ensure joining event exists for current user
+router.post('/me/history/ensure-joining', authenticateToken, setTenantContext, async (req, res) => {
+  try {
+    const tenantId = await getTenantId(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    const employeeId = await getEmployeeId(req.user.id, tenantId);
+    if (!employeeId) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    // Check if employee has join_date
+    const empResult = await queryWithOrg(
+      'SELECT join_date FROM employees WHERE id = $1',
+      [employeeId],
+      tenantId
+    );
+
+    if (empResult.rows.length === 0 || !empResult.rows[0].join_date) {
+      return res.status(400).json({ error: 'Employee has no join date' });
+    }
+
+    const joinDate = empResult.rows[0].join_date;
+
+    // Check if joining event already exists
+    const existingEvent = await queryWithOrg(
+      `SELECT id FROM employee_events 
+       WHERE org_id = $1 AND employee_id = $2 AND event_type = 'JOINING'
+       LIMIT 1`,
+      [tenantId, employeeId],
+      tenantId
+    );
+
+    if (existingEvent.rows.length > 0) {
+      return res.json({ message: 'Joining event already exists', event_id: existingEvent.rows[0].id });
+    }
+
+    // Create joining event
+    const { createJoiningEvent } = await import('../utils/employee-events.js');
+    const event = await createJoiningEvent(tenantId, employeeId, joinDate);
+
+    res.json({ message: 'Joining event created', event });
+  } catch (error) {
+    console.error('Error ensuring joining event:', error);
+    res.status(500).json({ error: error.message || 'Failed to ensure joining event' });
+  }
+});
+
 export default router;
 
