@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { User } from "lucide-react";
@@ -20,9 +20,14 @@ interface TreeNode extends Employee {
   children: TreeNode[];
 }
 
-export default function OrgChart() {
+interface OrgChartProps {
+  searchQuery?: string;
+}
+
+export default function OrgChart({ searchQuery = "" }: OrgChartProps) {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [employees, setEmployees] = useState<Employee[]>([]);
 
   useEffect(() => {
     fetchOrgStructure();
@@ -33,8 +38,7 @@ export default function OrgChart() {
       const data = await api.getOrgStructure();
       if (data) {
         const validEmployees = (data as Employee[]).filter((emp) => emp.profiles);
-        const orgTree = buildTree(validEmployees);
-        setTree(orgTree);
+        setEmployees(validEmployees);
       }
     } catch (error) {
       console.error('Error fetching org structure:', error);
@@ -42,17 +46,17 @@ export default function OrgChart() {
     setLoading(false);
   };
 
-  const buildTree = (employees: Employee[]): TreeNode[] => {
+  const buildTree = (list: Employee[]): TreeNode[] => {
     const map: Record<string, TreeNode> = {};
     const roots: TreeNode[] = [];
 
     // Create all nodes
-    employees.forEach(emp => {
+    list.forEach(emp => {
       map[emp.id] = { ...emp, children: [] };
     });
 
     // Build tree structure
-    employees.forEach(emp => {
+    list.forEach(emp => {
       const node = map[emp.id];
       if (emp.reporting_manager_id && map[emp.reporting_manager_id]) {
         map[emp.reporting_manager_id].children.push(node);
@@ -63,6 +67,31 @@ export default function OrgChart() {
 
     return roots;
   };
+
+  const filteredEmployees = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    if (!term) return employees;
+
+    return employees.filter((emp) => {
+      const fullName = `${emp.profiles?.first_name || ""} ${emp.profiles?.last_name || ""}`.toLowerCase();
+      const email = (emp.profiles?.email || "").toLowerCase();
+      const dept = (emp.department || emp.home_assignment?.department_name || "").toLowerCase();
+      const pos = (emp.position || "").toLowerCase();
+
+      return (
+        fullName.includes(term) ||
+        email.includes(term) ||
+        dept.includes(term) ||
+        pos.includes(term)
+      );
+    });
+  }, [employees, searchQuery]);
+
+  useEffect(() => {
+    if (employees.length === 0) return;
+    const orgTree = buildTree(filteredEmployees);
+    setTree(orgTree);
+  }, [employees, filteredEmployees]);
 
   const renderNode = (node: TreeNode, level: number = 0) => {
     if (!node.profiles) {

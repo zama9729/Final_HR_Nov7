@@ -458,29 +458,60 @@ router.get('/attendance/heatmap', authenticateToken, setTenantContext, requireRo
     const fromDate = new Date(from);
     const toDate = new Date(to);
 
-    // Group by department or team
-    const groupColumn = group_by === 'team' 
-      ? 'ea.team_id, t.name as group_name'
-      : 'ea.department_id, d.name as group_name';
+    // Group by department or team (separate SELECT and GROUP BY fragments so aliases aren't used in GROUP BY)
+    const groupSelect = group_by === 'team'
+      ? "ea.team_id, COALESCE(t.name, 'Unassigned') as group_name"
+      : "ea.department_id, COALESCE(d.name, 'Unassigned') as group_name";
+
+    const groupByCols = group_by === 'team'
+      ? 'ea.team_id, t.name'
+      : 'ea.department_id, d.name';
+
     const groupJoin = group_by === 'team'
       ? 'LEFT JOIN teams t ON t.id = ea.team_id'
       : 'LEFT JOIN departments d ON d.id = ea.department_id';
 
+    // Pre-compute total employees per group (department or team) so we don't
+    // accidentally treat "present employees" as the full denominator.
+    const totalsCte = group_by === 'team'
+      ? `WITH group_totals AS (
+           SELECT ea.team_id AS group_id,
+                  COUNT(DISTINCT e.id) AS total_employees
+           FROM employees e
+           LEFT JOIN employee_assignments ea
+             ON ea.employee_id = e.id
+            AND ea.is_home = true
+           WHERE e.tenant_id = $1
+           GROUP BY ea.team_id
+         )`
+      : `WITH group_totals AS (
+           SELECT ea.department_id AS group_id,
+                  COUNT(DISTINCT e.id) AS total_employees
+           FROM employees e
+           LEFT JOIN employee_assignments ea
+             ON ea.employee_id = e.id
+            AND ea.is_home = true
+           WHERE e.tenant_id = $1
+           GROUP BY ea.department_id
+         )`;
+
     const result = await queryWithOrg(
-      `SELECT 
-         ${groupColumn},
+      `${totalsCte}
+       SELECT 
+         ${groupSelect},
          DATE(ae.raw_timestamp) as date,
          COUNT(DISTINCT ae.employee_id) FILTER (WHERE ae.event_type = 'IN') as present_count,
-         COUNT(DISTINCT e.id) as total_employees
+         COALESCE(gt.total_employees, 1) as total_employees
        FROM attendance_events ae
        JOIN employees e ON e.id = ae.employee_id AND e.tenant_id = $1
        LEFT JOIN employee_assignments ea ON ea.employee_id = e.id AND ea.is_home = true
        ${groupJoin}
+       LEFT JOIN group_totals gt ON gt.group_id = ${group_by === 'team' ? 'ea.team_id' : 'ea.department_id'}
        WHERE ae.tenant_id = $1
          AND DATE(ae.raw_timestamp) >= $2
          AND DATE(ae.raw_timestamp) <= $3
          ${branch_id ? 'AND ae.work_location_branch_id = $4' : ''}
-       GROUP BY ${groupColumn}, DATE(ae.raw_timestamp)
+       GROUP BY ${groupByCols}, DATE(ae.raw_timestamp), gt.total_employees
        ORDER BY date, group_name`,
       branch_id ? [orgId, fromDate, toDate, branch_id] : [orgId, fromDate, toDate],
       orgId
