@@ -86,6 +86,17 @@ async function ensureRequiredTables() {
       console.log('✅ Employees table created');
     } else {
       console.log('✅ Employees table exists');
+
+      // Self-heal legacy schemas: ensure employee_code column exists even if table was created earlier
+      try {
+        await query(`
+          ALTER TABLE public.employees
+          ADD COLUMN IF NOT EXISTS employee_code TEXT;
+        `);
+        console.log('✅ Ensured employees.employee_code column exists');
+      } catch (err: any) {
+        console.error('⚠️ Failed to ensure employees.employee_code column:', err.message);
+      }
     }
 
     // Check if compensation_structures table exists
@@ -100,7 +111,7 @@ async function ensureRequiredTables() {
     if (!compCheck.rows[0]?.exists) {
       console.log('⚠️  Compensation structures table does not exist, creating...');
       
-      // Create compensation_structures table
+      // Create compensation_structures table (no FK on created_by to avoid cross-system issues)
       await query(`
         CREATE TABLE IF NOT EXISTS public.compensation_structures (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -147,6 +158,34 @@ async function ensureRequiredTables() {
       console.log('✅ Compensation structures table created');
     } else {
       console.log('✅ Compensation structures table exists');
+
+      // Self-heal legacy schemas: drop FK on created_by if present to allow null/HR IDs
+      try {
+        await query(`
+          DO $$
+          DECLARE
+            fk_name text;
+          BEGIN
+            SELECT tc.constraint_name
+            INTO fk_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            WHERE tc.table_name = 'compensation_structures'
+              AND tc.constraint_type = 'FOREIGN KEY'
+              AND kcu.column_name = 'created_by'
+            LIMIT 1;
+
+            IF fk_name IS NOT NULL THEN
+              EXECUTE format('ALTER TABLE public.compensation_structures DROP CONSTRAINT %I', fk_name);
+            END IF;
+          END $$;
+        `);
+        console.log('✅ Ensured compensation_structures.created_by has no foreign key constraint');
+      } catch (err: any) {
+        console.error('⚠️ Failed to relax compensation_structures.created_by FK:', err.message);
+      }
     }
 
     // Check if organizations table exists

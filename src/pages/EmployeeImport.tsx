@@ -25,18 +25,18 @@ export default function EmployeeImport() {
     { field: 'first_name', required: true, description: 'Given name' },
     { field: 'last_name', required: true, description: 'Surname' },
     { field: 'email', required: true, description: 'Work email (must be unique)' },
-    { field: 'employee_id', required: true, description: 'Company employee code (unique)' },
+    { field: 'employee_id', required: true, description: 'Company employee code (unique). Also accepts: employee' },
     { field: 'role', required: false, description: "Profile role (CEO, HR, Admin, Manager, Employee; defaults to 'employee')" },
     { field: 'designation', required: false, description: 'Designation/position (use names from Org Setup)' },
-    { field: 'grade', required: false, description: 'Grade/level (A4, A5, B1, etc.)' },
-    { field: 'department', required: false, description: 'Department name (e.g., Engineering)' },
-    { field: 'department_code', required: false, description: 'Department code (used if provided)' },
-    { field: 'branch_name', required: false, description: 'Branch / site name' },
-    { field: 'branch_code', required: false, description: 'Branch code (preferred if available)' },
-    { field: 'team_name', required: false, description: 'Team name (within branch/department)' },
-    { field: 'work_location', required: false, description: 'Free-text work location (or one saved in Org Setup)' },
+    { field: 'grade', required: false, description: 'Grade/level (A4, A5, B1, etc.) - Optional but recommended' },
+    { field: 'department', required: false, description: 'Department name (e.g., Engineering). Also accepts: departme' },
+    { field: 'department_code', required: false, description: 'Department code. If CSV has duplicate "departme" columns, second one is used for code' },
+    { field: 'branch_name', required: false, description: 'Branch / site name. Also accepts: branch_na' },
+    { field: 'branch_code', required: false, description: 'Branch code (preferred if available). Also accepts: branch_co' },
+    { field: 'team_name', required: false, description: 'Team name (within branch/department). Also accepts: team_nam' },
+    { field: 'work_location', required: false, description: 'Free-text work location (or one saved in Org Setup). Also accepts: work_loca' },
     { field: 'join_date', required: false, description: 'Date format YYYY-MM-DD or DD-MM-YYYY' },
-    { field: 'manager_email', required: false, description: 'Reporting manager email' },
+    { field: 'manager_email', required: false, description: 'Reporting manager email. Also accepts: manager' },
     { field: 'phone', required: false, description: 'Contact number' }
   ], []);
 
@@ -164,9 +164,13 @@ export default function EmployeeImport() {
   };
 
   const downloadTemplate = () => {
-    const csvContent = `first_name,last_name,email,employee_id,role,department,department_code,branch_name,branch_code,team_name,work_location,join_date,manager_email,phone
-John,Doe,john.doe@company.com,EMP001,employee,Engineering,ENG,Hyderabad Campus,HYD01,SRE,Hyderabad,2024-01-15,manager@company.com,+91-9876501234
-Jane,Smith,jane.smith@company.com,EMP002,manager,Product,PROD,Bengaluru Tech Park,BLR02,Product Ops,Bengaluru,15-02-2024,ceo@company.com,+91-9876509999`;
+    // Template matches your exact CSV format: employee (not employee_id), departme appears twice (name then code),
+    // branch_na, branch_co, team_nam, work_loca, manager (not manager_email), grade
+    // The system auto-maps: employee→employee_id, departme→department, branch_na→branch_name, 
+    // branch_co→branch_code, team_nam→team_name, work_loca→work_location, manager→manager_email, grade→grade
+    const csvContent = `first_name,last_name,email,employee,role,departme,departme,branch_na,branch_co,team_nam,work_loca,join_date,manager,phone,grade
+John,Doe,john.doe@company.com,EMP001,employee,Engineering,ENG,Hyderabad,HYD01,SRE,Hyderabad,2024-01-15,manager@company.com,+91-9876501234,A4
+Jane,Smith,jane.smith@company.com,EMP002,manager,Product,PROD,Bengaluru,BLR02,Product Ops,Bengaluru,2024-02-15,ceo@company.com,+91-9876509999,B1`;
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -224,15 +228,16 @@ Jane,Smith,jane.smith@company.com,EMP002,manager,Product,PROD,Bengaluru Tech Par
               Download CSV Template
             </Button>
             <div className="mt-4 p-4 bg-muted rounded-lg">
-              <p className="text-sm font-medium mb-2">Template columns (snake_case recommended):</p>
+              <p className="text-sm font-medium mb-2">Template columns (supports multiple formats):</p>
               <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                <li><strong>Required:</strong> first_name, last_name, email, employee_id</li>
-                <li><strong>Role & Reporting:</strong> role, manager_email</li>
-                <li><strong>Org placement:</strong> department / department_code, branch_name / branch_code, team_name</li>
-                <li><strong>Dates & misc:</strong> join_date (YYYY-MM-DD or DD-MM-YYYY), work_location, phone</li>
+                <li><strong>Required:</strong> first_name, last_name, email, employee (or employee_id)</li>
+                <li><strong>Role & Reporting:</strong> role, manager (or manager_email)</li>
+                <li><strong>Org placement:</strong> departme (or department) / department_code, branch_na (or branch_name) / branch_co (or branch_code), team_nam (or team_name)</li>
+                <li><strong>Dates & misc:</strong> join_date (YYYY-MM-DD or DD-MM-YYYY), work_loca (or work_location), phone, grade</li>
+                <li><strong>Note:</strong> If your CSV has duplicate 'departme' columns, the first is used for name and second for code.</li>
               </ul>
               <p className="text-xs text-muted-foreground mt-2">
-                Header names are case-insensitive — e.g. we map firstName ⇢ first_name automatically. Use the table below for exact mappings.
+                Header names are case-insensitive and auto-mapped — e.g. we map 'employee' ⇢ employee_id, 'departme' ⇢ department automatically. Use the table below for exact mappings.
               </p>
             </div>
           </CardContent>

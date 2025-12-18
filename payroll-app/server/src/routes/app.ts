@@ -2385,19 +2385,44 @@ appRouter.post("/imports/bulk-salary-structure", requireAuth, salaryImportUpload
         return res.status(400).json({ error: "CSV file must have at least a header row and one data row" });
       }
 
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-      const employeeIdIndex = headers.findIndex(h => h === 'employee id' || h === 'employee_id');
+      // Raw, trimmed, lowercased headers as keys
+      const rawHeaders = lines[0].split(',').map(h => h.trim());
+      const headers = rawHeaders.map(h => h.toLowerCase());
+
+      // Normalized headers (remove spaces/underscores) for matching variations
+      const normalizedHeaders = headers.map(h =>
+        h.replace(/\s+/g, '').replace(/_/g, '').toLowerCase()
+      );
+
+      const employeeHeaderCandidates = ['employeeid', 'employee', 'employeecode', 'empid', 'employee_code'];
+      let employeeIdIndex = -1;
+      for (let i = 0; i < normalizedHeaders.length; i++) {
+        if (employeeHeaderCandidates.includes(normalizedHeaders[i])) {
+          employeeIdIndex = i;
+          break;
+        }
+      }
 
       if (employeeIdIndex === -1) {
-        return res.status(400).json({ error: "CSV must contain 'Employee ID' column" });
+        return res.status(400).json({
+          error: "CSV must contain an Employee ID column (e.g., 'Employee ID', 'EmployeeID', or 'Employee Code')"
+        });
       }
 
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim());
         const row: any = {};
+
         headers.forEach((header, idx) => {
-          row[header] = values[idx] || '';
+          const value = values[idx] || '';
+          row[header] = value;
+
+          // Also normalize the detected Employee ID column to a canonical key
+          if (idx === employeeIdIndex) {
+            row['employee_id'] = value;
+          }
         });
+
         rows.push(row);
       }
     } else if (['xlsx', 'xls'].includes(fileExt)) {
@@ -2490,10 +2515,15 @@ appRouter.post("/imports/bulk-salary-structure", requireAuth, salaryImportUpload
       }
 
       try {
-        // Find employee by employee_id
+        // Find employee by employee_id / employee_code in unified payroll view
+        // Use HR employee UUID so compensation structures line up with HR Suite
         const employeeResult = await query(
-          `SELECT id FROM employees WHERE employee_code = $1 AND tenant_id = $2`,
-          [employeeId, tenantId]
+          `SELECT employee_id as id
+           FROM payroll_employee_view
+           WHERE org_id = $1
+             AND employee_code = $2
+           LIMIT 1`,
+          [tenantId, employeeId]
         );
 
         if (employeeResult.rows.length === 0) {

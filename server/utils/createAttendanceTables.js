@@ -138,6 +138,32 @@ BEGIN
   END IF;
 END $$;
 
+-- Ensure source CHECK constraint allows all legacy and new values (including 'upload')
+DO $$
+BEGIN
+  -- Drop existing constraint if it exists (name from legacy schema)
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.table_constraints
+    WHERE table_name = 'timesheet_entries'
+      AND constraint_type = 'CHECK'
+      AND constraint_name = 'timesheet_entries_source_check'
+  ) THEN
+    ALTER TABLE timesheet_entries DROP CONSTRAINT timesheet_entries_source_check;
+  END IF;
+
+  -- Recreate constraint with unified allowed set, including 'upload'
+  BEGIN
+    ALTER TABLE timesheet_entries
+      ADD CONSTRAINT timesheet_entries_source_check
+      CHECK (source IN ('punch', 'manual_edit', 'manual', 'import', 'api', 'upload'));
+  EXCEPTION
+    WHEN duplicate_object THEN
+      -- Constraint already exists with correct definition; ignore
+      NULL;
+  END;
+END $$;
+
 -- Index for timesheet entries by source
 CREATE INDEX IF NOT EXISTS idx_timesheet_entries_source ON timesheet_entries(source);
 CREATE INDEX IF NOT EXISTS idx_timesheet_entries_payroll_status ON timesheet_entries(payroll_status);
