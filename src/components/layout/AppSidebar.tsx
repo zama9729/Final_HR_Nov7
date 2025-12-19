@@ -35,7 +35,7 @@ const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "My Profile", url: "/my/profile", icon: Users },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-        { title: "My Shifts", url: "/my/profile?tab=shifts", icon: CalendarClock },
+        { title: "My Shifts", url: "/my/shifts", icon: CalendarClock },
         { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Leave Requests", url: "/leaves", icon: Calendar },
         { title: "Request Resignation", url: "/offboarding/new", icon: LogOut },

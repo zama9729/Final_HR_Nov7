@@ -982,13 +982,9 @@ export default function Dashboard() {
                 <Button
                   onClick={() => {
                     if (isEmployee) {
-                      navigate('/my/profile?tab=shifts');
+                      navigate('/my/shifts');
                     } else {
-                      // Scroll to the team calendar section on the dashboard
-                      const calendarSection = document.getElementById('team-calendar-section');
-                      if (calendarSection) {
-                        calendarSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }
+                      navigate('/my/shifts');
                     }
                   }}
                   className="w-full"

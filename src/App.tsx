@@ -60,6 +60,7 @@ import HolidayManagement from "./pages/HolidayManagement";
 import EmployeeStats from "./pages/EmployeeStats";
 import Payroll from "./pages/Payroll";
 import PayrollAdjustments from "./pages/PayrollAdjustments";
+import MyShifts from "./pages/MyShifts";
 import BackgroundChecks from "./pages/BackgroundChecks";
 import DocumentInbox from "./pages/DocumentInbox";
 import OffboardingNew from "./pages/OffboardingNew";
@@ -194,6 +195,7 @@ const App = () => (
             <Route path="/timesheets" element={<ProtectedRoute><Timesheets /></ProtectedRoute>} />
             <Route path="/timesheet-approvals" element={<ProtectedRoute allowedRoles={['manager', 'hr', 'director', 'ceo', 'admin']}><TimesheetApprovals /></ProtectedRoute>} />
             <Route path="/timesheet-generator/:employeeId?" element={<ProtectedRoute><TimesheetGenerator /></ProtectedRoute>} />
+            <Route path="/my-shifts" element={<ProtectedRoute><MyShifts /></ProtectedRoute>} />
             <Route path="/leaves" element={<ProtectedRoute><LeaveRequests /></ProtectedRoute>} />
             <Route path="/org-chart" element={<ProtectedRoute><OrgChart /></ProtectedRoute>} />
             <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
@@ -204,7 +206,10 @@ const App = () => (
             <Route path="/settings/organization-rules" element={<ProtectedRoute allowedRoles={['hr','ceo']}><OrganizationRules /></ProtectedRoute>} />
             <Route path="/appraisals" element={<ProtectedRoute allowedRoles={['manager', 'hr', 'director', 'ceo', 'admin']}><Appraisals /></ProtectedRoute>} />
             <Route path="/my-appraisal" element={<ProtectedRoute><MyAppraisal /></ProtectedRoute>} />
-            <Route path="/shifts" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><ShiftManagement /></ProtectedRoute>} />
+            {/* New My Shifts experience (aliases for nicer URLs) */}
+            <Route path="/shifts" element={<ProtectedRoute><MyShifts /></ProtectedRoute>} />
+            <Route path="/my/shifts" element={<ProtectedRoute><MyShifts /></ProtectedRoute>} />
+            <Route path="/my/profile/shifts" element={<ProtectedRoute><MyShifts /></ProtectedRoute>} />
             <Route path="/scheduling" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><StaffScheduling /></ProtectedRoute>} />
             <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
             <Route path="/rag/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><RAGDocumentUpload /></ProtectedRoute>} />
