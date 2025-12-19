@@ -60,7 +60,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "My Profile", url: "/my/profile", icon: Users },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-        { title: "My Shifts", url: "/my/profile?tab=shifts", icon: CalendarClock },
+        { title: "My Shifts", url: "/my/shifts", icon: CalendarClock },
         { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },

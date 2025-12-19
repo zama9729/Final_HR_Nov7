@@ -15,7 +15,7 @@ import EmployeePastProjectsEditor from '@/components/EmployeePastProjectsEditor'
 import EmployeeCertificationsEditor from '@/components/EmployeeCertificationsEditor';
 import AnimatedHistoryTimeline from '@/components/AnimatedHistoryTimeline';
 import { CalendarDays, Clock, Camera, Upload, Download, Mail, Phone, MapPin, Briefcase, Award, Code, Calendar, UserPlus } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
 
 interface SimpleEmployee {
@@ -61,6 +61,7 @@ export default function MyProfile() {
   const { userRole, user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [employee, setEmployee] = useState<SimpleEmployee | null>(null);
   const [loading, setLoading] = useState(true);
   const [about, setAbout] = useState('');
@@ -77,6 +78,14 @@ export default function MyProfile() {
   const [directReports, setDirectReports] = useState<any[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // If old URL /my/profile?tab=shifts is used, redirect to the new My Shifts page
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'shifts') {
+      navigate('/my/shifts', { replace: true });
+    }
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     const load = async () => {
