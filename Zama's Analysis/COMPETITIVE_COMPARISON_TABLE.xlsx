@@ -1,0 +1,44 @@
+Feature Category,Feature,Your HR Suite,Keka,HR1,ServiceNow,ADP
+Core HR,Employee Management,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Core HR,Onboarding,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Core HR,Employee Self-Service,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Core HR,Organization Chart,✅ Full,✅ Full,❌ Not Available,✅ Full,✅ Full
+Leave Management,Leave Policies,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Leave Management,Approval Workflows,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Leave Management,Leave Balance Tracking,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Attendance,Clock In/Out,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Attendance,Timesheet Management,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Attendance,Biometric Integration,❌ Not Available,✅ Full,⚠️ Limited,✅ Full,✅ Full
+Payroll,Payroll Processing,✅ Full System,✅ Full,⚠️ Basic,⚠️ Limited,✅ Full
+Payroll,Tax Compliance,⚠️ Enhanced Needed,✅ Full,⚠️ Basic,✅ Full,✅ Full
+Payroll,Payslip Generation,✅ PDF Download,✅ Full,✅ Full,✅ Full,✅ Full
+Expense Management,Expense Claims,✅ Complete,✅ Full,❌ Not Available,⚠️ Limited,✅ Full
+Expense Management,Receipt Upload,✅ Full,✅ Full,❌ Not Available,⚠️ Limited,✅ Full
+Expense Management,Approval Workflow,✅ Full,✅ Full,❌ Not Available,✅ Full,✅ Full
+Expense Management,Reimbursement Runs,✅ Separate Batches,⚠️ Integrated,❌ Not Available,⚠️ Limited,✅ Full
+Shift Management,Shift Scheduling,✅ Advanced Algorithm,✅ Basic,❌ Not Available,⚠️ Basic,✅ Full
+Shift Management,Fairness Algorithms,✅ Probability-Based,❌ Not Available,❌ Not Available,❌ Not Available,❌ Not Available
+Shift Management,Team View,✅ Full,⚠️ Limited,❌ Not Available,✅ Full,⚠️ Limited
+Performance,Appraisals,✅ Full,✅ Full,⚠️ Basic,✅ Full,⚠️ Basic
+Performance,360 Reviews,❌ Not Available,✅ Full,❌ Not Available,✅ Full,⚠️ Limited
+Performance,Goal Setting,✅ Full,✅ Full,❌ Not Available,✅ Full,⚠️ Limited
+AI Features,Smart Memo,✅ Unique Feature,❌ Not Available,❌ Not Available,⚠️ Limited,❌ Not Available
+AI Features,Document Intelligence,✅ RAG Service,❌ Not Available,❌ Not Available,✅ Full,❌ Not Available
+AI Features,AI Assistant,✅ RAG-Powered,❌ Not Available,❌ Not Available,✅ Full,❌ Not Available
+Analytics,Dashboards,✅ Full,✅ Full,⚠️ Basic,✅ Full,✅ Full
+Analytics,Custom Reports,✅ Full,✅ Full,❌ Not Available,✅ Full,✅ Full
+Analytics,Predictive Analytics,❌ Not Available,❌ Not Available,❌ Not Available,✅ Full,⚠️ Limited
+Integration,API Access,✅ Extensive REST APIs,⚠️ Limited,❌ Not Available,✅ Full,⚠️ Limited
+Integration,Third-party Integrations,✅ Growing,✅ Full,❌ Not Available,✅ Full,✅ Full
+Integration,Webhooks,✅ Full,⚠️ Limited,❌ Not Available,✅ Full,⚠️ Limited
+Security,Row-Level Security,✅ Database-Level,⚠️ Application-Level,❌ Not Available,✅ Full,✅ Full
+Security,Multi-tenant Isolation,✅ Full,✅ Full,⚠️ Basic,✅ Full,✅ Full
+Security,SSO Support,✅ Full,✅ Full,❌ Not Available,✅ Full,✅ Full
+Deployment,Cloud Hosted,✅ Full,✅ Full,✅ Full,✅ Full,✅ Full
+Deployment,Self-Hosted,✅ Full,❌ Not Available,❌ Not Available,❌ Not Available,❌ Not Available
+Deployment,On-Premise,✅ Full,❌ Not Available,❌ Not Available,✅ Full,⚠️ Limited
+Mobile App,iOS App,❌ Not Available,✅ Full,⚠️ Basic,✅ Full,✅ Full
+Mobile App,Android App,❌ Not Available,✅ Full,⚠️ Basic,✅ Full,✅ Full
+Pricing,Starting Price,$0 (self-hosted),₹6000/month,₹3000/month,$50000/year,$8/emp/month
+Pricing,Scalability,✅ Excellent,✅ Good,⚠️ Limited,✅ Excellent,✅ Excellent
+
