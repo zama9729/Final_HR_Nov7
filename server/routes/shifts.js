@@ -5,27 +5,27 @@ import { setTenantContext } from '../middleware/tenant.js';
 
 const router = express.Router();
 
-// Get all shifts (with role-based filtering)
-router.get('/', async (req, res) => {
+// Get all shifts (with role-based filtering and RLS)
+router.get('/', authenticateToken, setTenantContext, async (req, res) => {
   try {
     // Check if filtering by specific employee_id
     const { employee_id } = req.query;
+    const orgId = req.orgId;
     
-    // First get user role and tenant_id
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization context required' });
+    }
+    
+    // First get user role
     const userResult = await query(
-      `SELECT p.tenant_id, ur.role
-       FROM profiles p
-       LEFT JOIN user_roles ur ON ur.user_id = p.id
-       WHERE p.id = $1
+      `SELECT ur.role
+       FROM user_roles ur
+       WHERE ur.user_id = $1
        LIMIT 1`,
       [req.user.id]
     );
 
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const { tenant_id: tenantId, role } = userResult.rows[0];
+    const role = userResult.rows[0]?.role || 'employee';
 
     // Get employee ID if user has an employee record
     let employeeId = null;
@@ -41,8 +41,22 @@ router.get('/', async (req, res) => {
     let shiftsQuery;
     let params;
     
-    if (['hr', 'director', 'ceo'].includes(role)) {
-      // HR/CEO can see all shifts, optionally filtered by employee_id
+    // Get employee ID if user has an employee record
+    let employeeId = null;
+    const empResult = await query(
+      'SELECT id FROM employees WHERE user_id = $1 AND tenant_id = $2',
+      [req.user.id, orgId]
+    );
+    
+    if (empResult.rows.length > 0) {
+      employeeId = empResult.rows[0].id;
+    }
+
+    let shiftsQuery;
+    let params;
+    
+    if (['hr', 'director', 'ceo', 'admin'].includes(role)) {
+      // HR/CEO/Admin can see all shifts in their organization, optionally filtered by employee_id
       if (employee_id) {
         shiftsQuery = `
           SELECT 
@@ -55,12 +69,12 @@ router.get('/', async (req, res) => {
               )
             ) as employees
           FROM shifts s
-          JOIN employees e ON e.id = s.employee_id
+          JOIN employees e ON e.id = s.employee_id AND e.tenant_id = $1
           JOIN profiles p ON p.id = e.user_id
           WHERE s.tenant_id = $1 AND s.employee_id = $2
           ORDER BY s.shift_date ASC, s.start_time ASC
         `;
-        params = [tenantId, employee_id];
+        params = [orgId, employee_id];
       } else {
         shiftsQuery = `
           SELECT 
@@ -73,15 +87,18 @@ router.get('/', async (req, res) => {
               )
             ) as employees
           FROM shifts s
-          JOIN employees e ON e.id = s.employee_id
+          JOIN employees e ON e.id = s.employee_id AND e.tenant_id = $1
           JOIN profiles p ON p.id = e.user_id
           WHERE s.tenant_id = $1
           ORDER BY s.shift_date ASC, s.start_time ASC
         `;
-        params = [tenantId];
+        params = [orgId];
       }
     } else if (role === 'manager') {
-      // Managers can see their team's shifts
+      // Managers can see their team's shifts (direct reports only)
+      if (!employeeId) {
+        return res.json([]);
+      }
       shiftsQuery = `
         SELECT 
           s.*,
@@ -93,14 +110,18 @@ router.get('/', async (req, res) => {
             )
           ) as employees
         FROM shifts s
-        JOIN employees e ON e.id = s.employee_id
+        JOIN employees e ON e.id = s.employee_id AND e.tenant_id = $1
         JOIN profiles p ON p.id = e.user_id
         WHERE s.tenant_id = $1
           AND e.reporting_manager_id = $2
         ORDER BY s.shift_date ASC, s.start_time ASC
       `;
+      params = [orgId, employeeId];
     } else {
       // Employees can only see their own shifts
+      if (!employeeId) {
+        return res.json([]);
+      }
       shiftsQuery = `
         SELECT 
           s.*,
@@ -112,24 +133,13 @@ router.get('/', async (req, res) => {
             )
           ) as employees
         FROM shifts s
-        JOIN employees e ON e.id = s.employee_id
+        JOIN employees e ON e.id = s.employee_id AND e.tenant_id = $1
         JOIN profiles p ON p.id = e.user_id
         WHERE s.tenant_id = $1
           AND s.employee_id = $2
         ORDER BY s.shift_date ASC, s.start_time ASC
       `;
-    }
-
-    // Set params for manager and employee roles if not already set
-    if (!params) {
-      if (role === 'manager' && employeeId) {
-        params = [tenantId, employeeId];
-      } else if (employeeId) {
-        params = [tenantId, employeeId];
-      } else {
-        // User has no employee record and is not an admin
-        return res.json([]);
-      }
+      params = [orgId, employeeId];
     }
 
     const result = await query(shiftsQuery, params);

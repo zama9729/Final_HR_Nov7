@@ -177,14 +177,29 @@ export default function MyShifts() {
         const lastMonthCounts: Record<string, number> = {};
         
         thisMonthShifts.forEach((s) => {
-          const type = s.shift_type || 'regular';
-          thisMonthCounts[type] = (thisMonthCounts[type] || 0) + 1;
+          const type = (s.shift_type || 'regular').toLowerCase();
+          // Normalize shift types for consistent counting
+          if (type === 'day' || type === 'regular') {
+            thisMonthCounts['morning'] = (thisMonthCounts['morning'] || 0) + 1;
+          } else if (type === 'ad-hoc') {
+            thisMonthCounts['adhoc'] = (thisMonthCounts['adhoc'] || 0) + 1;
+          } else {
+            thisMonthCounts[type] = (thisMonthCounts[type] || 0) + 1;
+          }
         });
         lastMonthShifts.forEach((s) => {
-          const type = s.shift_type || 'regular';
-          lastMonthCounts[type] = (lastMonthCounts[type] || 0) + 1;
+          const type = (s.shift_type || 'regular').toLowerCase();
+          // Normalize shift types for consistent counting
+          if (type === 'day' || type === 'regular') {
+            lastMonthCounts['morning'] = (lastMonthCounts['morning'] || 0) + 1;
+          } else if (type === 'ad-hoc') {
+            lastMonthCounts['adhoc'] = (lastMonthCounts['adhoc'] || 0) + 1;
+          } else {
+            lastMonthCounts[type] = (lastMonthCounts[type] || 0) + 1;
+          }
         });
         
+        console.log('[MyShifts] Shift trends calculated:', { thisMonth: thisMonthCounts, lastMonth: lastMonthCounts });
         setShiftTrends({ thisMonth: thisMonthCounts, lastMonth: lastMonthCounts });
       } catch (error: any) {
         console.error("[MyShifts] Failed to load shifts", error);
@@ -663,23 +678,29 @@ export default function MyShifts() {
                 <CardTitle className="text-base">Shift Trends</CardTitle>
                 <CardDescription>Monthly comparison</CardDescription>
               </CardHeader>
-              <CardContent className="flex-1" style={{ minHeight: '450px' }}>
-                <ResponsiveContainer width="100%" height="100%" minHeight={450}>
-                  <LineChart data={[
-                    { period: 'Last Month', night: shiftTrends.lastMonth['night'] || 0, morning: shiftTrends.lastMonth['morning'] || shiftTrends.lastMonth['day'] || shiftTrends.lastMonth['regular'] || 0, evening: shiftTrends.lastMonth['evening'] || 0, custom: shiftTrends.lastMonth['custom'] || 0, adhoc: shiftTrends.lastMonth['ad-hoc'] || shiftTrends.lastMonth['adhoc'] || 0 },
-                    { period: 'This Month', night: shiftTrends.thisMonth['night'] || 0, morning: shiftTrends.thisMonth['morning'] || shiftTrends.thisMonth['day'] || shiftTrends.thisMonth['regular'] || 0, evening: shiftTrends.thisMonth['evening'] || 0, custom: shiftTrends.thisMonth['custom'] || 0, adhoc: shiftTrends.thisMonth['ad-hoc'] || shiftTrends.thisMonth['adhoc'] || 0 },
-                  ]}>
-                    <XAxis dataKey="period" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="night" stroke="#9333ea" strokeWidth={2} name="Night" />
-                    <Line type="monotone" dataKey="morning" stroke="#3b82f6" strokeWidth={2} name="Morning" />
-                    <Line type="monotone" dataKey="evening" stroke="#10b981" strokeWidth={2} name="Evening" />
-                    <Line type="monotone" dataKey="custom" stroke="#f59e0b" strokeWidth={2} name="Custom" />
-                    <Line type="monotone" dataKey="adhoc" stroke="#f43f5e" strokeWidth={2} name="Ad-hoc" />
-                  </LineChart>
-                </ResponsiveContainer>
+              <CardContent className="flex-1" style={{ minHeight: '450px', height: '450px' }}>
+                {shiftTrends.thisMonth && Object.keys(shiftTrends.thisMonth).length > 0 || shiftTrends.lastMonth && Object.keys(shiftTrends.lastMonth).length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={[
+                      { period: 'Last Month', night: shiftTrends.lastMonth['night'] || 0, morning: shiftTrends.lastMonth['morning'] || shiftTrends.lastMonth['day'] || shiftTrends.lastMonth['regular'] || 0, evening: shiftTrends.lastMonth['evening'] || 0, custom: shiftTrends.lastMonth['custom'] || 0, adhoc: shiftTrends.lastMonth['ad-hoc'] || shiftTrends.lastMonth['adhoc'] || 0 },
+                      { period: 'This Month', night: shiftTrends.thisMonth['night'] || 0, morning: shiftTrends.thisMonth['morning'] || shiftTrends.thisMonth['day'] || shiftTrends.thisMonth['regular'] || 0, evening: shiftTrends.thisMonth['evening'] || 0, custom: shiftTrends.thisMonth['custom'] || 0, adhoc: shiftTrends.thisMonth['ad-hoc'] || shiftTrends.thisMonth['adhoc'] || 0 },
+                    ]}>
+                      <XAxis dataKey="period" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="night" stroke="#9333ea" strokeWidth={2} name="Night" />
+                      <Line type="monotone" dataKey="morning" stroke="#3b82f6" strokeWidth={2} name="Morning" />
+                      <Line type="monotone" dataKey="evening" stroke="#10b981" strokeWidth={2} name="Evening" />
+                      <Line type="monotone" dataKey="custom" stroke="#f59e0b" strokeWidth={2} name="Custom" />
+                      <Line type="monotone" dataKey="adhoc" stroke="#f43f5e" strokeWidth={2} name="Ad-hoc" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                    No shift data available for comparison
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
