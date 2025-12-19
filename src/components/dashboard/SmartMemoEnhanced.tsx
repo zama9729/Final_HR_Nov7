@@ -372,17 +372,22 @@ export function SmartMemoEnhanced({ selectedDate, onEventsCreated }: SmartMemoPr
   return (
     <>
       <Card className="shadow-sm">
-        <CardHeader className="pb-2">
+        <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <CardTitle className="text-lg font-semibold flex items-center gap-2">
             <Calendar className="h-5 w-5 text-blue-600" />
             Smart Memo
           </CardTitle>
+          {/* Minimal inline helper instead of large instructions block */}
+          <p className="text-[11px] text-muted-foreground hidden md:block">
+            Example:&nbsp;
+            <span className="font-medium">11-12 meeting with @Meera</span>
+          </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="relative">
             <Textarea
               ref={textareaRef}
-              placeholder="Example: 11-12 meeting with @Summie, 13-15 worked on issues&#10;remind me in 30 minutes"
+              placeholder="Type your day in one line, e.g. 11-12 meeting with @Meera, 13-15 worked on issues, remind me in 30 minutes"
               value={memoText}
               onChange={handleTextChange}
               onKeyDown={handleKeyDown}
@@ -392,7 +397,7 @@ export function SmartMemoEnhanced({ selectedDate, onEventsCreated }: SmartMemoPr
             {showSuggestions && (
               <div
                 ref={suggestionsRef}
-                className="absolute z-[9999] w-full mt-1 bg-white dark:bg-gray-800 border-2 border-blue-300 rounded-lg shadow-xl max-h-60 overflow-y-auto"
+                className="absolute z-[9999] w-full mt-1 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg max-h-72 overflow-y-auto"
                 style={{ top: '100%', left: 0, marginTop: '4px' }}
               >
                 {suggestions.length > 0 ? (
@@ -400,19 +405,32 @@ export function SmartMemoEnhanced({ selectedDate, onEventsCreated }: SmartMemoPr
                     <div
                       key={employee.id}
                       className={cn(
-                        "px-3 py-2 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors",
-                        idx === selectedSuggestionIndex && "bg-blue-50 dark:bg-blue-900/20"
+                        "px-3 py-2 cursor-pointer hover:bg-muted/70 transition-colors",
+                        idx === selectedSuggestionIndex && "bg-muted"
                       )}
                       onClick={() => handleSelectSuggestion(employee)}
                       onMouseEnter={() => setSelectedSuggestionIndex(idx)}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
-                          <div className="font-medium text-sm">{employee.name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {employee.designation} • {employee.department}
-                            {employee.team !== 'No Team' && ` • ${employee.team}`}
+                          <div className="font-medium text-sm truncate">
+                            {employee.name}
+                            {employee.employee_id && (
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                · {employee.employee_id}
+                              </span>
+                            )}
                           </div>
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            {employee.designation}
+                            {employee.department && ` • ${employee.department}`}
+                            {employee.team && employee.team !== 'No Team' && ` • ${employee.team}`}
+                          </div>
+                          {employee.email && (
+                            <div className="text-[11px] text-muted-foreground truncate">
+                              {employee.email}
+                            </div>
+                          )}
                         </div>
                         <User className="h-4 w-4 text-muted-foreground" />
                       </div>
@@ -429,17 +447,6 @@ export function SmartMemoEnhanced({ selectedDate, onEventsCreated }: SmartMemoPr
                 )}
               </div>
             )}
-            <div className="space-y-1 mt-2">
-              <p className="text-xs text-muted-foreground">
-                <strong>Format:</strong> HH-HH description (e.g., "11-12 meeting with @John")
-              </p>
-              <p className="text-xs text-muted-foreground">
-                <strong>@mentions:</strong> Type @ followed by a name to mention someone. They'll be added to the calendar event.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                <strong>Reminders:</strong> Add "remind me in X minutes/hours" for reminders
-              </p>
-            </div>
           </div>
           <div className="flex gap-2">
             <Button
