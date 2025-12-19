@@ -1034,6 +1034,18 @@ class ApiClient {
     });
   }
 
+  async getShiftStatistics(params?: {
+    start_date?: string;
+    end_date?: string;
+    employee_id?: string;
+  }) {
+    const query = new URLSearchParams();
+    if (params?.start_date) query.append('start_date', params.start_date);
+    if (params?.end_date) query.append('end_date', params.end_date);
+    if (params?.employee_id) query.append('employee_id', params.employee_id);
+    return this.request(`/api/shifts/statistics?${query.toString()}`);
+  }
+
   // Appraisal methods
   async getAppraisalCycles() {
     return this.request('/api/appraisal-cycles');
@@ -2542,7 +2554,8 @@ class ApiClient {
 
   async getTeamMembers(teamId: string) {
     const response = await this.request(`/api/teams/${teamId}/members`);
-    return response.members || [];
+    // API returns { members: [...] }, return the full response so we can access .members
+    return response;
   }
 
   async getAvailableEmployeesForTeam(teamId: string) {

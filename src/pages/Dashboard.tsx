@@ -614,22 +614,57 @@ export default function Dashboard() {
         return;
       }
 
-      // Get upcoming shifts (next 7 days)
+      // Get upcoming shifts (next 7 days) - use published shifts from schedule_assignments
       const today = new Date();
       const nextWeek = addDays(today, 7);
       
-      const data = await api.get(
-        `/api/scheduling/employee/${employeeId.id}/shifts?start_date=${format(
-          today,
-          'yyyy-MM-dd'
-        )}&end_date=${format(nextWeek, 'yyyy-MM-dd')}`
-      );
-      const sorted = (data.shifts || []).sort((a: UpcomingShift, b: UpcomingShift) => {
-        const dateCompare = new Date(a.shift_date).getTime() - new Date(b.shift_date).getTime();
-        if (dateCompare !== 0) return dateCompare;
-        return a.start_time.localeCompare(b.start_time);
-      });
-      setUpcomingShifts(sorted);
+      try {
+        // Try the scheduling endpoint first (for published schedules)
+        const data = await api.get(
+          `/api/scheduling/employee/${employeeId.id}/shifts?start_date=${format(
+            today,
+            'yyyy-MM-dd'
+          )}&end_date=${format(nextWeek, 'yyyy-MM-dd')}`
+        );
+        const shifts = data.shifts || [];
+        
+        // Also try the shifts endpoint as fallback
+        if (shifts.length === 0) {
+          const shiftsData = await api.getShiftsForEmployee(employeeId.id);
+          const allShifts = Array.isArray(shiftsData) ? shiftsData : (shiftsData?.shifts || []);
+          const upcoming = allShifts.filter((s: any) => {
+            const shiftDate = parseISO(s.shift_date || s.shiftDate);
+            return shiftDate >= today && shiftDate <= nextWeek;
+          });
+          shifts.push(...upcoming);
+        }
+        
+        const sorted = shifts.sort((a: UpcomingShift, b: UpcomingShift) => {
+          const dateCompare = new Date(a.shift_date || a.shiftDate).getTime() - new Date(b.shift_date || b.shiftDate).getTime();
+          if (dateCompare !== 0) return dateCompare;
+          return (a.start_time || a.startTime || '').localeCompare(b.start_time || b.startTime || '');
+        });
+        setUpcomingShifts(sorted);
+      } catch (err) {
+        // Fallback to shifts endpoint
+        try {
+          const shiftsData = await api.getShiftsForEmployee(employeeId.id);
+          const allShifts = Array.isArray(shiftsData) ? shiftsData : (shiftsData?.shifts || []);
+          const upcoming = allShifts.filter((s: any) => {
+            const shiftDate = parseISO(s.shift_date || s.shiftDate);
+            return shiftDate >= today && shiftDate <= nextWeek;
+          });
+          const sorted = upcoming.sort((a: UpcomingShift, b: UpcomingShift) => {
+            const dateCompare = new Date(a.shift_date || a.shiftDate).getTime() - new Date(b.shift_date || b.shiftDate).getTime();
+            if (dateCompare !== 0) return dateCompare;
+            return (a.start_time || a.startTime || '').localeCompare(b.start_time || b.startTime || '');
+          });
+          setUpcomingShifts(sorted);
+        } catch (fallbackErr) {
+          console.error('Error fetching shifts from fallback:', fallbackErr);
+          setUpcomingShifts([]);
+        }
+      }
     } catch (error) {
       console.error('Error fetching upcoming shifts:', error);
     } finally {

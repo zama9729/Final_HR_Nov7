@@ -20,6 +20,7 @@ import Employees from "./pages/Employees";
 import Appraisals from "./pages/Appraisals";
 import MyAppraisal from "./pages/MyAppraisal";
 import ShiftManagement from "./pages/ShiftManagement";
+import ShiftManagement2 from "./pages/ShiftManagement2";
 import StaffScheduling from "./pages/StaffScheduling";
 import AIAssistantPage from "./pages/AIAssistantPage";
 import RAGDocumentUpload from "./pages/RAGDocumentUpload";
@@ -210,6 +211,7 @@ const App = () => (
             <Route path="/shifts" element={<ProtectedRoute><MyShifts /></ProtectedRoute>} />
             <Route path="/my/shifts" element={<ProtectedRoute><MyShifts /></ProtectedRoute>} />
             <Route path="/my/profile/shifts" element={<ProtectedRoute><MyShifts /></ProtectedRoute>} />
+            <Route path="/shift-management-2" element={<ProtectedRoute allowedRoles={['manager','hr','ceo']}><ShiftManagement2 /></ProtectedRoute>} />
             <Route path="/scheduling" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><StaffScheduling /></ProtectedRoute>} />
             <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
             <Route path="/rag/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><RAGDocumentUpload /></ProtectedRoute>} />

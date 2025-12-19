@@ -1,5 +1,7 @@
 import express from 'express';
 import { query } from '../db/pool.js';
+import { authenticateToken } from '../middleware/auth.js';
+import { setTenantContext } from '../middleware/tenant.js';
 
 const router = express.Router();
 
@@ -235,6 +237,98 @@ router.post('/', async (req, res) => {
     res.status(201).json(shiftResult.rows[0]);
   } catch (error) {
     console.error('Error creating shift:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/shifts/statistics - Get shift statistics per employee
+router.get('/statistics', authenticateToken, setTenantContext, async (req, res) => {
+  try {
+    const { start_date, end_date, employee_id } = req.query;
+    const orgId = req.orgId;
+
+    // Get current user's tenant_id
+    const userResult = await query(
+      `SELECT p.tenant_id
+       FROM profiles p
+       WHERE p.id = $1`,
+      [req.user.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const { tenant_id: tenantId } = userResult.rows[0];
+
+    let queryStr = `
+      SELECT 
+        e.id as employee_id,
+        e.employee_id as employee_code,
+        p.first_name || ' ' || p.last_name as employee_name,
+        COUNT(*) FILTER (WHERE s.shift_type = 'night') as night_shifts,
+        COUNT(*) FILTER (WHERE s.shift_type IN ('morning', 'day', 'regular')) as day_shifts,
+        COUNT(*) FILTER (WHERE s.shift_type = 'evening') as evening_shifts,
+        COUNT(*) FILTER (WHERE s.shift_type = 'custom') as custom_shifts,
+        COUNT(*) FILTER (WHERE s.shift_type = 'ad-hoc' OR s.shift_type = 'adhoc') as adhoc_shifts,
+        COUNT(*) as total_shifts
+      FROM employees e
+      JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN shifts s ON s.employee_id = e.id AND s.tenant_id = $1
+    `;
+
+    const params = [tenantId];
+    let paramIndex = 2;
+
+    if (start_date) {
+      queryStr += ` AND s.shift_date >= $${paramIndex}::date`;
+      params.push(start_date);
+      paramIndex++;
+    }
+    if (end_date) {
+      queryStr += ` AND s.shift_date <= $${paramIndex}::date`;
+      params.push(end_date);
+      paramIndex++;
+    }
+    if (employee_id) {
+      queryStr += ` AND e.id = $${paramIndex}::uuid`;
+      params.push(employee_id);
+      paramIndex++;
+    }
+
+    queryStr += `
+      WHERE e.tenant_id = $1
+        AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
+      GROUP BY e.id, e.employee_id, p.first_name, p.last_name
+      ORDER BY employee_name
+    `;
+
+    const result = await query(queryStr, params);
+
+    // Calculate percentages
+    const statistics = result.rows.map((row) => {
+      const total = parseInt(row.total_shifts) || 0;
+      return {
+        employee_id: row.employee_id,
+        employee_code: row.employee_code,
+        employee_name: row.employee_name,
+        night_shifts: parseInt(row.night_shifts) || 0,
+        day_shifts: parseInt(row.day_shifts) || 0,
+        evening_shifts: parseInt(row.evening_shifts) || 0,
+        custom_shifts: parseInt(row.custom_shifts) || 0,
+        adhoc_shifts: parseInt(row.adhoc_shifts) || 0,
+        total_shifts: total,
+        night_percentage: total > 0 ? ((parseInt(row.night_shifts) || 0) / total * 100).toFixed(1) : '0.0',
+        day_percentage: total > 0 ? ((parseInt(row.day_shifts) || 0) / total * 100).toFixed(1) : '0.0',
+        evening_percentage: total > 0 ? ((parseInt(row.evening_shifts) || 0) / total * 100).toFixed(1) : '0.0',
+        custom_percentage: total > 0 ? ((parseInt(row.custom_shifts) || 0) / total * 100).toFixed(1) : '0.0',
+        adhoc_percentage: total > 0 ? ((parseInt(row.adhoc_shifts) || 0) / total * 100).toFixed(1) : '0.0',
+      };
+    });
+
+    res.json({ statistics });
+  } catch (error) {
+    console.error('Error fetching shift statistics:', error);
     res.status(500).json({ error: error.message });
   }
 });

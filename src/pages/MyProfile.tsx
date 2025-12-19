@@ -16,7 +16,7 @@ import EmployeeCertificationsEditor from '@/components/EmployeeCertificationsEdi
 import AnimatedHistoryTimeline from '@/components/AnimatedHistoryTimeline';
 import { CalendarDays, Clock, Camera, Upload, Download, Mail, Phone, MapPin, Briefcase, Award, Code, Calendar, UserPlus } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
+import { addDays, format, isToday, isTomorrow, isSameDay, parseISO } from 'date-fns';
 
 interface SimpleEmployee {
   id: string;
@@ -320,13 +320,44 @@ export default function MyProfile() {
       setLoadingShifts(true);
       const today = new Date();
       const nextMonth = addDays(today, 30);
-      const data = await api.get(
-        `/api/scheduling/employee/${employeeId}/shifts?start_date=${format(
-          today,
-          'yyyy-MM-dd',
-        )}&end_date=${format(nextMonth, 'yyyy-MM-dd')}`,
-      );
-      setUpcomingShifts(data.shifts || []);
+      
+      try {
+        // Try the scheduling endpoint first (for published schedules)
+        const data = await api.get(
+          `/api/scheduling/employee/${employeeId}/shifts?start_date=${format(
+            today,
+            'yyyy-MM-dd',
+          )}&end_date=${format(nextMonth, 'yyyy-MM-dd')}`,
+        );
+        let shifts = data.shifts || [];
+        
+        // Also try the shifts endpoint as fallback
+        if (shifts.length === 0) {
+          const shiftsData = await api.getShiftsForEmployee(employeeId);
+          const allShifts = Array.isArray(shiftsData) ? shiftsData : (shiftsData?.shifts || []);
+          const upcoming = allShifts.filter((s: any) => {
+            const shiftDate = parseISO(s.shift_date || s.shiftDate);
+            return shiftDate >= today && shiftDate <= nextMonth;
+          });
+          shifts = upcoming;
+        }
+        
+        setUpcomingShifts(shifts);
+      } catch (err) {
+        // Fallback to shifts endpoint
+        try {
+          const shiftsData = await api.getShiftsForEmployee(employeeId);
+          const allShifts = Array.isArray(shiftsData) ? shiftsData : (shiftsData?.shifts || []);
+          const upcoming = allShifts.filter((s: any) => {
+            const shiftDate = parseISO(s.shift_date || s.shiftDate);
+            return shiftDate >= today && shiftDate <= nextMonth;
+          });
+          setUpcomingShifts(upcoming);
+        } catch (fallbackErr) {
+          console.error('Error fetching shifts from fallback:', fallbackErr);
+          setUpcomingShifts([]);
+        }
+      }
     } catch (error) {
       console.error('Error fetching upcoming shifts:', error);
       setUpcomingShifts([]);
@@ -817,29 +848,36 @@ export default function MyProfile() {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {upcomingShifts.slice(0, 5).map((shift) => {
+                        {upcomingShifts.map((shift) => {
                           const label = getShiftDateLabel(shift.shift_date);
                           const type = shift.shift_type || 'day';
+                          const shiftDate = parseISO(shift.shift_date);
+                          const isToday = isSameDay(shiftDate, new Date());
+                          
                           return (
                             <div
                               key={shift.id}
-                              className="flex items-start justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
+                              className={`flex items-start justify-between rounded-lg border px-3 py-2 ${
+                                isToday 
+                                  ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
+                                  : 'border-gray-200 bg-gray-50'
+                              }`}
                             >
                               <div>
                                 <div className="flex items-center gap-2">
-                                  <p className="text-xs font-semibold text-gray-900">
+                                  <p className={`text-xs font-semibold ${isToday ? 'text-blue-900' : 'text-gray-900'}`}>
                                     {shift.template_name || 'Shift'}
                                   </p>
                                   <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
                                     {type}
                                   </Badge>
                                 </div>
-                                <p className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-600">
+                                <p className={`mt-1 flex items-center gap-1.5 text-[10px] ${isToday ? 'text-blue-700' : 'text-gray-600'}`}>
                                   <CalendarDays className="h-3 w-3" />
                                   {label}
                                 </p>
                               </div>
-                              <div className="flex flex-col items-end gap-1 text-[10px] text-gray-700">
+                              <div className={`flex flex-col items-end gap-1 text-[10px] ${isToday ? 'text-blue-700' : 'text-gray-700'}`}>
                                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
                                   <Clock className="h-3 w-3 flex-shrink-0" />
                                   <span>{formatShiftTime(shift.start_time)}</span>
@@ -850,11 +888,6 @@ export default function MyProfile() {
                             </div>
                           );
                         })}
-                        {upcomingShifts.length > 5 && (
-                          <p className="text-xs text-gray-500 text-center pt-2">
-                            +{upcomingShifts.length - 5} more shifts
-                          </p>
-                        )}
                       </div>
                     )}
                   </CardContent>
