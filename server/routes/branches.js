@@ -15,6 +15,11 @@ router.use(authenticateToken, requireRole('admin', 'hr', 'ceo', 'manager'), setT
 
 router.get('/', async (req, res) => {
   try {
+    // Ensure orgId is available from setTenantContext middleware
+    const orgId = req.orgId;
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization ID is required' });
+    }
     console.log(`[Branches] Fetching branches for orgId: ${orgId}`);
     const { rows: branches } = await queryWithOrg(
       `SELECT 
@@ -42,8 +47,8 @@ router.get('/', async (req, res) => {
        FROM org_branches b
        WHERE b.org_id = $1
        ORDER BY b.created_at`,
-      [req.orgId],
-      req.orgId
+      [orgId],
+      orgId
     );
 
     const { rows: departments } = await queryWithOrg(
@@ -56,28 +61,28 @@ router.get('/', async (req, res) => {
     );
 
     const { rows: teams } = await queryWithOrg(
-      `SELECT id, org_id, branch_id, department_id, name, code, host_branch_id, metadata, created_at, updated_at
+      `SELECT id, org_id, branch_id, department_id, name, name as team_name, code, host_branch_id, metadata, created_at, updated_at
        FROM teams
        WHERE org_id = $1
        ORDER BY created_at`,
-      [req.orgId],
-      req.orgId
+      [orgId],
+      orgId
     );
 
     const { rows: calendars } = await queryWithOrg(
       `SELECT id, org_id, name, region_code, rules, is_default
        FROM holiday_calendars
        WHERE org_id = $1`,
-      [req.orgId],
-      req.orgId
+      [orgId],
+      orgId
     );
 
     const { rows: payGroups } = await queryWithOrg(
       `SELECT id, org_id, name, cycle, currency, proration_rule, is_default
        FROM pay_groups
        WHERE org_id = $1`,
-      [req.orgId],
-      req.orgId
+      [orgId],
+      orgId
     );
 
     res.json({

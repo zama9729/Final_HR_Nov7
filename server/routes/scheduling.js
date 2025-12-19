@@ -13,7 +13,6 @@ import { generateRosterRun } from '../services/roster-engine.js';
 
 const router = express.Router();
 
-// Self-healing guard to ensure shift_templates has all required columns
 let shiftTemplatesSchemaEnsured = false;
 async function ensureShiftTemplatesSchema() {
   if (shiftTemplatesSchemaEnsured) return;
@@ -31,6 +30,7 @@ async function ensureShiftTemplatesSchema() {
     console.log('[Scheduling] Ensured shift_templates schema (duration_hours, crosses_midnight, is_default, team_id, branch_id, schedule_mode)');
   } catch (err) {
     console.error('[Scheduling] Failed to ensure shift_templates schema:', err.message);
+    // Don't set flag to true if it failed, so we retry on next call
   }
 }
 
@@ -335,7 +335,7 @@ router.get('/employee/:employee_id/shifts', authenticateToken, setTenantContext,
       JOIN generated_schedules gs ON gs.id = sa.schedule_id
       WHERE sa.tenant_id = $1 
         AND sa.employee_id = $2
-        AND gs.status IN ('approved', 'active')
+        AND gs.status IN ('approved', 'active', 'published')
     `;
     const params = [orgId, employee_id];
 
@@ -1123,6 +1123,31 @@ router.get('/schedules/:id/export/csv', authenticateToken, setTenantContext, asy
     res.send(csv);
   } catch (error) {
     console.error('Error exporting CSV:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/scheduling/audit - Create audit log entry
+router.post('/audit', authenticateToken, setTenantContext, async (req, res) => {
+  try {
+    const { action, entity_type, entity_id, changes, reason } = req.body;
+    const orgId = req.orgId;
+
+    if (!action || !entity_type) {
+      return res.status(400).json({ error: 'action and entity_type are required' });
+    }
+
+    const result = await query(
+      `INSERT INTO schedule_audit_log (
+        tenant_id, action, entity_type, entity_id, changes, reason, created_by
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+      RETURNING *`,
+      [orgId, action, entity_type, entity_id || null, JSON.stringify(changes || {}), reason || null, req.user.id]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating schedule audit log:', error);
     res.status(500).json({ error: error.message });
   }
 });
