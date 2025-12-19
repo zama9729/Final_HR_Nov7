@@ -19,7 +19,7 @@ router.get('/employees/search', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'No organization found' });
     }
 
-    // If query is empty, return top 10 employees (when user just types @)
+    // If query is empty, return all employees in the organization (when user just types @)
     if (!q || typeof q !== 'string' || !q.trim()) {
       const result = await query(
         `SELECT 
@@ -32,14 +32,12 @@ router.get('/employees/search', authenticateToken, async (req, res) => {
           p.last_name,
           p.email,
           COALESCE(t.name, 'No Team') as team_name
-        FROM employees e
-        JOIN profiles p ON p.id = e.user_id
-        LEFT JOIN team_memberships tm ON tm.employee_id = e.id AND tm.end_date IS NULL AND tm.org_id = $1
-        LEFT JOIN teams t ON t.id = tm.team_id AND t.org_id = $1
-        WHERE e.tenant_id = $1
-          AND e.status = 'active'
-        ORDER BY p.first_name, p.last_name
-        LIMIT 10`,
+      FROM employees e
+      JOIN profiles p ON p.id = e.user_id
+      LEFT JOIN team_memberships tm ON tm.employee_id = e.id AND tm.end_date IS NULL AND tm.org_id = $1
+      LEFT JOIN teams t ON t.id = tm.team_id AND t.org_id = $1
+      WHERE e.tenant_id = $1
+      ORDER BY p.first_name, p.last_name`,
         [tenantId]
       );
       
@@ -76,7 +74,6 @@ router.get('/employees/search', authenticateToken, async (req, res) => {
         LEFT JOIN team_memberships tm ON tm.employee_id = e.id AND tm.end_date IS NULL AND tm.org_id = $1
         LEFT JOIN teams t ON t.id = tm.team_id AND t.org_id = $1
         WHERE e.tenant_id = $1
-        AND e.status = 'active'
         AND (
           p.first_name ILIKE $2 
           OR p.last_name ILIKE $2 
@@ -90,8 +87,7 @@ router.get('/employees/search', authenticateToken, async (req, res) => {
           WHEN CONCAT(p.first_name, ' ', p.last_name) ILIKE $2 THEN 2
           ELSE 3
         END,
-        p.first_name, p.last_name
-      LIMIT 10`,
+        p.first_name, p.last_name`,
       [tenantId, searchTerm]
     );
 

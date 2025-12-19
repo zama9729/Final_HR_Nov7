@@ -13,11 +13,33 @@ import { generateRosterRun } from '../services/roster-engine.js';
 
 const router = express.Router();
 
+// Self-healing guard to ensure shift_templates has all required columns
+let shiftTemplatesSchemaEnsured = false;
+async function ensureShiftTemplatesSchema() {
+  if (shiftTemplatesSchemaEnsured) return;
+  try {
+    await query(`
+      ALTER TABLE IF EXISTS shift_templates
+        ADD COLUMN IF NOT EXISTS duration_hours NUMERIC,
+        ADD COLUMN IF NOT EXISTS crosses_midnight BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS team_id UUID,
+        ADD COLUMN IF NOT EXISTS branch_id UUID,
+        ADD COLUMN IF NOT EXISTS schedule_mode TEXT DEFAULT 'employee';
+    `);
+    shiftTemplatesSchemaEnsured = true;
+    console.log('[Scheduling] Ensured shift_templates schema (duration_hours, crosses_midnight, is_default, team_id, branch_id, schedule_mode)');
+  } catch (err) {
+    console.error('[Scheduling] Failed to ensure shift_templates schema:', err.message);
+  }
+}
+
 // ========== SHIFT TEMPLATES ==========
 
 // GET /api/scheduling/templates
 router.get('/templates', authenticateToken, setTenantContext, async (req, res) => {
   try {
+    await ensureShiftTemplatesSchema();
     const orgId = req.orgId;
     const { team_id, branch_id } = req.query;
 
@@ -57,6 +79,7 @@ router.get('/templates', authenticateToken, setTenantContext, async (req, res) =
 // POST /api/scheduling/templates
 router.post('/templates', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
   try {
+    await ensureShiftTemplatesSchema();
     const {
       name,
       start_time,
