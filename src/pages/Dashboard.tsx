@@ -462,9 +462,10 @@ export default function Dashboard() {
         const employee = await api.getEmployee(employeeIdResult.id);
         setEmployeeData(employee);
         
-        // Check if today is birthday
-        if (employee?.onboarding_data?.date_of_birth) {
-          const dob = parseISO(employee.onboarding_data.date_of_birth);
+        // Check if today is birthday - check both nested and direct paths
+        const dateOfBirth = employee?.onboarding_data?.date_of_birth || employee?.date_of_birth;
+        if (dateOfBirth) {
+          const dob = parseISO(dateOfBirth);
           const today = new Date();
           const isTodayBirthday = dob.getDate() === today.getDate() && 
                                   dob.getMonth() === today.getMonth();
@@ -473,10 +474,13 @@ export default function Dashboard() {
           
           // Trigger confetti every time on birthday (on each visit/refresh)
           if (isTodayBirthday) {
+            console.log('🎂 Today is birthday! Triggering confetti...');
             // Small delay to ensure component is rendered, then trigger confetti
             setTimeout(() => {
               triggerConfetti();
-            }, 500);
+            }, 1000);
+          } else {
+            console.log('🎂 Not birthday today. DOB:', dateOfBirth, 'Today:', new Date().toISOString().split('T')[0]);
           }
         }
       }
@@ -487,34 +491,42 @@ export default function Dashboard() {
   };
 
   const triggerConfetti = () => {
-    const duration = 3000;
-    const animationEnd = Date.now() + duration;
-    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+    try {
+      console.log('🎉 Triggering confetti effect');
+      const duration = 3000;
+      const animationEnd = Date.now() + duration;
+      const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
 
-    function randomInRange(min: number, max: number) {
-      return Math.random() * (max - min) + min;
-    }
-
-    const interval: any = setInterval(function() {
-      const timeLeft = animationEnd - Date.now();
-
-      if (timeLeft <= 0) {
-        return clearInterval(interval);
+      function randomInRange(min: number, max: number) {
+        return Math.random() * (max - min) + min;
       }
 
-      const particleCount = 50 * (timeLeft / duration);
-      
-      confetti({
-        ...defaults,
-        particleCount,
-        origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }
-      });
-      confetti({
-        ...defaults,
-        particleCount,
-        origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }
-      });
-    }, 250);
+      const interval: any = setInterval(function() {
+        const timeLeft = animationEnd - Date.now();
+
+        if (timeLeft <= 0) {
+          clearInterval(interval);
+          return;
+        }
+
+        const particleCount = 50 * (timeLeft / duration);
+        
+        // Fire from left
+        confetti({
+          ...defaults,
+          particleCount,
+          origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }
+        });
+        // Fire from right
+        confetti({
+          ...defaults,
+          particleCount,
+          origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }
+        });
+      }, 250);
+    } catch (error) {
+      console.error('Error triggering confetti:', error);
+    }
   };
 
   const getFirstName = () => {

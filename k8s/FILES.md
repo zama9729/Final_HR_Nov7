@@ -73,3 +73,5 @@ kubectl apply -f secrets.yaml
 
 
 
+
+

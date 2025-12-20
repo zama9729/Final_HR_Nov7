@@ -56,22 +56,59 @@ export default function TimesheetApprovals() {
 
   useEffect(() => {
     if (user) {
+      console.log("User loaded, fetching pending timesheets. User:", user);
       fetchPendingTimesheets();
+      // Refresh every 30 seconds
+      const interval = setInterval(() => {
+        console.log("Auto-refreshing pending timesheets...");
+        fetchPendingTimesheets();
+      }, 30000);
+      return () => clearInterval(interval);
+    } else {
+      console.log("No user, skipping fetch");
     }
   }, [user]);
 
   const fetchPendingTimesheets = async () => {
     try {
       setLoading(true);
+      console.log("Fetching pending timesheets...");
       const data = await api.getPendingTimesheets();
-      setTimesheets(data || []);
-    } catch (error) {
+      console.log("Raw API response:", data);
+      console.log("Response type:", typeof data);
+      console.log("Is array?", Array.isArray(data));
+      
+      // Ensure data is an array
+      let timesheetsArray: Timesheet[] = [];
+      if (Array.isArray(data)) {
+        timesheetsArray = data;
+      } else if (data && Array.isArray(data.timesheets)) {
+        timesheetsArray = data.timesheets;
+      } else if (data && Array.isArray(data.pending)) {
+        timesheetsArray = data.pending;
+      } else if (data && data.data && Array.isArray(data.data)) {
+        timesheetsArray = data.data;
+      } else {
+        console.warn("Unexpected response format:", data);
+        timesheetsArray = [];
+      }
+      
+      console.log("Processed timesheets array:", timesheetsArray);
+      console.log("Number of timesheets:", timesheetsArray.length);
+      setTimesheets(timesheetsArray);
+    } catch (error: any) {
       console.error("Error fetching pending timesheets:", error);
+      console.error("Error details:", {
+        message: error.message,
+        stack: error.stack,
+        response: error.response
+      });
       toast({
         title: "Error",
-        description: "Failed to fetch pending timesheets",
+        description: error.message || "Failed to fetch pending timesheets. Please check the console for details.",
         variant: "destructive",
       });
+      setTimesheets([]);
     } finally {
       setLoading(false);
     }
@@ -178,12 +215,22 @@ export default function TimesheetApprovals() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Timesheet Approvals</h1>
-          <p className="text-muted-foreground">Review and approve pending timesheets from your team</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Timesheet Approvals</h1>
+            <p className="text-muted-foreground">Review and approve pending timesheets from your team</p>
+          </div>
+          <Button 
+            onClick={fetchPendingTimesheets} 
+            variant="outline"
+            disabled={loading}
+          >
+            <RotateCcw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
         </div>
 
-        {timesheets.length === 0 ? (
+        {timesheets.length === 0 && !loading ? (
           <Card>
             <CardContent className="py-12 text-center">
               <Clock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -191,9 +238,17 @@ export default function TimesheetApprovals() {
               <p className="text-sm text-muted-foreground mt-2">
                 All timesheets have been reviewed
               </p>
+              <Button 
+                onClick={fetchPendingTimesheets} 
+                variant="outline" 
+                className="mt-4"
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
             </CardContent>
           </Card>
-        ) : (
+        ) : timesheets.length > 0 ? (
           <div className="grid gap-4">
             {timesheets.map((timesheet) => (
               <Card key={timesheet.id}>
@@ -283,7 +338,7 @@ export default function TimesheetApprovals() {
               </Card>
             ))}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Reject Dialog */}
