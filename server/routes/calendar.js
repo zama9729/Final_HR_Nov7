@@ -271,9 +271,13 @@ router.get('/', authenticateToken, async (req, res) => {
     }
     
     // Format project assignments as calendar events
+    // Projects should appear in "My Calendar" for assigned users
+    // Projects should appear in "My Organization" for managers (their team's projects) and privileged roles
     assignmentEvents = assignmentsRes.rows.map(assign => ({
       id: `assignment_${assign.id}`,
-      title: `${assign.project_name} - ${assign.first_name} ${assign.last_name} (${assign.allocation_percent || 0}%)`,
+      title: isEmployeeView 
+        ? assign.project_name  // In My Calendar, just show project name
+        : `${assign.project_name} - ${assign.first_name} ${assign.last_name} (${assign.allocation_percent || 0}%)`, // In Organization view, show with employee name
       start: assign.start_date || assign.project_start_date,
       end: assign.end_date || assign.project_end_date || null,
       allDay: true,
@@ -292,20 +296,24 @@ router.get('/', authenticateToken, async (req, res) => {
     }));
 
     // Get shift schedule assignments for the date range
+    // NOTE: Shifts should NOT appear in "My Calendar" view - only in "My Organization" view
     let scheduleEvents = [];
-    try {
-      scheduleEvents = await fetchScheduleEvents(tenantId, {
-        rangeStart,
-        rangeEnd,
-        isEmployeeView,
-        employee_id,
-        myEmployeeId,
-        isPrivilegedRole,
-        isManager,
-        managerEmployeeId: myEmployeeId,
-      });
-    } catch (error) {
-      console.error('Error fetching schedule assignments:', error);
+    if (!isEmployeeView) {
+      // Only fetch shifts for organization view
+      try {
+        scheduleEvents = await fetchScheduleEvents(tenantId, {
+          rangeStart,
+          rangeEnd,
+          isEmployeeView: false, // Always use organization view for shifts
+          employee_id,
+          myEmployeeId,
+          isPrivilegedRole,
+          isManager,
+          managerEmployeeId: myEmployeeId,
+        });
+      } catch (error) {
+        console.error('Error fetching schedule assignments:', error);
+      }
     }
 
     // Fetch approved leaves overlapping the range
@@ -317,10 +325,12 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(lp.leave_type::text, 'leave') AS leave_type,
         lr.reason,
         lr.start_date,
-        lr.end_date
+        lr.end_date,
+        pr.first_name || ' ' || pr.last_name AS employee_name
       FROM leave_requests lr
       LEFT JOIN leave_policies lp ON lp.id = lr.leave_type_id
       JOIN employees e ON e.id = lr.employee_id
+      JOIN profiles pr ON pr.id = e.user_id
       WHERE lr.tenant_id = $1
         AND e.tenant_id = $1
         AND lr.status IN ('approved', 'planned')
@@ -354,16 +364,47 @@ router.get('/', authenticateToken, async (req, res) => {
     const leaveEvents = leaveResult.rows;
 
     // Fetch ad-hoc team schedule events (meetings, milestones) from team_schedule_events
+    // These are Smart Memo events - should appear in both creator's and tagged users' calendars
     let teamScheduleEvents = [];
     try {
-      const teamEventsRes = await query(
-        `SELECT *
+      let teamEventsQuery = `
+        SELECT *
          FROM team_schedule_events
          WHERE tenant_id = $1
            AND end_date >= $2::date
-           AND start_date <= $3::date`,
-        [tenantId, rangeStart, rangeEnd],
-      );
+           AND start_date <= $3::date
+      `;
+      const teamEventsParams = [tenantId, rangeStart, rangeEnd];
+      let paramIndex = 4;
+
+      if (isEmployeeView && myEmployeeId) {
+        // My Calendar: Show events where user is the creator OR user is tagged/mentioned
+        teamEventsQuery += ` AND (
+          employee_id = $${paramIndex}
+          OR (shared_with_employee_ids IS NOT NULL AND $${paramIndex} = ANY(shared_with_employee_ids))
+        )`;
+        teamEventsParams.push(myEmployeeId);
+      } else if (!isEmployeeView && isManager && myEmployeeId) {
+        // Manager Organization view: Show events for manager's team (direct reports + manager)
+        // Get direct reports
+        const directReportsRes = await query(
+          `SELECT id FROM employees WHERE reporting_manager_id = $1 AND tenant_id = $2 AND status = 'active'`,
+          [myEmployeeId, tenantId]
+        );
+        const directReportIds = directReportsRes.rows.map(r => r.id);
+        const teamMemberIds = [myEmployeeId, ...directReportIds];
+        
+        teamEventsQuery += ` AND (
+          employee_id = ANY($${paramIndex}::uuid[])
+          OR shared_with_employee_ids && $${paramIndex}::uuid[]
+        )`;
+        teamEventsParams.push(teamMemberIds);
+      } else if (!isEmployeeView && isPrivilegedRole) {
+        // HR/CEO/Director/Admin Organization view: Show all organization events
+        // No additional filter needed
+      }
+
+      const teamEventsRes = await query(teamEventsQuery, teamEventsParams);
       teamScheduleEvents = teamEventsRes.rows.map((ev) => ({
         id: `team_event_${ev.id}`,
         title: ev.title,
@@ -380,6 +421,8 @@ router.get('/', authenticateToken, async (req, res) => {
           start_time: ev.start_time,
           end_time: ev.end_time,
           notes: ev.notes,
+          is_shared: ev.is_shared,
+          shared_with_employee_ids: ev.shared_with_employee_ids,
         },
       }));
     } catch (error) {
@@ -469,12 +512,25 @@ router.get('/', authenticateToken, async (req, res) => {
         
         // Filter birthdays by employee if in employee view
         if (isEmployeeView && myEmployeeId) {
+          // My Calendar: Only show user's own birthday
           birthdayQuery += ` AND e.id = $2`;
           birthdayParams.push(myEmployeeId);
+        } else if (!isEmployeeView && isManager && myEmployeeId) {
+          // Manager Organization view: Show birthdays for manager's team (direct reports + manager)
+          const directReportsRes = await query(
+            `SELECT id FROM employees WHERE reporting_manager_id = $1 AND tenant_id = $2 AND status = 'active'`,
+            [myEmployeeId, tenantId]
+          );
+          const directReportIds = directReportsRes.rows.map(r => r.id);
+          const teamMemberIds = [myEmployeeId, ...directReportIds];
+          birthdayQuery += ` AND e.id = ANY($2::uuid[])`;
+          birthdayParams.push(teamMemberIds);
         } else if (isPrivilegedRole && employee_id) {
+          // Filter by specific employee if provided
           birthdayQuery += ` AND e.id = $2`;
           birthdayParams.push(employee_id);
         }
+        // For HR/CEO/Director/Admin in organization view without employee filter, show all birthdays
         
       const birthdayRes = await query(birthdayQuery, birthdayParams);
     
@@ -545,6 +601,8 @@ router.get('/', authenticateToken, async (req, res) => {
     }));
 
     // Format leaves as events
+    // Leaves should appear in "My Calendar" for the user's own leaves
+    // Leaves should appear in "My Organization" for managers (their team's leaves) and privileged roles
     const leaveEventsFormatted = leaveEvents.map(leave => {
       const startDate = leave.start_date instanceof Date 
         ? leave.start_date.toISOString().split('T')[0]
@@ -553,9 +611,16 @@ router.get('/', authenticateToken, async (req, res) => {
         ? leave.end_date.toISOString().split('T')[0]
         : leave.end_date;
       
+      // Get employee name for organization view
+      let title = `🏖️ ${leave.leave_label || 'Leave'}`;
+      if (!isEmployeeView && leave.employee_name) {
+        // In organization view, include employee name
+        title = `🏖️ ${leave.employee_name} - ${leave.leave_label || 'Leave'}`;
+      }
+      
       return {
         id: `leave_${leave.id}`,
-        title: `🏖️ ${leave.leave_label || 'Leave'}`,
+        title,
         start: startDate,
         end: endDate,
         allDay: true,
@@ -691,7 +756,25 @@ router.get('/', authenticateToken, async (req, res) => {
       end: row.week_end_date instanceof Date ? row.week_end_date.toISOString().split('T')[0] : row.week_end_date,
     }));
 
-    console.log('[Calendar] tenant', tenantId, 'view', view_type, 'range', rangeStart, rangeEnd, 'events', events.length);
+    console.log('🔵 [Calendar API] Request:', {
+      tenantId,
+      view_type: view_type || 'not provided',
+      isEmployeeView,
+      isManager,
+      isPrivilegedRole,
+      userRole,
+      myEmployeeId,
+      range: `${rangeStart} to ${rangeEnd}`
+    });
+    console.log('🔵 [Calendar API] Events returned:', {
+      shifts: scheduleEvents.length,
+      projects: assignmentEvents.length,
+      leaves: leaveEventsFormatted.length,
+      birthdays: birthdayEvents.length,
+      team_events: teamScheduleEvents.length,
+      holidays: holidayEvents.length,
+      total: events.length
+    });
     res.json({
       events,
       projects: projectsRes.rows,

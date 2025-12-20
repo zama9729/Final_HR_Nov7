@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { setTenantContext } from '../middleware/tenant.js';
 import { injectHolidayRowsIntoTimesheet, selectEmployeeHolidays } from '../services/holidays.js';
 import {
   calculateDurationHours,
@@ -428,37 +429,42 @@ router.get('/employee-id', authenticateToken, async (req, res) => {
 });
 
 // Get pending timesheets for manager's team (must be before '/' route)
-router.get('/pending', authenticateToken, async (req, res) => {
+router.get('/pending', authenticateToken, setTenantContext, async (req, res) => {
   try {
+    const orgId = req.orgId || req.user?.org_id;
+    
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization context missing' });
+    }
+
     // Try to resolve employee record first
     const empResult = await query(
       `SELECT e.id, e.tenant_id, ur.role
        FROM employees e
        JOIN profiles p ON p.id = e.user_id
        LEFT JOIN user_roles ur ON ur.user_id = e.user_id
-       WHERE e.user_id = $1
+       WHERE e.user_id = $1 AND e.tenant_id = $2
        LIMIT 1`,
-      [req.user.id]
+      [req.user.id, orgId]
     );
 
     let managerId = null;
-    let tenantId = null;
     let role = null;
 
     if (empResult.rows.length === 0) {
       // Fallback through profile + roles for HR/CEO
-      const profileRes = await query('SELECT tenant_id FROM profiles WHERE id = $1', [req.user.id]);
-      const roleRes = await query('SELECT role FROM user_roles WHERE user_id = $1 LIMIT 1', [req.user.id]);
-      tenantId = profileRes.rows[0]?.tenant_id || null;
+      const roleRes = await query(
+        'SELECT role FROM user_roles WHERE user_id = $1 LIMIT 1', 
+        [req.user.id]
+      );
       role = roleRes.rows[0]?.role || null;
-      // Only allow HR/CEO (not manager) without employee row
-      if (!tenantId || !role || !['hr', 'director', 'ceo', 'admin'].includes(role)) {
-        return res.status(404).json({ error: 'Employee not found' });
+      // Only allow HR/CEO/Admin (not manager) without employee row
+      if (!role || !['hr', 'director', 'ceo', 'admin'].includes(role)) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
       }
       // No managerId; skip manager filter below
     } else {
       managerId = empResult.rows[0].id;
-      tenantId = empResult.rows[0].tenant_id;
       role = empResult.rows[0].role;
     }
 
@@ -473,6 +479,9 @@ router.get('/pending', authenticateToken, async (req, res) => {
     
     if (role === 'manager') {
       // Managers can only see their team's timesheets
+      if (!managerId) {
+        return res.status(404).json({ error: 'Employee not found' });
+      }
       timesheetsQuery = `
         SELECT 
           t.*,
@@ -484,16 +493,16 @@ router.get('/pending', authenticateToken, async (req, res) => {
             'email', p.email
           ) as employee
         FROM timesheets t
-        JOIN employees e ON e.id = t.employee_id
-        JOIN profiles p ON p.id = e.user_id
+        JOIN employees e ON e.id = t.employee_id AND e.tenant_id = $1
+        JOIN profiles p ON p.id = e.user_id AND p.tenant_id = $1
         WHERE t.tenant_id = $1
           AND t.status = 'pending_approval'
           AND e.reporting_manager_id = $2
         ORDER BY t.submitted_at DESC
       `;
-      queryParams = [tenantId, managerId];
+      queryParams = [orgId, managerId];
     } else if (['hr', 'director', 'ceo', 'admin'].includes(role)) {
-      // HR/CEO can see timesheets where employee has no manager OR manager has no manager
+      // HR/CEO/Admin can see ALL pending timesheets in their organization
       timesheetsQuery = `
         SELECT 
           t.*,
@@ -505,27 +514,19 @@ router.get('/pending', authenticateToken, async (req, res) => {
             'email', p.email
           ) as employee
         FROM timesheets t
-        JOIN employees e ON e.id = t.employee_id
-        JOIN profiles p ON p.id = e.user_id
-        LEFT JOIN employees m ON e.reporting_manager_id = m.id
+        JOIN employees e ON e.id = t.employee_id AND e.tenant_id = $1
+        JOIN profiles p ON p.id = e.user_id AND p.tenant_id = $1
         WHERE t.tenant_id = $1
           AND t.status = 'pending_approval'
-          AND (e.reporting_manager_id IS NULL OR m.reporting_manager_id IS NULL)
         ORDER BY t.submitted_at DESC
       `;
-      queryParams = [tenantId];
+      queryParams = [orgId];
     } else {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
-    let result;
-    if (role === 'manager') {
-      if (!managerId) {
-        // Managers must have an employee row
-        return res.status(404).json({ error: 'Employee not found' });
-      }
-    }
-    result = await query(timesheetsQuery, queryParams);
+    const result = await query(timesheetsQuery, queryParams);
+    console.log(`[Timesheets Pending] Found ${result.rows.length} pending timesheets for org ${orgId}, role: ${role}`);
     
     // Fetch entries separately for each timesheet
     const timesheetsWithEntries = await Promise.all(
@@ -534,15 +535,15 @@ router.get('/pending', authenticateToken, async (req, res) => {
         let entriesResult;
         try {
           entriesResult = await query(
-            'SELECT id, work_date, hours, description, project_id, project_type FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date',
-            [timesheet.id]
+            'SELECT id, work_date, hours, description, project_id, project_type FROM timesheet_entries WHERE timesheet_id = $1 AND tenant_id = $2 ORDER BY work_date',
+            [timesheet.id, orgId]
           );
         } catch (err) {
           // If project_id doesn't exist, use query without those columns
           if (err.code === '42703') {
             entriesResult = await query(
-              'SELECT id, work_date, hours, description FROM timesheet_entries WHERE timesheet_id = $1 ORDER BY work_date',
-              [timesheet.id]
+              'SELECT id, work_date, hours, description FROM timesheet_entries WHERE timesheet_id = $1 AND tenant_id = $2 ORDER BY work_date',
+              [timesheet.id, orgId]
             );
             // Add null values for missing columns
             entriesResult.rows = entriesResult.rows.map(row => ({
@@ -561,9 +562,11 @@ router.get('/pending', authenticateToken, async (req, res) => {
       })
     );
     
+    console.log(`[Timesheets Pending] Returning ${timesheetsWithEntries.length} timesheets with entries`);
     res.json(timesheetsWithEntries);
   } catch (error) {
-    console.error('Error fetching pending timesheets:', error);
+    console.error('[Timesheets Pending] Error:', error);
+    console.error('[Timesheets Pending] Stack:', error.stack);
     res.status(500).json({ error: error.message });
   }
 });

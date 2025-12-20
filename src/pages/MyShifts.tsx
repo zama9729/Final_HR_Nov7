@@ -224,13 +224,21 @@ export default function MyShifts() {
         const me = await api.getEmployeeId().catch(() => null);
         if (me?.id) {
           const reports = await api.getManagerDirectReports(me.id);
-          setTeamMembers(reports || []);
-          if (reports && reports.length > 0 && !selectedEmployeeId) {
-            setSelectedEmployeeId(reports[0].employee_id || reports[0].id);
+          console.log('[MyShifts] Direct reports received:', reports);
+          // Handle both array response and object with direct_reports property
+          const teamMembersList = Array.isArray(reports) ? reports : (reports?.direct_reports || []);
+          setTeamMembers(teamMembersList);
+          if (teamMembersList && teamMembersList.length > 0 && !selectedEmployeeId) {
+            setSelectedEmployeeId(teamMembersList[0].employee_id || teamMembersList[0].id);
           }
         }
       } catch (error: any) {
         console.error("[MyShifts] Failed to load team members", error);
+        toast({
+          title: "Error loading team members",
+          description: error?.message || "Please try again.",
+          variant: "destructive",
+        });
       }
     };
     
@@ -679,11 +687,11 @@ export default function MyShifts() {
                 <CardDescription>Monthly comparison</CardDescription>
               </CardHeader>
               <CardContent className="flex-1" style={{ minHeight: '450px', height: '450px' }}>
-                {shiftTrends.thisMonth && Object.keys(shiftTrends.thisMonth).length > 0 || shiftTrends.lastMonth && Object.keys(shiftTrends.lastMonth).length > 0 ? (
+                {(shiftTrends.thisMonth && Object.keys(shiftTrends.thisMonth).length > 0) || (shiftTrends.lastMonth && Object.keys(shiftTrends.lastMonth).length > 0) ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={[
-                      { period: 'Last Month', night: shiftTrends.lastMonth['night'] || 0, morning: shiftTrends.lastMonth['morning'] || shiftTrends.lastMonth['day'] || shiftTrends.lastMonth['regular'] || 0, evening: shiftTrends.lastMonth['evening'] || 0, custom: shiftTrends.lastMonth['custom'] || 0, adhoc: shiftTrends.lastMonth['ad-hoc'] || shiftTrends.lastMonth['adhoc'] || 0 },
-                      { period: 'This Month', night: shiftTrends.thisMonth['night'] || 0, morning: shiftTrends.thisMonth['morning'] || shiftTrends.thisMonth['day'] || shiftTrends.thisMonth['regular'] || 0, evening: shiftTrends.thisMonth['evening'] || 0, custom: shiftTrends.thisMonth['custom'] || 0, adhoc: shiftTrends.thisMonth['ad-hoc'] || shiftTrends.thisMonth['adhoc'] || 0 },
+                      { period: 'Last Month', night: shiftTrends.lastMonth?.['night'] || 0, morning: shiftTrends.lastMonth?.['morning'] || shiftTrends.lastMonth?.['day'] || shiftTrends.lastMonth?.['regular'] || 0, evening: shiftTrends.lastMonth?.['evening'] || 0, custom: shiftTrends.lastMonth?.['custom'] || 0, adhoc: shiftTrends.lastMonth?.['ad-hoc'] || shiftTrends.lastMonth?.['adhoc'] || 0 },
+                      { period: 'This Month', night: shiftTrends.thisMonth?.['night'] || 0, morning: shiftTrends.thisMonth?.['morning'] || shiftTrends.thisMonth?.['day'] || shiftTrends.thisMonth?.['regular'] || 0, evening: shiftTrends.thisMonth?.['evening'] || 0, custom: shiftTrends.thisMonth?.['custom'] || 0, adhoc: shiftTrends.thisMonth?.['ad-hoc'] || shiftTrends.thisMonth?.['adhoc'] || 0 },
                     ]}>
                       <XAxis dataKey="period" />
                       <YAxis />

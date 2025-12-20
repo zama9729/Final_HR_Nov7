@@ -177,6 +177,20 @@ export function CalendarPanel() {
     }
   }, [userRole, viewLevel]);
 
+  // Listen for calendar events updates (e.g., from Smart Memo)
+  useEffect(() => {
+    const handleCalendarUpdate = () => {
+      // Trigger a calendar refresh by updating currentMonth slightly
+      // This will cause the fetchCalendar effect to re-run
+      setCurrentMonth((prev) => new Date(prev.getTime()));
+    };
+
+    window.addEventListener('calendar-events-updated', handleCalendarUpdate);
+    return () => {
+      window.removeEventListener('calendar-events-updated', handleCalendarUpdate);
+    };
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     const fetchCalendar = async () => {
@@ -191,6 +205,38 @@ export function CalendarPanel() {
           view_type: viewLevel,
         });
         if (!isMounted) return;
+        
+        // Debug logging
+        const eventTypes = response.events?.reduce((acc: any, e: any) => {
+          const type = e?.resource?.type || 'unknown';
+          acc[type] = (acc[type] || 0) + 1;
+          return acc;
+        }, {}) || {};
+        
+        console.log('📅 [CalendarPanel] Calendar Data:', {
+          viewLevel,
+          userRole,
+          eventCount: response.events?.length || 0,
+          eventTypes,
+          hasShifts: eventTypes.shift > 0,
+          hasProjects: eventTypes.assignment > 0,
+          hasLeaves: eventTypes.leave > 0,
+          hasBirthdays: eventTypes.birthday > 0,
+          hasTeamEvents: eventTypes.team_event > 0,
+          hasHolidays: eventTypes.holiday > 0,
+        });
+        
+        // Show alert for debugging (remove after testing)
+        if (response.events?.length === 0) {
+          console.warn('⚠️ [CalendarPanel] No events returned from API. Check server logs for [Calendar API]');
+        } else {
+          console.log('✅ [CalendarPanel] Events received:', response.events?.slice(0, 5).map((e: any) => ({
+            id: e.id,
+            type: e.resource?.type,
+            title: e.title,
+            start: e.start
+          })));
+        }
 
         // Get month boundaries for filtering expanded events
         const monthStart = startOfMonth(currentMonth);
@@ -248,18 +294,18 @@ export function CalendarPanel() {
             return;
           }
 
-          // Only derive time for shift events - projects, leaves, and other events don't need time display
+          // Derive time for shift events and team_event (Smart Memo) events
           let time: string | undefined = undefined;
           
-          if (normalizedType === 'shift') {
-            // Derive a human-readable time range if available for shifts only
+          if (normalizedType === 'shift' || normalizedType === 'team_event') {
+            // Derive a human-readable time range if available
             let startTime: string | undefined =
               typeof event?.resource?.start_time === 'string' && event.resource.start_time
-                ? event.resource.start_time
+                ? event.resource.start_time.substring(0, 5) // Format HH:mm
                 : undefined;
             let endTime: string | undefined =
               typeof event?.resource?.end_time === 'string' && event.resource.end_time
-                ? event.resource.end_time
+                ? event.resource.end_time.substring(0, 5) // Format HH:mm
                 : undefined;
 
             // Fallback: try to parse from start/end timestamps if explicit time fields aren't present.
@@ -371,14 +417,21 @@ export function CalendarPanel() {
 
         const mergedRaw: CalendarEvent[] = expandedEvents;
 
+        // Filter out shifts if in "My Calendar" view (they should only appear in Organization view)
+        let filteredEvents = mergedRaw;
+        if (viewLevel === 'employee') {
+          filteredEvents = mergedRaw.filter(e => e.type !== 'shift');
+          console.log('🔵 [CalendarPanel] Filtered out shifts for My Calendar view. Remaining events:', filteredEvents.length);
+        }
+        
         // For HR/CEO/Admin in organization view, aggregate day/night shift counts per day
         const RoleForAggregation = new Set(['hr', 'ceo', 'admin']);
-        let merged: CalendarEvent[] = mergedRaw;
+        let merged: CalendarEvent[] = filteredEvents;
         if (viewLevel === 'organization' && RoleForAggregation.has((userRole || '').toLowerCase())) {
           const nonShiftEvents: CalendarEvent[] = [];
           const summaryMap = new Map<string, { date: string; subtype: CalendarEvent['shiftSubtype']; count: number }>();
 
-          mergedRaw.forEach((evt) => {
+          filteredEvents.forEach((evt) => {
             if (evt.type !== 'shift') {
               nonShiftEvents.push(evt);
               return;
@@ -689,7 +742,7 @@ export function CalendarPanel() {
                               <span className={`h-2 w-2 rounded-full ${styles.dot} flex-shrink-0`} />
                               <div className="flex-1 min-w-0">
                                 <div className="font-semibold truncate">{event.title}</div>
-                                {event.time && event.type === 'shift' && (
+                                {event.time && (event.type === 'shift' || event.type === 'team_event') && (
                                   <div className="text-[10px] text-gray-600 mt-0.5">{event.time}</div>
                                 )}
                                 {event.description && (
@@ -701,7 +754,7 @@ export function CalendarPanel() {
                           <TooltipContent side="right" className="max-w-xs">
                             <div className="space-y-1">
                               <p className="font-semibold">{event.title}</p>
-                              {event.time && event.type === 'shift' && <p className="text-xs text-gray-400">Time: {event.time}</p>}
+                              {event.time && (event.type === 'shift' || event.type === 'team_event') && <p className="text-xs text-gray-400">Time: {event.time}</p>}
                               {event.description && <p className="text-xs text-gray-400">{event.description}</p>}
                               {event.location && <p className="text-xs text-gray-400">Location: {event.location}</p>}
                             </div>
@@ -727,7 +780,7 @@ export function CalendarPanel() {
                                     <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
                                     <p className="font-semibold text-sm">{event.title}</p>
                                   </div>
-                                  {event.time && event.type === 'shift' && <p className="text-xs text-gray-400 ml-4">Time: {event.time}</p>}
+                                  {event.time && (event.type === 'shift' || event.type === 'team_event') && <p className="text-xs text-gray-400 ml-4">Time: {event.time}</p>}
                                   {event.description && <p className="text-xs text-gray-400 ml-4">{event.description}</p>}
                                 </div>
                               );
@@ -760,6 +813,26 @@ export function CalendarPanel() {
           {error && (
             <div className="border-t border-gray-200 px-4 py-4 text-sm text-rose-600">
               {error}
+            </div>
+          )}
+          {!loading && !error && events.length === 0 && personalEvents.length === 0 && (
+            <div className="border-t border-gray-200 px-4 py-4 text-sm text-gray-500 text-center">
+              No events found for this month. Try switching to "Organization" view if you're a manager/HR/CEO/Admin/Director.
+            </div>
+          )}
+          {/* Debug Info - Remove after testing */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="border-t border-gray-200 px-4 py-2 text-xs bg-gray-50">
+              <div className="flex items-center gap-4 text-gray-600">
+                <span>View: <strong>{viewLevel}</strong></span>
+                <span>Role: <strong>{userRole || 'none'}</strong></span>
+                <span>Events: <strong>{events.length}</strong></span>
+                <span>Personal: <strong>{personalEvents.length}</strong></span>
+                <span>Shifts: <strong>{events.filter(e => e.type === 'shift').length}</strong></span>
+                <span>Projects: <strong>{events.filter(e => e.type === 'project').length}</strong></span>
+                <span>Leaves: <strong>{events.filter(e => e.type === 'leave').length}</strong></span>
+                <span>Team Events: <strong>{events.filter(e => e.type === 'team_event').length}</strong></span>
+              </div>
             </div>
           )}
         </CardContent>
