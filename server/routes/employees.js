@@ -356,9 +356,22 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
 
     // More inclusive status filter - include active, confirmed, and NULL status employees
     // Exclude only terminated, on_hold, and resigned
+    // Explicitly include user_id for profile picture RLS
     const result = await query(
       `SELECT 
-        e.*,
+        e.id,
+        e.employee_id,
+        e.user_id,
+        e.position,
+        e.department,
+        e.work_location,
+        e.presence_status,
+        e.reporting_manager_id,
+        e.status,
+        e.join_date,
+        e.about_me,
+        e.job_love,
+        e.hobbies,
         d.name as designation_name,
         NULL as designation_level,
         rl.parent_designation_id as designation_parent_id,
@@ -381,6 +394,19 @@ router.get('/org-chart', authenticateToken, async (req, res) => {
     );
 
     console.log(`[Org Chart] Found ${result.rows.length} employees for tenant ${tenantId}`);
+    
+    // Log sample employee data to verify user_id and profile_picture_url are included
+    if (result.rows.length > 0) {
+      const sample = result.rows[0];
+      console.log(`[Org Chart] Sample employee:`, {
+        id: sample.id,
+        employee_id: sample.employee_id,
+        user_id: sample.user_id,
+        has_profiles: !!sample.profiles,
+        profile_picture_url: sample.profiles?.profile_picture_url || 'NOT SET',
+        first_name: sample.profiles?.first_name
+      });
+    }
     
     // Log sample if no results
     if (result.rows.length === 0) {

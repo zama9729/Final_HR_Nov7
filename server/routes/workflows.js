@@ -15,10 +15,26 @@ async function ensureWorkflowsTable() {
       description TEXT,
       workflow_json JSONB NOT NULL,
       status TEXT DEFAULT 'draft',
+      published_at TIMESTAMPTZ,
+      published_by UUID REFERENCES profiles(id),
       created_by UUID REFERENCES profiles(id),
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
+
+    -- Backfill new columns if they don't exist
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflows' AND column_name = 'published_at') THEN
+        ALTER TABLE workflows ADD COLUMN published_at TIMESTAMPTZ;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workflows' AND column_name = 'published_by') THEN
+        ALTER TABLE workflows ADD COLUMN published_by UUID REFERENCES profiles(id);
+      END IF;
+    END $$;
+
+    CREATE INDEX IF NOT EXISTS idx_workflows_tenant ON workflows(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
   `);
 }
 
@@ -204,7 +220,7 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     const result = await query(
-      `SELECT id, name, description, workflow_json, status, created_at, updated_at
+      `SELECT id, name, description, workflow_json, status, created_at, updated_at, published_at, published_by
        FROM workflows
        WHERE tenant_id = $1
        ORDER BY updated_at DESC`,
@@ -231,7 +247,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 
     const result = await query(
-      `SELECT id, name, description, workflow_json, status, created_at, updated_at
+      `SELECT id, name, description, workflow_json, status, created_at, updated_at, published_at, published_by
        FROM workflows
        WHERE id = $1 AND tenant_id = $2`,
       [id, tenantId]
@@ -282,6 +298,40 @@ router.put('/:id', authenticateToken, async (req, res) => {
     res.json({ workflow: result.rows[0] });
   } catch (error) {
     console.error('Error updating workflow:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Publish workflow (set status=published, set published_at/by)
+router.post('/:id/publish', authenticateToken, async (req, res) => {
+  try {
+    await ensureWorkflowsTable();
+    const { id } = req.params;
+    const userId = req.user.id;
+    const tenantId = await getTenantId(userId);
+
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    const result = await query(
+      `UPDATE workflows
+       SET status = 'published',
+           published_at = now(),
+           published_by = $1,
+           updated_at = now()
+       WHERE id = $2 AND tenant_id = $3
+       RETURNING *`,
+      [userId, id, tenantId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Workflow not found' });
+    }
+
+    res.json({ workflow: result.rows[0] });
+  } catch (error) {
+    console.error('Error publishing workflow:', error);
     res.status(500).json({ error: error.message });
   }
 });

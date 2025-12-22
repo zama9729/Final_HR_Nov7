@@ -30,20 +30,6 @@ router.get('/', authenticateToken, setTenantContext, async (req, res) => {
     // Get employee ID if user has an employee record
     let employeeId = null;
     const empResult = await query(
-      'SELECT id FROM employees WHERE user_id = $1',
-      [req.user.id]
-    );
-    
-    if (empResult.rows.length > 0) {
-      employeeId = empResult.rows[0].id;
-    }
-
-    let shiftsQuery;
-    let params;
-    
-    // Get employee ID if user has an employee record
-    let employeeId = null;
-    const empResult = await query(
       'SELECT id FROM employees WHERE user_id = $1 AND tenant_id = $2',
       [req.user.id, orgId]
     );

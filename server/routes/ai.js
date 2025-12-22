@@ -362,6 +362,15 @@ router.post('/chat', authenticateToken, async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
+    // If OpenAI is not configured in this environment, return a graceful fallback
+    if (!process.env.OPENAI_API_KEY) {
+      const fallback = "AI Assistant isn't configured on this environment yet. Please ask an admin to set OPENAI_API_KEY.";
+      console.warn('[AI Assistant] Missing OPENAI_API_KEY, sending fallback response');
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: fallback } }] })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
+
     try {
       const { executeFunction } = await import('../services/ai/functions.js');
       const { chatWithFunctions } = await import('../services/openai.js');

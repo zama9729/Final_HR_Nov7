@@ -2083,6 +2083,12 @@ class ApiClient {
     });
   }
 
+  async publishWorkflow(id: string) {
+    return this.request(`/api/workflows/${id}/publish`, {
+      method: 'POST',
+    });
+  }
+
   // Roster scheduling endpoints
   async getRosterTemplates() {
     return this.request('/api/roster/templates');
