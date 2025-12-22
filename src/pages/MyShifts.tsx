@@ -104,7 +104,8 @@ export default function MyShifts() {
     return defaultFilters;
   });
 
-  const isManager = ["manager", "hr", "director", "ceo", "admin"].includes((userRole || "").toLowerCase());
+  const normalizedRole = (userRole || "").toLowerCase();
+  const isManager = ["manager", "hr", "director", "ceo", "admin"].includes(normalizedRole);
   const isEmployee = !isManager;
   const [viewMode, setViewMode] = useState<"my" | "team">("my");
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -123,23 +124,19 @@ export default function MyShifts() {
     );
   }, [filters]);
 
+  // Load "My Shifts" (always current employee only) and compute personal trends
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       try {
-        // Managers/Admins: use full shifts endpoint; employees: use own
         let data: any[] = [];
-        if (isManager) {
-          data = await api.getShifts();
+        const me = await api.getEmployeeId().catch(() => null);
+        if (me?.id) {
+          const shiftsData = await api.getShiftsForEmployee(me.id);
+          // Handle both array and object response formats
+          data = Array.isArray(shiftsData) ? shiftsData : (shiftsData?.shifts || shiftsData || []);
         } else {
-          const me = await api.getEmployeeId().catch(() => null);
-          if (me?.id) {
-            const shiftsData = await api.getShiftsForEmployee(me.id);
-            // Handle both array and object response formats
-            data = Array.isArray(shiftsData) ? shiftsData : (shiftsData?.shifts || shiftsData || []);
-          } else {
-            data = [];
-          }
+          data = [];
         }
         // Ensure data is properly formatted
         const formattedShifts = Array.isArray(data) ? data.map((shift: any) => ({
@@ -213,23 +210,36 @@ export default function MyShifts() {
       }
     };
     load();
-  }, [isManager, toast, currentMonth, viewMode, selectedEmployeeId]);
+  }, [toast]);
 
-  // Load team members for managers
+  // Load team members for managers / HR in Team View
   useEffect(() => {
     if (!isManager || viewMode !== "team") return;
     
     const loadTeam = async () => {
       try {
-        const me = await api.getEmployeeId().catch(() => null);
-        if (me?.id) {
-          const reports = await api.getManagerDirectReports(me.id);
-          console.log('[MyShifts] Direct reports received:', reports);
-          // Handle both array response and object with direct_reports property
-          const teamMembersList = Array.isArray(reports) ? reports : (reports?.direct_reports || []);
+        // For HR/Director/CEO/Admin, show all employees in org
+        if (["hr", "director", "ceo", "admin"].includes(normalizedRole)) {
+          const employeesData = await api.getEmployees();
+          const teamMembersList = Array.isArray(employeesData) ? employeesData : (employeesData?.employees || []);
+          console.log("[MyShifts] HR team view employees:", teamMembersList.length);
           setTeamMembers(teamMembersList);
-          if (teamMembersList && teamMembersList.length > 0 && !selectedEmployeeId) {
-            setSelectedEmployeeId(teamMembersList[0].employee_id || teamMembersList[0].id);
+          if (teamMembersList.length > 0 && !selectedEmployeeId) {
+            setSelectedEmployeeId(teamMembersList[0].id);
+          }
+        } else {
+          // Managers: use direct reports only
+          const me = await api.getEmployeeId().catch(() => null);
+          if (me?.id) {
+            const reports = await api.getManagerDirectReports(me.id);
+            console.log("[MyShifts] Direct reports received:", reports);
+            const teamMembersList = Array.isArray(reports) ? reports : (reports?.direct_reports || []);
+            setTeamMembers(teamMembersList);
+            if (teamMembersList.length > 0 && !selectedEmployeeId) {
+              setSelectedEmployeeId(teamMembersList[0].employee_id || teamMembersList[0].id);
+            }
+          } else {
+            setTeamMembers([]);
           }
         }
       } catch (error: any) {

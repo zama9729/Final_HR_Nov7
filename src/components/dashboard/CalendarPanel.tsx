@@ -459,7 +459,7 @@ export function CalendarPanel() {
           const birthdayCountAfterFilter = filteredEvents.filter(e => e.type === 'birthday').length;
           console.log('🔵 [CalendarPanel] Filtered out shifts for My Calendar view. Remaining events:', filteredEvents.length, 'Birthdays:', birthdayCountAfterFilter);
         }
-        
+
         // For HR/CEO/Admin in organization view, aggregate day/night shift counts per day
         const RoleForAggregation = new Set(['hr', 'ceo', 'admin']);
         let merged: CalendarEvent[] = filteredEvents;

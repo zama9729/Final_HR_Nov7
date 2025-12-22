@@ -300,19 +300,19 @@ router.get('/', authenticateToken, async (req, res) => {
     let scheduleEvents = [];
     if (!isEmployeeView) {
       // Only fetch shifts for organization view
-      try {
-        scheduleEvents = await fetchScheduleEvents(tenantId, {
-          rangeStart,
-          rangeEnd,
+    try {
+      scheduleEvents = await fetchScheduleEvents(tenantId, {
+        rangeStart,
+        rangeEnd,
           isEmployeeView: false, // Always use organization view for shifts
-          employee_id,
-          myEmployeeId,
-          isPrivilegedRole,
-          isManager,
-          managerEmployeeId: myEmployeeId,
-        });
-      } catch (error) {
-        console.error('Error fetching schedule assignments:', error);
+        employee_id,
+        myEmployeeId,
+        isPrivilegedRole,
+        isManager,
+        managerEmployeeId: myEmployeeId,
+      });
+    } catch (error) {
+      console.error('Error fetching schedule assignments:', error);
       }
     }
 
