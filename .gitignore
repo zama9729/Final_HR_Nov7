@@ -42,3 +42,6 @@ nginx/ssl/*.crt
 # Temporary backup and cloned repos
 payroll-app-backup/
 payroll-repo-temp/
+
+# Kubernetes real secrets (keep only example file in git)
+k8s/secrets.yaml
