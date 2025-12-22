@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ProfilePicture } from "@/components/ProfilePicture";
 import { Button } from "@/components/ui/button";
 import {
   ChevronDown,
@@ -28,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 interface Employee {
   id: string;
   employee_id: string;
+  user_id?: string; // User ID for profile picture lookup
   position: string | null;
   department: string | null;
   work_location: string | null;
@@ -42,6 +44,7 @@ interface Employee {
     first_name: string | null;
     last_name: string | null;
     email: string;
+    profile_picture_url?: string | null;
   } | null;
   home_assignment?: {
     department_name?: string | null;
@@ -104,6 +107,16 @@ export default function AdvancedOrgChart({ searchQuery = "" }: AdvancedOrgChartP
       try {
         const data = await api.getOrgStructure();
         const list = (data || []).filter((e: Employee) => e.profiles) as Employee[];
+        console.log('[AdvancedOrgChart] Loaded employees:', list.length);
+        if (list.length > 0) {
+          const sample = list[0];
+          console.log('[AdvancedOrgChart] Sample employee:', {
+            id: sample.id,
+            user_id: sample.user_id,
+            has_profile_picture: !!sample.profiles?.profile_picture_url,
+            profile_picture_url: sample.profiles?.profile_picture_url || 'NOT SET'
+          });
+        }
         setEmployees(list);
       } catch (error) {
         console.error("[AdvancedOrgChart] Failed to load org structure:", error);
@@ -291,6 +304,20 @@ export default function AdvancedOrgChart({ searchQuery = "" }: AdvancedOrgChartP
                     <div className="flex items-center gap-3">
                       <div className="relative">
                         <Avatar className="h-12 w-12">
+                          {node.user_id ? (
+                            <ProfilePicture
+                              userId={node.user_id}
+                              src={node.profiles?.profile_picture_url}
+                              className="h-12 w-12"
+                              alt={fullName}
+                            />
+                          ) : node.profiles?.profile_picture_url ? (
+                            <AvatarImage
+                              src={node.profiles.profile_picture_url}
+                              alt={fullName}
+                              className="h-12 w-12"
+                            />
+                          ) : null}
                           <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
                             {initials}
                           </AvatarFallback>

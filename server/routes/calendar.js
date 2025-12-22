@@ -536,22 +536,37 @@ router.get('/', authenticateToken, async (req, res) => {
     
       // Generate birthday events for the current year within the date range
       const currentYear = new Date().getFullYear();
+      
+      // Normalize range dates to midnight for proper comparison
+      const rangeStartDate = new Date(rangeStart + 'T00:00:00');
+      const rangeEndDate = new Date(rangeEnd + 'T23:59:59');
+      
+      console.log('🎂 [Calendar] Fetching birthdays:', {
+        employeesFound: birthdayRes.rows.length,
+        rangeStart: rangeStart,
+        rangeEnd: rangeEnd,
+        isEmployeeView,
+        myEmployeeId
+      });
+      
       birthdayRes.rows.forEach(emp => {
         if (!emp.date_of_birth) return;
         const birthDate = new Date(emp.date_of_birth);
         const thisYearBirthday = new Date(currentYear, birthDate.getMonth(), birthDate.getDate());
         const nextYearBirthday = new Date(currentYear + 1, birthDate.getMonth(), birthDate.getDate());
         
-        // Check if birthday falls within range (this year or next year)
-        const rangeStartDate = new Date(rangeStart);
-        const rangeEndDate = new Date(rangeEnd);
+        // Normalize birthday dates to midnight for comparison
+        thisYearBirthday.setHours(0, 0, 0, 0);
+        nextYearBirthday.setHours(0, 0, 0, 0);
         
+        // Check if birthday falls within range (this year)
         if (thisYearBirthday >= rangeStartDate && thisYearBirthday <= rangeEndDate) {
+          const birthdayDateStr = thisYearBirthday.toISOString().split('T')[0];
           birthdayEvents.push({
             id: `birthday_${emp.employee_id}_${currentYear}`,
             title: `🎂 ${emp.first_name} ${emp.last_name}'s Birthday`,
-            start: thisYearBirthday.toISOString().split('T')[0],
-            end: thisYearBirthday.toISOString().split('T')[0],
+            start: birthdayDateStr,
+            end: birthdayDateStr,
             allDay: true,
             resource: {
               type: 'birthday',
@@ -559,16 +574,22 @@ router.get('/', authenticateToken, async (req, res) => {
               employee_name: `${emp.first_name} ${emp.last_name}`,
               date_of_birth: emp.date_of_birth
             }
+          });
+          console.log('🎂 [Calendar] Added birthday:', {
+            name: `${emp.first_name} ${emp.last_name}`,
+            date: birthdayDateStr,
+            employee_id: emp.employee_id
           });
         }
         
         // Also include next year's birthday if range extends to next year
         if (nextYearBirthday >= rangeStartDate && nextYearBirthday <= rangeEndDate) {
+          const birthdayDateStr = nextYearBirthday.toISOString().split('T')[0];
           birthdayEvents.push({
             id: `birthday_${emp.employee_id}_${currentYear + 1}`,
             title: `🎂 ${emp.first_name} ${emp.last_name}'s Birthday`,
-            start: nextYearBirthday.toISOString().split('T')[0],
-            end: nextYearBirthday.toISOString().split('T')[0],
+            start: birthdayDateStr,
+            end: birthdayDateStr,
             allDay: true,
             resource: {
               type: 'birthday',
@@ -577,8 +598,15 @@ router.get('/', authenticateToken, async (req, res) => {
               date_of_birth: emp.date_of_birth
             }
           });
+          console.log('🎂 [Calendar] Added next year birthday:', {
+            name: `${emp.first_name} ${emp.last_name}`,
+            date: birthdayDateStr,
+            employee_id: emp.employee_id
+          });
         }
       });
+      
+      console.log('🎂 [Calendar] Total birthday events created:', birthdayEvents.length);
     } catch (error) {
       console.error('Error fetching birthdays:', error);
       // Continue without birthdays if there's an error
@@ -775,6 +803,18 @@ router.get('/', authenticateToken, async (req, res) => {
       holidays: holidayEvents.length,
       total: events.length
     });
+    
+    // Log birthday events specifically for debugging
+    if (birthdayEvents.length > 0) {
+      console.log('🎂 [Calendar API] Birthday events in response:', birthdayEvents.map(b => ({
+        id: b.id,
+        title: b.title,
+        date: b.start,
+        employee: b.resource?.employee_name
+      })));
+    } else {
+      console.warn('⚠️ [Calendar API] No birthday events found. Check if employees have date_of_birth set in onboarding_data.');
+    }
     res.json({
       events,
       projects: projectsRes.rows,

@@ -13,6 +13,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -114,6 +115,64 @@ const InnerCanvas = React.forwardRef<{ openSave: () => void; runPreview: () => P
   }, [initialWorkflow, nodes.length, reactFlow]);
 
   const onConnect = useCallback((connection: any) => setEdges((eds: any) => addEdge({ ...connection, animated: true }, eds)), [setEdges]);
+
+  const handleSave = useCallback(
+    async (publish: boolean) => {
+      try {
+        setSaving(true);
+        const token = api.token || localStorage.getItem('auth_token');
+        const payload = {
+          name: saveName.trim(),
+          description: saveDesc.trim() || undefined,
+          status: publish ? 'published' : 'draft',
+          workflow_json: {
+            nodes: nodes.map((n: any) => ({
+              id: n.id,
+              type: (n.data as any).typeKey,
+              label: (n.data as any).label,
+              x: n.position.x,
+              y: n.position.y,
+              props: (n.data as any).props
+            })),
+            connections: edges.map((e: any) => ({ from: String(e.source), to: String(e.target) }))
+          }
+        };
+
+        const url = savedWorkflowId
+          ? `${import.meta.env.VITE_API_URL}/api/workflows/${savedWorkflowId}`
+          : `${import.meta.env.VITE_API_URL}/api/workflows`;
+        const method = savedWorkflowId ? 'PUT' : 'POST';
+
+        const resp = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : '' },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || 'Save failed');
+        const workflowId = data.workflow?.id || savedWorkflowId;
+        setSavedWorkflowId(workflowId);
+
+        // If publish requested, hit publish endpoint to set published_at/by
+        if (publish && workflowId) {
+          const publishResp = await fetch(`${import.meta.env.VITE_API_URL}/api/workflows/${workflowId}/publish`, {
+            method: 'POST',
+            headers: { Authorization: token ? `Bearer ${token}` : '' }
+          });
+          const publishData = await publishResp.json();
+          if (!publishResp.ok) throw new Error(publishData?.error || 'Publish failed');
+        }
+
+        setSaveOpen(false);
+        setSaving(false);
+        alert(publish ? 'Workflow published successfully!' : workflowId ? 'Workflow updated successfully!' : 'Workflow saved successfully! You can now run it.');
+      } catch (e: any) {
+        setSaving(false);
+        alert(e?.message || 'Save failed');
+      }
+    },
+    [edges, nodes, saveDesc, saveName, savedWorkflowId]
+  );
 
   const runPreview = useCallback(async () => {
     const token = api.token || localStorage.getItem('auth_token');
@@ -279,42 +338,23 @@ const InnerCanvas = React.forwardRef<{ openSave: () => void; runPreview: () => P
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" size="sm" onClick={() => setSaveOpen(false)}>Cancel</Button>
-              <Button size="sm" disabled={saving || !saveName.trim()} onClick={async () => {
-                try {
-                  setSaving(true);
-                  const token = api.token || localStorage.getItem('auth_token');
-                  const payload = {
-                    name: saveName.trim(),
-                    description: saveDesc.trim() || undefined,
-                    status: 'draft',
-                    workflow_json: {
-                      nodes: nodes.map((n: any) => ({ id: n.id, type: (n.data as any).typeKey, label: (n.data as any).label, x: n.position.x, y: n.position.y, props: (n.data as any).props })),
-                      connections: edges.map((e: any) => ({ from: String(e.source), to: String(e.target) }))
-                    }
-                  };
-                  
-                  // If we have a saved workflow ID, update it; otherwise create new
-                  const url = savedWorkflowId 
-                    ? `${import.meta.env.VITE_API_URL}/api/workflows/${savedWorkflowId}`
-                    : `${import.meta.env.VITE_API_URL}/api/workflows`;
-                  const method = savedWorkflowId ? 'PUT' : 'POST';
-                  
-                  const resp = await fetch(url, {
-                    method,
-                    headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : '' },
-                    body: JSON.stringify(payload)
-                  });
-                  const data = await resp.json();
-                  if (!resp.ok) throw new Error(data?.error || 'Save failed');
-                  setSavedWorkflowId(data.workflow?.id || savedWorkflowId);
-                  setSaveOpen(false);
-                  setSaving(false);
-                  alert(savedWorkflowId ? 'Workflow updated successfully!' : 'Workflow saved successfully! You can now run it.');
-                } catch (e: any) {
-                  setSaving(false);
-                  alert(e?.message || 'Save failed');
-                }
-              }}>{savedWorkflowId ? 'Update' : 'Save'}</Button>
+              <Button
+                size="sm"
+                disabled={saving || !saveName.trim()}
+                onClick={() => handleSave(false)}
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Save Draft
+              </Button>
+              <Button
+                size="sm"
+                variant="default"
+                disabled={saving || !saveName.trim()}
+                onClick={() => handleSave(true)}
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Save & Publish
+              </Button>
             </div>
           </div>
         </DialogContent>

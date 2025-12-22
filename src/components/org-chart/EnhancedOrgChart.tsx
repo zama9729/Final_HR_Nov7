@@ -246,16 +246,20 @@ function OrgChartNode({
                   {/* Avatar */}
                   <div className="relative">
                     <Avatar className="h-12 w-12 border-2 border-white shadow-inner">
-                      {node.profiles?.profile_picture_url ? (
+                      {node.user_id && node.profiles?.profile_picture_url ? (
                         <ProfilePicture
-                          userId={node.id}
+                          userId={node.user_id}
                           src={node.profiles.profile_picture_url}
                           className="h-full w-full object-cover"
                           alt={fullName}
                         />
-                      ) : (
-                        <AvatarImage src={undefined} alt={fullName} />
-                      )}
+                      ) : node.profiles?.profile_picture_url ? (
+                        <AvatarImage 
+                          src={node.profiles.profile_picture_url} 
+                          alt={fullName}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : null}
                       <AvatarFallback className="bg-gradient-to-br from-blue-100 to-indigo-100 text-blue-700 text-sm font-semibold">
                         {initials || "?"}
                       </AvatarFallback>
@@ -935,19 +939,23 @@ export default function EnhancedOrgChart({ searchQuery = "" }: EnhancedOrgChartP
                 <p className="mb-2 text-xs font-semibold uppercase text-slate-500">About</p>
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10">
-                    {selectedNode.profiles.profile_picture_url ? (
+                    {selectedNode.user_id && selectedNode.profiles?.profile_picture_url ? (
                       <ProfilePicture
-                        userId={selectedNode.id}
+                        userId={selectedNode.user_id}
                         src={selectedNode.profiles.profile_picture_url}
                         className="h-full w-full object-cover"
                         alt=""
                       />
-                    ) : (
-                      <AvatarImage src={undefined} alt="" />
-                    )}
+                    ) : selectedNode.profiles?.profile_picture_url ? (
+                      <AvatarImage 
+                        src={selectedNode.profiles.profile_picture_url} 
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : null}
                     <AvatarFallback>
-                      {(selectedNode.profiles.first_name?.[0] || "") +
-                        (selectedNode.profiles.last_name?.[0] || "")}
+                      {(selectedNode.profiles?.first_name?.[0] || "") +
+                        (selectedNode.profiles?.last_name?.[0] || "")}
                     </AvatarFallback>
                   </Avatar>
                   <div className="space-y-1 text-sm">

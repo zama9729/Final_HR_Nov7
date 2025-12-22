@@ -49,3 +49,5 @@ The calendar now shows a debug panel at the bottom (in development) showing:
 4. **Verify your role** - Are you employee, manager, HR, etc.?
 5. **Check the debug panel** at bottom of calendar
 
+
+

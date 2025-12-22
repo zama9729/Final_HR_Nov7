@@ -213,6 +213,9 @@ export function CalendarPanel() {
           return acc;
         }, {}) || {};
         
+        // Count birthdays specifically
+        const birthdayCount = response.events?.filter((e: any) => e.resource?.type === 'birthday').length || 0;
+        
         console.log('📅 [CalendarPanel] Calendar Data:', {
           viewLevel,
           userRole,
@@ -222,9 +225,23 @@ export function CalendarPanel() {
           hasProjects: eventTypes.assignment > 0,
           hasLeaves: eventTypes.leave > 0,
           hasBirthdays: eventTypes.birthday > 0,
+          birthdayCount,
           hasTeamEvents: eventTypes.team_event > 0,
           hasHolidays: eventTypes.holiday > 0,
         });
+        
+        // Log birthday events specifically
+        if (birthdayCount > 0) {
+          const birthdays = response.events?.filter((e: any) => e.resource?.type === 'birthday') || [];
+          console.log('🎂 [CalendarPanel] Birthday events found:', birthdays.map((e: any) => ({
+            id: e.id,
+            title: e.title,
+            start: e.start,
+            employee: e.resource?.employee_name
+          })));
+        } else {
+          console.warn('⚠️ [CalendarPanel] No birthday events found. Check server logs for 🎂 [Calendar]');
+        }
         
         // Show alert for debugging (remove after testing)
         if (response.events?.length === 0) {
@@ -262,7 +279,7 @@ export function CalendarPanel() {
                         ? 'team_event'
                         : 'announcement';
 
-          // Get start date
+          // Get start date - handle birthdays specially since they use 'start' field
           const rawStartISO =
             (typeof event?.resource?.shift_date === 'string' && event.resource.shift_date) ||
             (typeof event?.resource?.start === 'string' && event.resource.start) ||
@@ -277,6 +294,7 @@ export function CalendarPanel() {
             rawStartISO; // Default to start if no end date
 
           if (!rawStartISO) {
+            console.warn('⚠️ [CalendarPanel] Event missing start date:', event);
             return;
           }
 
@@ -284,13 +302,29 @@ export function CalendarPanel() {
           let endDate: Date;
           
           try {
-            startDate = parseISO(rawStartISO.split('T')[0]);
-            endDate = parseISO(rawEndISO.split('T')[0]);
+            // Extract date part (YYYY-MM-DD) from ISO string
+            const startDateStr = rawStartISO.split('T')[0];
+            const endDateStr = rawEndISO.split('T')[0];
+            
+            startDate = parseISO(startDateStr);
+            endDate = parseISO(endDateStr);
             
             if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+              console.warn('⚠️ [CalendarPanel] Invalid date parsed:', { startDateStr, endDateStr, eventType: normalizedType });
               return;
             }
-          } catch {
+            
+            // Debug birthdays specifically
+            if (normalizedType === 'birthday') {
+              console.log('🎂 [CalendarPanel] Processing birthday event:', {
+                title: event.title,
+                start: startDateStr,
+                parsedDate: startDate.toISOString().split('T')[0],
+                employee: event.resource?.employee_name
+              });
+            }
+          } catch (error) {
+            console.warn('⚠️ [CalendarPanel] Date parsing error:', error, { rawStartISO, normalizedType });
             return;
           }
 
@@ -418,10 +452,12 @@ export function CalendarPanel() {
         const mergedRaw: CalendarEvent[] = expandedEvents;
 
         // Filter out shifts if in "My Calendar" view (they should only appear in Organization view)
+        // NOTE: Keep birthdays, leaves, projects, holidays, and team events in both views
         let filteredEvents = mergedRaw;
         if (viewLevel === 'employee') {
           filteredEvents = mergedRaw.filter(e => e.type !== 'shift');
-          console.log('🔵 [CalendarPanel] Filtered out shifts for My Calendar view. Remaining events:', filteredEvents.length);
+          const birthdayCountAfterFilter = filteredEvents.filter(e => e.type === 'birthday').length;
+          console.log('🔵 [CalendarPanel] Filtered out shifts for My Calendar view. Remaining events:', filteredEvents.length, 'Birthdays:', birthdayCountAfterFilter);
         }
         
         // For HR/CEO/Admin in organization view, aggregate day/night shift counts per day

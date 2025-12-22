@@ -111,7 +111,12 @@ export default function PoliciesManagement() {
   const fetchLibraryPolicies = async () => {
     try {
       const data = await api.getManagedPolicies({});
-      const list = Array.isArray(data?.policies) ? data.policies : [];
+      // API returns an array; older shape was { policies: [] } so support both
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray((data as any)?.policies)
+          ? (data as any).policies
+          : [];
       setLibraryPolicies(list);
     } catch (error: any) {
       console.error("Error fetching rich policies:", error);
