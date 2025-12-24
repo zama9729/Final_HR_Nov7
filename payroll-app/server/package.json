@@ -10,6 +10,7 @@
     "migrate": "node ./scripts/run-migrations.js"
   },
   "dependencies": {
+    "@pdfsmaller/pdf-encrypt-lite": "^1.0.0",
     "@types/pdfkit": "^0.17.3",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",

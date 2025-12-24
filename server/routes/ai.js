@@ -316,6 +316,48 @@ router.get('/policy/explain', requireApiKey, rateLimit(60), async (req, res) => 
   }
 });
 
+// Deterministic tool execution (no LLM reasoning)
+router.post('/tools/execute', authenticateToken, async (req, res) => {
+  try {
+    const { query: rawQuery, userQuery, prompt, params = {} } = req.body || {};
+    const text = userQuery || rawQuery || prompt;
+    const { runToolEngine, STATIC_FAILURE_MESSAGE } = await import('../services/ai/tool-engine.js');
+
+    if (!text) {
+      return res.json({ error: STATIC_FAILURE_MESSAGE });
+    }
+
+    const roleResult = await query(
+      `SELECT role FROM user_roles WHERE user_id = $1
+       ORDER BY CASE role
+         WHEN 'ceo' THEN 0
+         WHEN 'hr' THEN 1
+         ELSE 99
+       END
+       LIMIT 1`,
+      [req.user.id]
+    );
+    const role = roleResult.rows[0]?.role || null;
+
+    const tenantResult = await query(
+      'SELECT tenant_id FROM profiles WHERE id = $1',
+      [req.user.id]
+    );
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+
+    if (!tenantId) {
+      return res.json({ error: STATIC_FAILURE_MESSAGE });
+    }
+
+    const result = await runToolEngine({ userQuery: text, params, role, tenantId });
+    return res.json(result || { error: STATIC_FAILURE_MESSAGE });
+  } catch (error) {
+    console.error('[AI Tools] Execution error:', error);
+    const { STATIC_FAILURE_MESSAGE } = await import('../services/ai/tool-engine.js');
+    return res.json({ error: STATIC_FAILURE_MESSAGE });
+  }
+});
+
 // Chat endpoint - streaming chat with OpenAI and function calling
 router.post('/chat', authenticateToken, async (req, res) => {
   console.log('[AI Assistant] Chat request received');

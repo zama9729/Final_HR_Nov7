@@ -122,8 +122,12 @@ export function UnifiedAssistant({ embedded = false }: UnifiedAssistantProps) {
     }, [isOpen]);
 
     useEffect(() => {
+        // Scroll to bottom when messages change
         if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+            if (scrollContainer) {
+                scrollContainer.scrollTop = scrollContainer.scrollHeight;
+            }
         }
     }, [messages]);
 
@@ -447,7 +451,7 @@ export function UnifiedAssistant({ embedded = false }: UnifiedAssistantProps) {
                     </div>
 
                     {/* Chat Messages */}
-                    <ScrollArea className="flex-1" ref={scrollRef}>
+                    <ScrollArea className="flex-1 min-h-0" ref={scrollRef}>
                         <div className="p-4 space-y-4">
                             {messages.length === 0 && (
                                 <div className="space-y-6">
