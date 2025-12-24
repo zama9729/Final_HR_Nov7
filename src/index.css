@@ -871,3 +871,23 @@ All colors MUST be HSL.
                 inset 0 1px 0 rgba(255, 255, 255, 0.5);
   }
 }
+
+/* Make scrollbars more visible in AI Assistant */
+[data-radix-scroll-area-scrollbar] {
+  display: flex !important;
+  opacity: 1 !important;
+}
+
+[data-radix-scroll-area-scrollbar][data-orientation="vertical"] {
+  width: 10px;
+}
+
+[data-radix-scroll-area-thumb] {
+  background-color: hsl(var(--border)) !important;
+  opacity: 0.8;
+}
+
+[data-radix-scroll-area-thumb]:hover {
+  background-color: hsl(var(--muted-foreground)) !important;
+  opacity: 1;
+}

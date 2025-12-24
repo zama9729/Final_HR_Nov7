@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sidebar, SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { Bot, Send, X, Loader2, MessageSquare, Trash2, Plus, Edit2, Check, XIcon } from "lucide-react";
 import { format } from "date-fns";
@@ -45,49 +46,102 @@ export function AIAssistant() {
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-  // Load conversation history
+  // Load conversation history and current conversation
   useEffect(() => {
     if (isOpen) {
+      // Try to restore last conversation ID from localStorage
+      const savedConvId = localStorage.getItem('ai_current_conversation_id');
+      if (savedConvId) {
+        setCurrentConversationId(savedConvId);
+      }
       loadConversations();
     }
   }, [isOpen]);
 
+  // Load conversation messages when currentConversationId changes
   useEffect(() => {
+    if (currentConversationId && isOpen && messages.length === 0) {
+      loadConversation(currentConversationId);
+    }
+  }, [currentConversationId, isOpen]);
+
+  useEffect(() => {
+    // Scroll to bottom when messages change
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
     }
   }, [messages]);
 
   const loadConversations = async () => {
     try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        console.warn('[AI Assistant] No auth token, skipping conversations load');
+        return;
+      }
+
       const response = await fetch(`${API_URL}/api/ai/conversations`, {
         headers: {
-          Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`,
+          Authorization: `Bearer ${token}`,
         },
       });
+      
       if (response.ok) {
         const data = await response.json();
-        setConversations(data.conversations || []);
+        const convs = data.conversations || [];
+        setConversations(convs);
+      } else if (response.status === 401) {
+        console.warn('[AI Assistant] Unauthorized when loading conversations');
       }
     } catch (error) {
-      console.error('Error loading conversations:', error);
+      console.error('[AI Assistant] Error loading conversations:', error);
+      // Don't show error to user, just log it
     }
   };
 
   const loadConversation = async (id: string) => {
+    if (!id) return;
+    
     try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        console.warn('[AI Assistant] No auth token, skipping conversation load');
+        return;
+      }
+
       const response = await fetch(`${API_URL}/api/ai/conversations/${id}`, {
         headers: {
-          Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`,
+          Authorization: `Bearer ${token}`,
         },
       });
+      
       if (response.ok) {
         const data = await response.json();
-        setMessages(data.conversation.messages || []);
-        setCurrentConversationId(id);
+        const conversationMessages = data.conversation?.messages || [];
+        if (conversationMessages.length > 0) {
+          setMessages(conversationMessages);
+          setCurrentConversationId(id);
+          localStorage.setItem('ai_current_conversation_id', id);
+        }
+      } else if (response.status === 404) {
+        // Conversation not found, clear it
+        console.warn('[AI Assistant] Conversation not found:', id);
+        setCurrentConversationId(null);
+        localStorage.removeItem('ai_current_conversation_id');
+        setMessages([]);
+      } else if (response.status === 401) {
+        // Unauthorized - clear token and conversation
+        console.warn('[AI Assistant] Unauthorized, clearing conversation');
+        setCurrentConversationId(null);
+        localStorage.removeItem('ai_current_conversation_id');
+        setMessages([]);
       }
     } catch (error) {
-      console.error('Error loading conversation:', error);
+      console.error('[AI Assistant] Error loading conversation:', error);
+      // Don't clear on network errors, might be temporary
     }
   };
 
@@ -136,33 +190,62 @@ export function AIAssistant() {
   const startNewConversation = () => {
     setMessages([]);
     setCurrentConversationId(null);
+    localStorage.removeItem('ai_current_conversation_id');
   };
 
   const streamChat = async (userMessage: string) => {
     const CHAT_URL = `${API_URL}/api/ai/chat`;
+    const token = localStorage.getItem('auth_token');
+    
+    if (!token) {
+      throw new Error("Authentication required. Please log in again.");
+    }
     
     const allMessages = [...messages, { role: "user" as const, content: userMessage }];
     
-    const resp = await fetch(CHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`,
-      },
-      body: JSON.stringify({ 
-        messages: allMessages,
-        enable_functions: true,
-        conversation_id: currentConversationId,
-      }),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ 
+          messages: allMessages,
+          enable_functions: true,
+          conversation_id: currentConversationId,
+        }),
+      });
+    } catch (fetchError: any) {
+      console.error('[AI Assistant] Fetch error:', fetchError);
+      if (fetchError.message?.includes('Failed to fetch') || fetchError.name === 'TypeError') {
+        throw new Error("Cannot connect to the server. Please check your connection and ensure the API server is running.");
+      }
+      throw new Error(`Network error: ${fetchError.message || 'Unknown error'}`);
+    }
 
     if (!resp.ok) {
-      const errorText = await resp.text();
-      throw new Error(`Failed to start stream: ${resp.status} ${errorText}`);
+      let errorText = '';
+      try {
+        errorText = await resp.text();
+      } catch (e) {
+        errorText = `HTTP ${resp.status} ${resp.statusText}`;
+      }
+      
+      if (resp.status === 401) {
+        throw new Error("Authentication failed. Please log in again.");
+      } else if (resp.status === 403) {
+        throw new Error("You don't have permission to use the AI Assistant.");
+      } else if (resp.status === 500) {
+        throw new Error("Server error. Please try again later.");
+      }
+      
+      throw new Error(`Failed to start chat: ${errorText || `HTTP ${resp.status}`}`);
     }
 
     if (!resp.body) {
-      throw new Error("Response body is null");
+      throw new Error("Server returned an empty response. Please try again.");
     }
 
     const reader = resp.body.getReader();
@@ -172,113 +255,148 @@ export function AIAssistant() {
     let assistantContent = "";
     let receivedConversationId = currentConversationId;
     let hasStartedContent = false;
+    let hasError = false;
 
     // Add assistant message placeholder
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
-    while (!streamDone) {
-      const { done, value } = await reader.read();
-      if (done) {
-        streamDone = true;
-        break;
-      }
-      
-      textBuffer += decoder.decode(value, { stream: true });
-
-      let newlineIndex: number;
-      while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-        let line = textBuffer.slice(0, newlineIndex);
-        textBuffer = textBuffer.slice(newlineIndex + 1);
-
-        // Clean up line
-        if (line.endsWith("\r")) line = line.slice(0, -1);
+    try {
+      while (!streamDone) {
+        let readResult;
+        try {
+          readResult = await reader.read();
+        } catch (readError: any) {
+          console.error('[AI Assistant] Read error:', readError);
+          throw new Error(`Stream read error: ${readError.message || 'Connection interrupted'}`);
+        }
         
-        // Skip empty lines or comment lines
-        if (line.trim() === "" || line.startsWith(":")) continue;
+        const { done, value } = readResult;
         
-        // Must start with "data: "
-        if (!line.startsWith("data: ")) continue;
-
-        const jsonStr = line.slice(6).trim();
-        
-        // Handle done signal
-        if (jsonStr === "[DONE]") {
+        if (done) {
           streamDone = true;
           break;
         }
-
-        // Skip function call marker - just continue
-        if (jsonStr === "[FUNCTION_CALL]") {
-          continue;
+        
+        if (value) {
+          textBuffer += decoder.decode(value, { stream: true });
         }
 
-        try {
-          const parsed = JSON.parse(jsonStr);
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+
+          // Clean up line
+          if (line.endsWith("\r")) line = line.slice(0, -1);
           
-          // Handle conversation ID
-          if (parsed.conversation_id && !receivedConversationId) {
-            receivedConversationId = parsed.conversation_id;
-            setCurrentConversationId(parsed.conversation_id);
-          }
+          // Skip empty lines or comment lines
+          if (line.trim() === "" || line.startsWith(":")) continue;
           
-          // Handle error
-          if (parsed.error) {
-            assistantContent = `Error: ${parsed.error}`;
-            setMessages((prev) => {
-              const newMessages = [...prev];
-              newMessages[newMessages.length - 1].content = assistantContent;
-              return newMessages;
-            });
-            break;
-          }
-          
-          // Extract content from various possible structures
-          const content = parsed.choices?.[0]?.delta?.content || 
-                         parsed.choices?.[0]?.message?.content ||
-                         parsed.content ||
-                         parsed.message ||
-                         (parsed.choices?.[0]?.message && parsed.choices[0].message.content);
-          
-          if (content && typeof content === 'string' && content.trim().length > 0) {
-            hasStartedContent = true;
-            assistantContent += content;
-            
-            // Force update messages state with new array
-            setMessages((prev) => {
-              const newMessages = [...prev];
-              
-              // Find and update the last assistant message
-              let found = false;
-              for (let i = newMessages.length - 1; i >= 0; i--) {
-                if (newMessages[i].role === "assistant") {
-                  newMessages[i] = { ...newMessages[i], content: assistantContent };
-                  found = true;
-                  break;
-                }
-              }
-              
-              // If no assistant message found, add one
-              if (!found) {
-                newMessages.push({ role: "assistant", content: assistantContent });
-              }
-              
-              return [...newMessages]; // Force new array reference
-            });
-          }
-        } catch (parseError) {
-          // If it's not valid JSON, it might be a continuation - keep it in buffer
-          if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
-            // Might be incomplete JSON, keep in buffer
+          // Must start with "data: "
+          if (!line.startsWith("data: ")) {
+            // Sometimes we get lines without "data: " prefix, try to parse anyway
+            if (line.trim() === "[DONE]") {
+              streamDone = true;
+              break;
+            }
             continue;
           }
-          // Otherwise, skip invalid lines
-          console.warn('Failed to parse line:', line, parseError);
+
+          const jsonStr = line.slice(6).trim();
+          
+          // Handle done signal
+          if (jsonStr === "[DONE]") {
+            streamDone = true;
+            break;
+          }
+
+          // Skip function call marker
+          if (jsonStr === "[FUNCTION_CALL]") {
+            continue;
+          }
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            
+            // Handle conversation ID
+            if (parsed.conversation_id) {
+              receivedConversationId = parsed.conversation_id;
+              setCurrentConversationId(parsed.conversation_id);
+              localStorage.setItem('ai_current_conversation_id', parsed.conversation_id);
+            }
+            
+            // Handle error
+            if (parsed.error) {
+              hasError = true;
+              assistantContent = parsed.error;
+              setMessages((prev) => {
+                const newMessages = [...prev];
+                const lastIdx = newMessages.length - 1;
+                if (lastIdx >= 0 && newMessages[lastIdx].role === "assistant") {
+                  newMessages[lastIdx] = { ...newMessages[lastIdx], content: assistantContent };
+                }
+                return newMessages;
+              });
+              break;
+            }
+            
+            // Extract content from various possible structures
+            const content = parsed.choices?.[0]?.delta?.content || 
+                           parsed.choices?.[0]?.message?.content ||
+                           parsed.content ||
+                           parsed.message ||
+                           (parsed.choices?.[0]?.message?.content);
+            
+            if (content && typeof content === 'string') {
+              hasStartedContent = true;
+              assistantContent += content;
+              
+              // Update messages state
+              setMessages((prev) => {
+                const newMessages = [...prev];
+                const lastIdx = newMessages.length - 1;
+                
+                // Update the last assistant message
+                if (lastIdx >= 0 && newMessages[lastIdx].role === "assistant") {
+                  newMessages[lastIdx] = { ...newMessages[lastIdx], content: assistantContent };
+                } else {
+                  // If no assistant message, add one
+                  newMessages.push({ role: "assistant", content: assistantContent });
+                }
+                
+                return newMessages;
+              });
+            }
+          } catch (parseError) {
+            // If it's not valid JSON, it might be incomplete - keep in buffer
+            if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
+              // Incomplete JSON, put it back in buffer
+              textBuffer = jsonStr + "\n" + textBuffer;
+              break;
+            }
+            // Otherwise, skip invalid lines silently
+            console.debug('Skipping invalid line:', line.substring(0, 100));
+          }
         }
       }
+    } catch (streamError: any) {
+      console.error('[AI Assistant] Stream error:', streamError);
+      if (!hasError) {
+        assistantContent = `Error: ${streamError.message || 'Stream interrupted'}`;
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          const lastIdx = newMessages.length - 1;
+          if (lastIdx >= 0 && newMessages[lastIdx].role === "assistant") {
+            newMessages[lastIdx] = { ...newMessages[lastIdx], content: assistantContent };
+          }
+          return newMessages;
+        });
+      }
+      throw streamError;
     }
 
     // Ensure we have content in the assistant message
-    if (assistantContent.trim() !== "") {
+    if (assistantContent.trim() !== "" || hasError) {
       // Ensure final content is set
       setMessages((prev) => {
         const newMessages = [...prev];
@@ -286,15 +404,15 @@ export function AIAssistant() {
           if (newMessages[i].role === "assistant") {
             newMessages[i] = {
               ...newMessages[i],
-              content: assistantContent
+              content: assistantContent || (hasError ? "An error occurred. Please try again." : "")
             };
             break;
           }
         }
         return newMessages;
       });
-    } else {
-      // Remove empty assistant message
+    } else if (!hasStartedContent) {
+      // Remove empty assistant message if no content was received
       setMessages((prev) => {
         const newMessages = [...prev];
         if (newMessages.length > 0 && 
@@ -306,9 +424,13 @@ export function AIAssistant() {
       });
     }
 
-    // Reload conversations after new message
-    if (receivedConversationId) {
-      loadConversations();
+    // Reload conversations after new message (with delay to ensure backend saved)
+    if (receivedConversationId && !hasError) {
+      setCurrentConversationId(receivedConversationId);
+      localStorage.setItem('ai_current_conversation_id', receivedConversationId);
+      setTimeout(() => {
+        loadConversations();
+      }, 1000);
     }
   };
 
@@ -325,20 +447,37 @@ export function AIAssistant() {
     try {
       await streamChat(userMessage);
     } catch (error: any) {
-      console.error("Error:", error);
-      const errorMessage = error?.message || "Sorry, I encountered an error. Please try again.";
+      console.error("[AI Assistant] Error:", error);
       
-      // Remove empty assistant message if it exists
+      let errorMessage = "Sorry, I encountered an error. Please try again.";
+      
+      if (error?.message) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      // Remove empty assistant message if it exists and add error message
       setMessages((prev) => {
         const newMessages = [...prev];
+        
         // Remove last message if it's empty assistant message
         if (newMessages.length > 0 && 
             newMessages[newMessages.length - 1].role === "assistant" && 
             newMessages[newMessages.length - 1].content === "") {
           newMessages.pop();
         }
-        // Add error message
-        newMessages.push({ role: "assistant", content: errorMessage });
+        
+        // Check if last message is already an error message
+        const lastMsg = newMessages[newMessages.length - 1];
+        if (lastMsg && lastMsg.role === "assistant" && lastMsg.content.includes("Error:")) {
+          // Update existing error message
+          newMessages[newMessages.length - 1] = { ...lastMsg, content: errorMessage };
+        } else {
+          // Add new error message
+          newMessages.push({ role: "assistant", content: errorMessage });
+        }
+        
         return newMessages;
       });
     } finally {
@@ -531,7 +670,7 @@ export function AIAssistant() {
           </div>
 
           {/* Chat Messages - Minimal */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          <ScrollArea className="flex-1 min-h-0 [&>[data-radix-scroll-area-scrollbar]]:flex" ref={scrollRef}>
             <div className="p-4 space-y-4">
               {messages.length === 0 && (
                 <div className="text-center text-muted-foreground py-12">
@@ -566,7 +705,7 @@ export function AIAssistant() {
                 </div>
               )}
             </div>
-          </div>
+          </ScrollArea>
 
           {/* Minimal Input */}
           <div className="border-t p-3">

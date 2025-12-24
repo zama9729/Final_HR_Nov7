@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { query } from "../db.js";
 import PDFDocument from "pdfkit";
+import { encryptPDF } from "@pdfsmaller/pdf-encrypt-lite";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
@@ -1269,6 +1270,18 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     }
 
     const payslip = payslipResult.rows[0];
+
+    // Use PAN as mandatory password for payslip PDF
+    const pan = (payslip.pan_number || "").toString().trim();
+    if (!pan) {
+      console.error("[PAYSLIP] Cannot generate password-protected payslip PDF: missing PAN", {
+        payslipId,
+        employeeId: payslip.employee_id,
+      });
+      return res.status(400).json({
+        error: "PAN not available for this employee. Cannot generate password-protected payslip.",
+      });
+    }
     const monthName = new Date(2000, payslip.month - 1).toLocaleString('en-IN', { month: 'long' });
 
     // Get LOP days and paid days from payroll_items (if available, otherwise calculate)
@@ -1279,15 +1292,34 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     // Create PDF
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
 
-    // Set response headers
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="payslip-${payslip.employee_code}-${monthName}-${payslip.year}.pdf"`
-    );
+    // We'll capture the generated PDF into a buffer, encrypt it with PAN,
+    // then stream the encrypted bytes to the response.
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk) => {
+      chunks.push(chunk as Buffer);
+    });
 
-    // Pipe PDF to response
-    doc.pipe(res);
+    doc.on("end", async () => {
+      try {
+        const pdfBuffer = Buffer.concat(chunks);
+        const encryptedBytes = await encryptPDF(pdfBuffer, pan);
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="payslip-${payslip.employee_code}-${monthName}-${payslip.year}.pdf"`
+        );
+
+        res.end(Buffer.from(encryptedBytes));
+      } catch (encryptError: any) {
+        console.error("[PAYSLIP] Failed to encrypt payslip PDF:", encryptError);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to generate payslip PDF" });
+        } else {
+          res.end();
+        }
+      }
+    });
 
     // Helper function to format currency (number only, no ₹ symbol for table cells)
     const formatCurrency = (amount: number) => {
@@ -1428,7 +1460,8 @@ appRouter.get("/payslips/:payslipId/pdf", requireAuth, async (req, res) => {
     const rightColValueX = margin + col1Width + 110;
 
     doc.font('Helvetica').text('PAN:', rightColLabelX, tableStartY + 3);
-    doc.font('Helvetica-Bold').text(payslip.pan_number || 'N/A', rightColValueX, tableStartY + 3);
+    // Do not expose PAN value inside the PDF content
+    doc.font('Helvetica-Bold').text('CONFIDENTIAL', rightColValueX, tableStartY + 3);
 
     // Right Column - Row 2
     doc.font('Helvetica').text('Bank Name:', rightColLabelX, tableStartY + rowHeight + 3);

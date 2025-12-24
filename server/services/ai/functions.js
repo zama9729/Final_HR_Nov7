@@ -386,6 +386,19 @@ export async function getLeavePolicies(tenantId) {
  */
 export async function executeFunction(functionName, args, userId, tenantId) {
   try {
+    // Check AI permissions
+    const { isFunctionAllowed, isAIEnabled } = await import('./permissions.js');
+    
+    const aiEnabled = await isAIEnabled(tenantId);
+    if (!aiEnabled) {
+      return { error: 'AI Assistant is disabled for your organization. Please contact your administrator.' };
+    }
+
+    const functionAllowed = await isFunctionAllowed(tenantId, functionName);
+    if (!functionAllowed) {
+      return { error: `This function is not available. The corresponding module may be disabled in AI configuration.` };
+    }
+
     switch (functionName) {
       case 'get_employee_info':
         return await getEmployeeInfo(args.employee_id, userId, tenantId);

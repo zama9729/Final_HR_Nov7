@@ -7,10 +7,11 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Upload, Loader2, Lock, ExternalLink, CheckCircle2, XCircle } from "lucide-react";
+import { Building2, Upload, Loader2, Lock, ExternalLink, CheckCircle2, XCircle, Bot, Check } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useOrgSetup } from "@/contexts/OrgSetupContext";
 
@@ -46,6 +47,9 @@ export default function Settings() {
     status: 'unknown' as 'enabled' | 'disabled' | 'unknown',
   });
   const [sslLoading, setSslLoading] = useState(false);
+  const [aiConfig, setAiConfig] = useState<any>(null);
+  const [aiConfigLoading, setAiConfigLoading] = useState(true);
+  const [aiConfigSaving, setAiConfigSaving] = useState(false);
   const selectedBranch = useMemo(
     () => branches.find((branch) => branch.id === selectedBranchId),
     [branches, selectedBranchId]
@@ -97,6 +101,9 @@ export default function Settings() {
     if (editable) {
       loadBranchHierarchy();
       fetchSslConfig();
+      if (userRole === 'hr' || userRole === 'ceo') {
+        loadAIConfig();
+      }
     } else {
       setBranches([]);
       setSelectedBranchId("");
@@ -120,6 +127,70 @@ export default function Settings() {
       });
     } finally {
       setSslLoading(false);
+    }
+  };
+
+  const loadAIConfig = async () => {
+    try {
+      setAiConfigLoading(true);
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/ai/settings`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAiConfig(data.configuration || {
+          enabled: true,
+          can_access_projects: true,
+          can_access_timesheets: true,
+          can_access_leaves: true,
+          can_access_attendance: true,
+          can_access_expenses: true,
+          can_access_onboarding: true,
+          can_access_payroll: true,
+          can_access_analytics: true,
+          can_access_employee_directory: true,
+          can_access_notifications: true,
+        });
+      }
+    } catch (error) {
+      console.error('Error loading AI config:', error);
+    } finally {
+      setAiConfigLoading(false);
+    }
+  };
+
+  const saveAIConfig = async () => {
+    if (!aiConfig) return;
+    
+    try {
+      setAiConfigSaving(true);
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/ai/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`,
+        },
+        body: JSON.stringify(aiConfig),
+      });
+      
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "AI configuration saved successfully",
+        });
+      } else {
+        throw new Error('Failed to save AI configuration');
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to save AI configuration",
+        variant: "destructive",
+      });
+    } finally {
+      setAiConfigSaving(false);
     }
   };
 
@@ -378,22 +449,134 @@ export default function Settings() {
               </Card>
 
               {(userRole === 'hr' || userRole === 'ceo') && (
-                <Card>
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Organization Rules</CardTitle>
+                      <CardDescription>
+                        Configure employment rules, probation policies, and organizational policies
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Button
+                        variant="outline"
+                        onClick={() => window.location.href = '/settings/organization-rules'}
+                      >
+                        Manage Organization Rules
+                      </Button>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
                   <CardHeader>
-                    <CardTitle>Organization Rules</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <Bot className="h-5 w-5" />
+                      <CardTitle>AI Assistant Configuration</CardTitle>
+                    </div>
                     <CardDescription>
-                      Configure employment rules, probation policies, and organizational policies
+                      Configure what data the AI Assistant can access. Changes apply to both AI Assistant and AI Conversation.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    <Button
-                      variant="outline"
-                      onClick={() => window.location.href = '/settings/organization-rules'}
-                    >
-                      Manage Organization Rules
-                    </Button>
+                  <CardContent className="space-y-6">
+                    {aiConfigLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin" />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label htmlFor="ai-enabled">Enable AI Assistant</Label>
+                              <p className="text-sm text-muted-foreground">
+                                Turn AI Assistant on or off for your organization
+                              </p>
+                            </div>
+                            <Switch
+                              id="ai-enabled"
+                              checked={aiConfig?.enabled ?? true}
+                              onCheckedChange={(checked) =>
+                                setAiConfig({ ...aiConfig, enabled: checked })
+                              }
+                            />
+                          </div>
+
+                          <div className="border-t pt-4 space-y-4">
+                            <h4 className="font-medium text-sm">Data Access Permissions</h4>
+                            <p className="text-sm text-muted-foreground">
+                              Select which modules the AI Assistant can access:
+                            </p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {[
+                                { key: 'can_access_projects', label: 'Projects', description: 'Access project information and assignments' },
+                                { key: 'can_access_timesheets', label: 'Timesheets', description: 'Access timesheet data and approvals' },
+                                { key: 'can_access_leaves', label: 'Leaves', description: 'Access leave requests and balances' },
+                                { key: 'can_access_attendance', label: 'Attendance', description: 'Access attendance records and clock-in/out data' },
+                                { key: 'can_access_expenses', label: 'Expenses', description: 'Access expense reports and reimbursements' },
+                                { key: 'can_access_onboarding', label: 'Onboarding', description: 'Access onboarding status and new joinees' },
+                                { key: 'can_access_payroll', label: 'Payroll', description: 'Access payroll information and payslips' },
+                                { key: 'can_access_analytics', label: 'Analytics', description: 'Access analytics and KPI data' },
+                                { key: 'can_access_employee_directory', label: 'Employee Directory', description: 'Access employee information and directory' },
+                                { key: 'can_access_notifications', label: 'Notifications', description: 'Send alerts and notifications' },
+                              ].map((item) => (
+                                <div
+                                  key={item.key}
+                                  className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-accent/50 transition-colors"
+                                >
+                                  <div className="flex items-center h-5 mt-0.5">
+                                    <Checkbox
+                                      id={item.key}
+                                      checked={aiConfig?.[item.key] ?? true}
+                                      onCheckedChange={(checked) =>
+                                        setAiConfig({
+                                          ...aiConfig,
+                                          [item.key]: checked,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <Label
+                                      htmlFor={item.key}
+                                      className="text-sm font-medium cursor-pointer"
+                                    >
+                                      {item.label}
+                                    </Label>
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      {item.description}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end pt-4 border-t">
+                          <Button
+                            onClick={saveAIConfig}
+                            disabled={aiConfigSaving}
+                            className="gap-2"
+                          >
+                            {aiConfigSaving ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Saving...
+                              </>
+                            ) : (
+                              <>
+                                <Check className="h-4 w-4" />
+                                Save Changes
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
+                </>
               )}
             </>
           )}

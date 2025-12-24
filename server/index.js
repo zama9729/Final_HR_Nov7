@@ -33,6 +33,7 @@ import analyticsRoutes from './routes/analytics.js';
 import employeeStatsRoutes from './routes/employee-stats.js';
 import migrationsRoutes from './routes/migrations.js';
 import aiRoutes from './routes/ai.js';
+import aiSettingsRoutes from './routes/ai-settings.js';
 import importsRoutes from './routes/imports.js';
 import checkInOutRoutes from './routes/check-in-out.js';
 import opalMiniAppsRoutes from './routes/opal-mini-apps.js';
@@ -183,6 +184,7 @@ app.use('/api/performance-reviews', performanceReviewRoutes);
 app.use('/api/promotions', promotionsRoutes);
 // Additional feature routes
 app.use('/api/ai', aiRoutes);
+app.use('/api/ai', aiSettingsRoutes);
 app.use('/api', importsRoutes);
 app.use('/api/v1', authenticateToken, setTenantContext, skillsRoutes);
 app.use('/api/v1/projects', authenticateToken, setTenantContext, projectsRoutes);
