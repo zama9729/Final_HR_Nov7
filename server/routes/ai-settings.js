@@ -5,6 +5,9 @@ import { setTenantContext } from '../middleware/tenant.js';
 
 const router = express.Router();
 
+// Log route registration
+console.log('[AI Settings Routes] Registering routes...');
+
 // Ensure AI configuration table exists
 async function ensureAIConfigurationTable() {
   try {
@@ -39,8 +42,15 @@ async function ensureAIConfigurationTable() {
   }
 }
 
+// Test route to verify registration
+router.get('/settings/test', (req, res) => {
+  console.log('[AI Settings] Test route hit');
+  res.json({ message: 'AI Settings routes are working!' });
+});
+
 // GET /api/ai/settings - Get AI configuration
 router.get('/settings', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin'), async (req, res) => {
+  console.log('[AI Settings] GET /settings called', req.method, req.path, req.url, 'User:', req.user?.id, 'Role:', req.userRole);
   try {
     await ensureAIConfigurationTable();
     const tenantId = req.orgId || req.user?.org_id;
@@ -74,6 +84,7 @@ router.get('/settings', authenticateToken, setTenantContext, requireRole('hr', '
 
 // PUT /api/ai/settings - Update AI configuration
 router.put('/settings', authenticateToken, setTenantContext, requireRole('hr', 'ceo', 'admin'), async (req, res) => {
+  console.log('[AI Settings] PUT /settings called', req.method, req.path, req.url, 'User:', req.user?.id, 'Role:', req.userRole, 'Body:', req.body);
   try {
     await ensureAIConfigurationTable();
     const tenantId = req.orgId || req.user?.org_id;
@@ -182,5 +193,7 @@ router.put('/settings', authenticateToken, setTenantContext, requireRole('hr', '
   }
 });
 
+console.log('[AI Settings Routes] Routes registered: GET /settings, PUT /settings');
 export default router;
+
 

@@ -94,6 +94,7 @@ export default function Settings() {
   useEffect(() => {
     const editable = ['admin', 'ceo', 'director', 'hr'].includes(userRole || '');
     setCanEdit(editable);
+    console.log('[Settings] User role:', userRole, 'Can edit:', editable);
     if (user) {
       fetchOrganization();
     }
@@ -101,8 +102,12 @@ export default function Settings() {
     if (editable) {
       loadBranchHierarchy();
       fetchSslConfig();
-      if (userRole === 'hr' || userRole === 'ceo') {
+      // Load AI config for HR, CEO, and Admin
+      if (userRole === 'hr' || userRole === 'ceo' || userRole === 'admin') {
+        console.log('[Settings] Loading AI config for role:', userRole);
         loadAIConfig();
+      } else {
+        console.log('[Settings] Not loading AI config. Role:', userRole, 'Required: hr, ceo, or admin');
       }
     } else {
       setBranches([]);
@@ -448,7 +453,7 @@ export default function Settings() {
                 </CardContent>
               </Card>
 
-              {(userRole === 'hr' || userRole === 'ceo') && (
+              {(userRole === 'hr' || userRole === 'ceo' || userRole === 'admin') && (
                 <>
                   <Card>
                     <CardHeader>
@@ -468,114 +473,114 @@ export default function Settings() {
                   </Card>
 
                   <Card>
-                  <CardHeader>
-                    <div className="flex items-center gap-2">
-                      <Bot className="h-5 w-5" />
-                      <CardTitle>AI Assistant Configuration</CardTitle>
-                    </div>
-                    <CardDescription>
-                      Configure what data the AI Assistant can access. Changes apply to both AI Assistant and AI Conversation.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    {aiConfigLoading ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin" />
+                    <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-5 w-5" />
+                        <CardTitle>AI Assistant Configuration</CardTitle>
                       </div>
-                    ) : (
-                      <>
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div className="space-y-0.5">
-                              <Label htmlFor="ai-enabled">Enable AI Assistant</Label>
-                              <p className="text-sm text-muted-foreground">
-                                Turn AI Assistant on or off for your organization
-                              </p>
-                            </div>
-                            <Switch
-                              id="ai-enabled"
-                              checked={aiConfig?.enabled ?? true}
-                              onCheckedChange={(checked) =>
-                                setAiConfig({ ...aiConfig, enabled: checked })
-                              }
-                            />
-                          </div>
-
-                          <div className="border-t pt-4 space-y-4">
-                            <h4 className="font-medium text-sm">Data Access Permissions</h4>
-                            <p className="text-sm text-muted-foreground">
-                              Select which modules the AI Assistant can access:
-                            </p>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              {[
-                                { key: 'can_access_projects', label: 'Projects', description: 'Access project information and assignments' },
-                                { key: 'can_access_timesheets', label: 'Timesheets', description: 'Access timesheet data and approvals' },
-                                { key: 'can_access_leaves', label: 'Leaves', description: 'Access leave requests and balances' },
-                                { key: 'can_access_attendance', label: 'Attendance', description: 'Access attendance records and clock-in/out data' },
-                                { key: 'can_access_expenses', label: 'Expenses', description: 'Access expense reports and reimbursements' },
-                                { key: 'can_access_onboarding', label: 'Onboarding', description: 'Access onboarding status and new joinees' },
-                                { key: 'can_access_payroll', label: 'Payroll', description: 'Access payroll information and payslips' },
-                                { key: 'can_access_analytics', label: 'Analytics', description: 'Access analytics and KPI data' },
-                                { key: 'can_access_employee_directory', label: 'Employee Directory', description: 'Access employee information and directory' },
-                                { key: 'can_access_notifications', label: 'Notifications', description: 'Send alerts and notifications' },
-                              ].map((item) => (
-                                <div
-                                  key={item.key}
-                                  className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-accent/50 transition-colors"
-                                >
-                                  <div className="flex items-center h-5 mt-0.5">
-                                    <Checkbox
-                                      id={item.key}
-                                      checked={aiConfig?.[item.key] ?? true}
-                                      onCheckedChange={(checked) =>
-                                        setAiConfig({
-                                          ...aiConfig,
-                                          [item.key]: checked,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <Label
-                                      htmlFor={item.key}
-                                      className="text-sm font-medium cursor-pointer"
-                                    >
-                                      {item.label}
-                                    </Label>
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                      {item.description}
-                                    </p>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                      <CardDescription>
+                        Configure what data the AI Assistant can access. Changes apply to both AI Assistant and AI Conversation.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {aiConfigLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="h-6 w-6 animate-spin" />
                         </div>
+                      ) : (
+                        <>
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <div className="space-y-0.5">
+                                <Label htmlFor="ai-enabled">Enable AI Assistant</Label>
+                                <p className="text-sm text-muted-foreground">
+                                  Turn AI Assistant on or off for your organization
+                                </p>
+                              </div>
+                              <Switch
+                                id="ai-enabled"
+                                checked={aiConfig?.enabled ?? true}
+                                onCheckedChange={(checked) =>
+                                  setAiConfig({ ...aiConfig, enabled: checked })
+                                }
+                              />
+                            </div>
 
-                        <div className="flex justify-end pt-4 border-t">
-                          <Button
-                            onClick={saveAIConfig}
-                            disabled={aiConfigSaving}
-                            className="gap-2"
-                          >
-                            {aiConfigSaving ? (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Saving...
-                              </>
-                            ) : (
-                              <>
-                                <Check className="h-4 w-4" />
-                                Save Changes
-                              </>
-                            )}
-                          </Button>
+                            <div className="border-t pt-4 space-y-4">
+                              <h4 className="font-medium text-sm">Data Access Permissions</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Select which modules the AI Assistant can access:
+                              </p>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {[
+                                  { key: 'can_access_projects', label: 'Projects', description: 'Access project information and assignments' },
+                                  { key: 'can_access_timesheets', label: 'Timesheets', description: 'Access timesheet data and approvals' },
+                                  { key: 'can_access_leaves', label: 'Leaves', description: 'Access leave requests and balances' },
+                                  { key: 'can_access_attendance', label: 'Attendance', description: 'Access attendance records and clock-in/out data' },
+                                  { key: 'can_access_expenses', label: 'Expenses', description: 'Access expense reports and reimbursements' },
+                                  { key: 'can_access_onboarding', label: 'Onboarding', description: 'Access onboarding status and new joinees' },
+                                  { key: 'can_access_payroll', label: 'Payroll', description: 'Access payroll information and payslips' },
+                                  { key: 'can_access_analytics', label: 'Analytics', description: 'Access analytics and KPI data' },
+                                  { key: 'can_access_employee_directory', label: 'Employee Directory', description: 'Access employee information and directory' },
+                                  { key: 'can_access_notifications', label: 'Notifications', description: 'Send alerts and notifications' },
+                                ].map((item) => (
+                                  <div
+                                    key={item.key}
+                                    className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-accent/50 transition-colors"
+                                  >
+                                    <div className="flex items-center h-5 mt-0.5">
+                                      <Checkbox
+                                        id={item.key}
+                                        checked={aiConfig?.[item.key] ?? true}
+                                        onCheckedChange={(checked) =>
+                                          setAiConfig({
+                                            ...aiConfig,
+                                            [item.key]: checked,
+                                          })
+                                        }
+                                      />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <Label
+                                        htmlFor={item.key}
+                                        className="text-sm font-medium cursor-pointer"
+                                      >
+                                        {item.label}
+                                      </Label>
+                                      <p className="text-xs text-muted-foreground mt-0.5">
+                                        {item.description}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end pt-4 border-t">
+                            <Button
+                              onClick={saveAIConfig}
+                              disabled={aiConfigSaving}
+                              className="gap-2"
+                            >
+                              {aiConfigSaving ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Saving...
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="h-4 w-4" />
+                                  Save Changes
+                                </>
+                              )}
+                            </Button>
                         </div>
                       </>
-                    )}
-                  </CardContent>
-                </Card>
+                      )}
+                    </CardContent>
+                  </Card>
                 </>
               )}
             </>

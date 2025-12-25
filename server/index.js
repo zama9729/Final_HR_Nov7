@@ -183,8 +183,31 @@ app.use('/api/appraisal-cycles', appraisalCycleRoutes);
 app.use('/api/performance-reviews', performanceReviewRoutes);
 app.use('/api/promotions', promotionsRoutes);
 // Additional feature routes
+// Debug middleware to log all /api/ai requests
+app.use('/api/ai', (req, res, next) => {
+  console.log(`[AI Routes Debug] ${req.method} ${req.path} ${req.url}`);
+  next();
+});
+
+// Register AI settings routes first (more specific routes should come first)
+try {
+  console.log('[Server] Registering AI settings routes...');
+  app.use('/api/ai', aiSettingsRoutes);
+  console.log('[Server] ✅ AI settings routes registered successfully');
+  // Log registered routes for debugging
+  if (aiSettingsRoutes && aiSettingsRoutes.stack) {
+    const routes = aiSettingsRoutes.stack.map(r => {
+      const methods = Object.keys(r.route?.methods || {}).filter(m => m !== '_all').join(', ').toUpperCase();
+      const path = r.route?.path || 'unknown';
+      return `${methods} ${path}`;
+    });
+    console.log('[Server] AI Settings Routes registered:', routes);
+  }
+} catch (error) {
+  console.error('[Server] ❌ Error registering AI settings routes:', error);
+}
 app.use('/api/ai', aiRoutes);
-app.use('/api/ai', aiSettingsRoutes);
+console.log('[Server] AI routes registered: /api/ai/settings (GET, PUT)');
 app.use('/api', importsRoutes);
 app.use('/api/v1', authenticateToken, setTenantContext, skillsRoutes);
 app.use('/api/v1/projects', authenticateToken, setTenantContext, projectsRoutes);
