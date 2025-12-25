@@ -56,3 +56,6 @@ FROM organizations
 WHERE id NOT IN (SELECT tenant_id FROM ai_configuration)
 ON CONFLICT (tenant_id) DO NOTHING;
 
+
+
+

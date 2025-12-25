@@ -142,3 +142,6 @@ export async function isFunctionAllowed(tenantId, functionName) {
   return config[permissionKey] === true;
 }
 
+
+
+

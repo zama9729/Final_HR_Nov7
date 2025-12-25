@@ -476,7 +476,11 @@ router.post('/profile-picture/upload', authenticateToken, async (req, res) => {
 
     // Construct public URL (use presigned URL or public bucket URL)
     const minioPublicUrl = process.env.MINIO_PUBLIC_URL || process.env.MINIO_ENDPOINT?.replace('minio:', 'localhost:') || 'http://localhost:9000';
-    const bucket = process.env.MINIO_BUCKET_ONBOARDING || process.env.DOCS_STORAGE_BUCKET || 'hr-onboarding-docs';
+    // Use the same bucket priority as storage.js for consistency
+    const bucket = process.env.MINIO_BUCKET_ONBOARDING || 
+                   process.env.DOCS_STORAGE_BUCKET || 
+                   process.env.MINIO_BUCKET || 
+                   'hr-onboarding-docs';
     const publicUrl = `${minioPublicUrl}/${bucket}/${key}`;
 
     // Ensure profile_picture_url column exists before updating
