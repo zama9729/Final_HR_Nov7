@@ -475,13 +475,32 @@ router.post('/profile-picture/upload', authenticateToken, async (req, res) => {
     }
 
     // Construct public URL (use presigned URL or public bucket URL)
-    const minioPublicUrl = process.env.MINIO_PUBLIC_URL || process.env.MINIO_ENDPOINT?.replace('minio:', 'localhost:') || 'http://localhost:9000';
-    // Use the same bucket priority as storage.js for consistency
+    // MIGRATION NOTE: This now supports both MinIO and AWS S3 URL formats
+    // For AWS S3, we construct a proper S3 URL; for MinIO, we use the endpoint format
     const bucket = process.env.MINIO_BUCKET_ONBOARDING || 
                    process.env.DOCS_STORAGE_BUCKET || 
                    process.env.MINIO_BUCKET || 
                    'hr-onboarding-docs';
-    const publicUrl = `${minioPublicUrl}/${bucket}/${key}`;
+    
+    // Detect if using AWS S3 (no custom endpoint or endpoint contains amazonaws.com)
+    const customEndpoint = process.env.AWS_S3_ENDPOINT || process.env.MINIO_ENDPOINT;
+    const isAWS = !customEndpoint || 
+                  customEndpoint.includes('amazonaws.com') || 
+                  customEndpoint.includes('s3.') ||
+                  (process.env.AWS_ACCESS_KEY_ID && !process.env.MINIO_ENABLED);
+    
+    let publicUrl;
+    if (isAWS) {
+      // AWS S3 URL format: https://bucket-name.s3.region.amazonaws.com/key
+      // Or: https://s3.region.amazonaws.com/bucket-name/key (path-style)
+      const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || process.env.MINIO_REGION || 'us-east-1';
+      // Use path-style for consistency (works with both virtual-hosted and path-style buckets)
+      publicUrl = `https://s3.${region}.amazonaws.com/${bucket}/${key}`;
+    } else {
+      // MinIO URL format: http://endpoint:port/bucket/key
+      const minioPublicUrl = process.env.MINIO_PUBLIC_URL || process.env.MINIO_ENDPOINT?.replace('minio:', 'localhost:') || 'http://localhost:9000';
+      publicUrl = `${minioPublicUrl}/${bucket}/${key}`;
+    }
 
     // Ensure profile_picture_url column exists before updating
     try {
@@ -538,14 +557,14 @@ router.post('/profile-picture/presign', authenticateToken, async (req, res) => {
     // Import storage functions
     const { getPresignedPutUrl, getStorageProvider } = await import('../services/storage.js');
     
-    // Check if S3/MinIO is available
+    // Check if S3 (MinIO or AWS S3) is available
     const storageProvider = getStorageProvider();
     if (storageProvider !== 's3') {
       return res.status(400).json({ 
-        error: 'S3/MinIO storage is not configured. Please configure MinIO environment variables to enable profile picture uploads.',
+        error: 'S3 storage (MinIO or AWS S3) is not configured. Please configure S3 environment variables to enable profile picture uploads.',
         storage_provider: storageProvider,
         requires_s3: true,
-        message: 'MinIO is required for profile picture uploads. Please set MINIO_ENABLED=true and configure MinIO credentials.'
+        message: 'S3 storage is required for profile picture uploads. Please configure AWS S3 or MinIO credentials.'
       });
     }
     
@@ -642,46 +661,84 @@ router.get('/profile-picture/:userId', authenticateToken, async (req, res) => {
     }
 
     // Extract object key from the stored URL
-    // URL format: http://localhost:9000/bucket/tenants/.../profile-pictures/.../filename.png
-    // Or: http://localhost:9000/hr-onboarding-docs/tenants/.../profile-pictures/.../filename.png
+    // MIGRATION NOTE: Supports both MinIO and AWS S3 URL formats
+    // MinIO format: http://localhost:9000/bucket/tenants/.../profile-pictures/.../filename.png
+    // AWS S3 format: https://s3.region.amazonaws.com/bucket/tenants/.../profile-pictures/.../filename.png
+    // Or: https://bucket.s3.region.amazonaws.com/tenants/.../profile-pictures/.../filename.png
     let key = null;
     const urlParts = profile.profile_picture_url.split('/');
     
-    // Try to find the bucket name first
-    const bucketNames = ['hr-onboarding-docs', 'docshr', 'onboarding-docs'];
-    let bucketIndex = -1;
-    let bucketName = null;
+    // Detect AWS S3 URL
+    const isAWS = profile.profile_picture_url.includes('amazonaws.com') || 
+                  profile.profile_picture_url.includes('s3.');
     
-    for (const bucket of bucketNames) {
-      const idx = urlParts.findIndex(part => part === bucket || part.includes(bucket));
-      if (idx !== -1) {
-        bucketIndex = idx;
-        bucketName = urlParts[idx];
-        break;
+    if (isAWS) {
+      // AWS S3 URL: https://s3.region.amazonaws.com/bucket/key or https://bucket.s3.region.amazonaws.com/key
+      // Find the bucket name (it's either in the hostname or after amazonaws.com)
+      const bucketNames = ['hr-onboarding-docs', 'docshr', 'onboarding-docs'];
+      let bucketIndex = -1;
+      
+      // Check if bucket is in hostname (virtual-hosted style)
+      const hostname = urlParts[2] || '';
+      for (const bucket of bucketNames) {
+        if (hostname.startsWith(`${bucket}.s3.`) || hostname.includes(`.${bucket}.`)) {
+          // Virtual-hosted style: bucket is in hostname, key starts after hostname
+          key = urlParts.slice(3).join('/');
+          break;
+        }
+      }
+      
+      // If not found, check path-style (bucket is in path)
+      if (!key) {
+        for (const bucket of bucketNames) {
+          const idx = urlParts.findIndex(part => part === bucket);
+          if (idx !== -1) {
+            bucketIndex = idx;
+            break;
+          }
+        }
+        if (bucketIndex !== -1) {
+          key = urlParts.slice(bucketIndex + 1).join('/');
+        }
+      }
+    } else {
+      // MinIO URL format
+      const bucketNames = ['hr-onboarding-docs', 'docshr', 'onboarding-docs'];
+      let bucketIndex = -1;
+      
+      for (const bucket of bucketNames) {
+        const idx = urlParts.findIndex(part => part === bucket || part.includes(bucket));
+        if (idx !== -1) {
+          bucketIndex = idx;
+          break;
+        }
+      }
+      
+      // If bucket found, extract key (everything after bucket)
+      if (bucketIndex !== -1) {
+        key = urlParts.slice(bucketIndex + 1).join('/');
       }
     }
     
-    // If bucket found, extract key (everything after bucket)
-    if (bucketIndex !== -1) {
-      key = urlParts.slice(bucketIndex + 1).join('/');
-    } else {
-      // Try to find 'tenants' as a fallback
+    // Fallback: Try to find 'tenants' or 'profile-pictures' as markers
+    if (!key) {
       const tenantsIndex = urlParts.findIndex(part => part === 'tenants');
       if (tenantsIndex !== -1) {
         key = urlParts.slice(tenantsIndex).join('/');
       } else {
-        // Last resort: try to extract from common patterns
-        const lastSlashIndex = profile.profile_picture_url.lastIndexOf('/');
-        if (lastSlashIndex !== -1) {
-          const possibleKey = profile.profile_picture_url.substring(
-            profile.profile_picture_url.indexOf('/tenants/') !== -1 
-              ? profile.profile_picture_url.indexOf('/tenants/') + 1
-              : profile.profile_picture_url.indexOf('/profile-pictures/') !== -1
-              ? profile.profile_picture_url.indexOf('/profile-pictures/') + 1
-              : lastSlashIndex
-          );
-          if (possibleKey.includes('tenants/') || possibleKey.includes('profile-pictures/')) {
-            key = possibleKey;
+        const profilePicsIndex = urlParts.findIndex(part => part === 'profile-pictures');
+        if (profilePicsIndex !== -1) {
+          key = urlParts.slice(profilePicsIndex).join('/');
+        } else {
+          // Last resort: try to extract from common patterns
+          const tenantsMatch = profile.profile_picture_url.match(/\/tenants\/(.+)/);
+          if (tenantsMatch) {
+            key = `tenants/${tenantsMatch[1]}`;
+          } else {
+            const profilePicsMatch = profile.profile_picture_url.match(/\/profile-pictures\/(.+)/);
+            if (profilePicsMatch) {
+              key = `profile-pictures/${profilePicsMatch[1]}`;
+            }
           }
         }
       }

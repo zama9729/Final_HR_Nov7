@@ -85,15 +85,18 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - AI_TOOL_API_KEY=${AI_TOOL_API_KEY:-}
-      - MINIO_ENABLED=${MINIO_ENABLED:-true}
-      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ENABLED=${MINIO_ENABLED:-false}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-}
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin123}
       - MINIO_BUCKET=${MINIO_BUCKET:-hr-docs}
       - DOCS_STORAGE_DRIVER=s3
-      - DOCS_STORAGE_BUCKET=${MINIO_BUCKET:-hr-docs}
-      - AWS_S3_ENDPOINT=http://minio:9000
-      - AWS_S3_FORCE_PATH_STYLE=true
+      - DOCS_STORAGE_BUCKET=${DOCS_STORAGE_BUCKET:-hr-onboarding-docs}
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_S3_ENDPOINT=${AWS_S3_ENDPOINT:-https://s3.ap-south-1.amazonaws.com}
+      - AWS_S3_FORCE_PATH_STYLE=${AWS_S3_FORCE_PATH_STYLE:-false}
     depends_on:
       postgres:
         condition: service_healthy
