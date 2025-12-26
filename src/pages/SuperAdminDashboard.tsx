@@ -1,177 +1,84 @@
-import { useEffect, useMemo, useState } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useToast } from "@/hooks/use-toast";
-import { api } from "@/lib/api";
+import { useState } from 'react';
+import { AppLayout } from '@/components/layout/AppLayout';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
+import { TenantList } from '@/components/superadmin/TenantList';
+import { FeatureMatrixView } from '@/components/superadmin/FeatureMatrixView';
+import { AuditLogsView } from '@/components/superadmin/AuditLogsView';
+import { SuperAdminStats } from '@/components/superadmin/SuperAdminStats';
+import { SuperAdminDebug } from '@/components/superadmin/SuperAdminDebug';
+import { Shield, Users, Settings, FileText } from 'lucide-react';
 
 export default function SuperAdminDashboard() {
   const { toast } = useToast();
-  const [mfaCode, setMfaCode] = useState("");
-  const [metrics, setMetrics] = useState<any | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
 
-  const kpiCards = useMemo(() => {
-    if (!metrics?.kpis) return [];
-    return [
-      { label: "Total Orgs", value: metrics.kpis.totalOrgs },
-      { label: "Active (30d)", value: metrics.kpis.active30d },
-      { label: "New (7d)", value: metrics.kpis.newThisWeek },
-      { label: "Churned (90d)", value: metrics.kpis.churned90d },
-    ];
-  }, [metrics]);
-
-  const loadMetrics = async () => {
-    if (!mfaCode) {
-      toast({
-        title: "MFA required",
-        description: "Enter your MFA code to load metrics.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setLoading(true);
-    try {
-      const data = await api.getSuperMetrics(undefined, mfaCode);
-      setMetrics(data);
-    } catch (error: any) {
-      toast({
-        title: "Unable to fetch metrics",
-        description: error?.message || "Check your MFA code and try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const exportData = async () => {
-    if (!mfaCode) return;
-    try {
-      const data = await api.exportSuperMetrics(undefined, mfaCode);
-      const blob = new Blob([JSON.stringify(data?.rows || [], null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "super-metrics.json";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (error: any) {
-      toast({
-        title: "Export failed",
-        description: error?.message || "Unable to export metrics",
-        variant: "destructive",
-      });
-    }
-  };
-
-  useEffect(() => {
-    setMetrics(null);
-  }, []);
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: ['superadmin', 'stats'],
+    queryFn: () => api.getSuperAdminStats(),
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <div className="flex flex-wrap items-center gap-3 justify-between">
+      <div className="container mx-auto p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Owner Analytics</h1>
-            <p className="text-muted-foreground">Aggregated, privacy-safe metrics across all organizations.</p>
-          </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <Input
-              type="password"
-              placeholder="MFA code"
-              value={mfaCode}
-              onChange={(event) => setMfaCode(event.target.value)}
-              className="w-40"
-            />
-            <Button onClick={loadMetrics} disabled={loading}>
-              {loading ? "Loading..." : "Load metrics"}
-            </Button>
-            <Button variant="outline" onClick={exportData} disabled={!metrics}>
-              Export snapshot
-            </Button>
+            <h1 className="text-3xl font-bold flex items-center gap-2">
+              <Shield className="h-8 w-8 text-blue-600" />
+              Super Admin Dashboard
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Manage tenants, features, and monitor platform activity
+            </p>
           </div>
         </div>
 
-        {metrics ? (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {kpiCards.map((card) => (
-                <Card key={card.label}>
-                  <CardHeader>
-                    <CardTitle className="text-sm text-muted-foreground">{card.label}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-2xl font-semibold">{card.value}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Org Size Buckets</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {(metrics.sizeBuckets || []).map((bucket: any) => (
-                    <div key={bucket.bucket} className="flex items-center justify-between text-sm">
-                      <span>{bucket.bucket}</span>
-                      <span className="font-semibold">{bucket.orgs}</span>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Feature Adoption</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {Object.entries(metrics.featureAdoption?.attendance || {}).map(([mode, value]) => (
-                    <div key={mode} className="flex items-center justify-between text-sm">
-                      <span>{mode}</span>
-                      <span className="font-semibold">{value as string}</span>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Branches enabled</span>
-                    <span className="font-semibold">{metrics.featureAdoption?.branches}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Payroll active</span>
-                    <span className="font-semibold">{metrics.featureAdoption?.payroll}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Signups</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {(metrics.signupStream || []).map((row: any, index: number) => (
-                  <div key={`${row.date}-${index}`} className="flex items-center justify-between text-sm">
-                    <span>{row.date}</span>
-                    <span className="text-muted-foreground">
-                      {row.plan_tier} · {row.company_size}
-                    </span>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </>
-        ) : (
-          <Card>
-            <CardContent className="p-6 text-muted-foreground">
-              Enter your MFA code and load metrics to view the dashboard.
-            </CardContent>
-          </Card>
+        {/* Debug Info */}
+        <SuperAdminDebug />
+        
+        {/* Stats Cards */}
+        {!statsLoading && stats && (
+          <SuperAdminStats stats={stats} />
         )}
+
+        {/* Main Content Tabs */}
+        <Tabs defaultValue="tenants" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="tenants" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Tenants
+            </TabsTrigger>
+            <TabsTrigger value="features" className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />
+              Feature Matrix
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Audit Logs
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="tenants" className="space-y-4">
+            <TenantList 
+              onTenantSelect={setSelectedTenantId}
+              selectedTenantId={selectedTenantId}
+            />
+          </TabsContent>
+
+          <TabsContent value="features" className="space-y-4">
+            <FeatureMatrixView />
+          </TabsContent>
+
+          <TabsContent value="audit" className="space-y-4">
+            <AuditLogsView />
+          </TabsContent>
+        </Tabs>
       </div>
     </AppLayout>
   );
 }
-

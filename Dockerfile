@@ -13,10 +13,13 @@ RUN npm install
 # Copy the rest of the source code
 COPY . .
 
-# Build-time environment variable for Vite
+# Build-time environment variables for Vite
 # Default to localhost:3001 so the frontend talks to the HR API via port-forward
 ARG VITE_API_URL=http://localhost:3001
 ENV VITE_API_URL=${VITE_API_URL}
+
+ARG VITE_ADMIN_EMAILS=zama@hr.com
+ENV VITE_ADMIN_EMAILS=${VITE_ADMIN_EMAILS}
 
 # Build the production bundle
 RUN npm run build
