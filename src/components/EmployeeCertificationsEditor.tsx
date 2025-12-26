@@ -302,16 +302,14 @@ export default function EmployeeCertificationsEditor({ employeeId, canEdit = fal
           <Award className="h-8 w-8 mx-auto mb-2 text-gray-400" />
           <p className="text-xs text-gray-500 mb-3">No certifications added yet</p>
           {canEdit && (
-            <Button
+            <button
               type="button"
-              variant="outline"
-              size="sm"
               onClick={() => setShowForm(true)}
-              className="h-7 text-xs"
+              className="inline-flex items-center justify-center h-7 px-3 text-xs font-medium text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
             >
               <Plus className="h-3 w-3 mr-1" />
               Add Certification
-            </Button>
+            </button>
           )}
         </div>
       ) : (
@@ -365,24 +363,20 @@ export default function EmployeeCertificationsEditor({ employeeId, canEdit = fal
                   </div>
                   {canEdit && (
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      <Button
+                      <button
                         type="button"
-                        variant="ghost"
-                        size="sm"
                         onClick={() => startEdit(cert)}
-                        className="h-6 w-6 p-0"
+                        className="h-6 w-6 p-0 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
                       >
-                        <Edit className="h-3 w-3 text-gray-600" />
-                      </Button>
-                      <Button
+                        <Edit className="h-3 w-3" />
+                      </button>
+                      <button
                         type="button"
-                        variant="ghost"
-                        size="sm"
                         onClick={() => deleteCertification(cert.id)}
-                        className="h-6 w-6 p-0"
+                        className="h-6 w-6 p-0 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
                       >
-                        <Trash2 className="h-3 w-3 text-red-600" />
-                      </Button>
+                        <Trash2 className="h-3 w-3" />
+                      </button>
                     </div>
                   )}
                 </div>
@@ -390,16 +384,14 @@ export default function EmployeeCertificationsEditor({ employeeId, canEdit = fal
             </Card>
           ))}
           {canEdit && !showForm && (
-            <Button
+            <button
               type="button"
-              variant="outline"
-              size="sm"
               onClick={() => setShowForm(true)}
-              className="w-full h-7 text-xs"
+              className="w-full inline-flex items-center justify-center h-7 px-3 text-xs font-medium text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
             >
               <Plus className="h-3 w-3 mr-1" />
               Add Certification
-            </Button>
+            </button>
           )}
         </div>
       )}
