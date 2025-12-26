@@ -615,15 +615,14 @@ export default function MyProfile() {
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base">About</CardTitle>
                     {canEdit && (
-                      <Button
+                      <button
                         type="button"
-                        size="sm"
-                        variant="ghost"
                         onClick={() => setAboutEditing((prev) => !prev)}
                         disabled={aboutLoading || aboutSaving}
+                        className="inline-flex items-center justify-center h-8 px-3 text-sm font-medium text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none disabled:opacity-50 disabled:pointer-events-none"
                       >
                         {aboutEditing ? 'Cancel' : 'Edit'}
-                      </Button>
+                      </button>
                     )}
                   </div>
                 </CardHeader>

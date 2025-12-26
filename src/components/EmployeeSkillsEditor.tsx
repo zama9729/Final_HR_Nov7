@@ -158,7 +158,13 @@ export default function EmployeeSkillsEditor({ employeeId, canEdit = false }: { 
                 <Button variant="outline" onClick={cancelEdit} className="shadow-none hover:shadow-none">Cancel</Button>
               </>
             ) : (
-              <Button onClick={addSkill} className="shadow-none hover:shadow-none">Add</Button>
+              <button 
+                type="button"
+                onClick={addSkill} 
+                className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
+              >
+                Add
+              </button>
             )}
           </CardContent>
         </Card>
@@ -177,22 +183,20 @@ export default function EmployeeSkillsEditor({ employeeId, canEdit = false }: { 
                 </div>
                 {canEdit && (
                   <div className="flex gap-2">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <button 
+                      type="button"
                       onClick={() => startEdit(s)}
-                      className="h-8 w-8 p-0"
+                      className="h-8 w-8 p-0 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
                     >
                       <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    </button>
+                    <button 
+                      type="button"
                       onClick={() => deleteSkill(s.id)}
-                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                      className="h-8 w-8 p-0 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
                     >
                       <Trash2 className="h-4 w-4" />
-                    </Button>
+                    </button>
                   </div>
                 )}
               </div>
