@@ -2679,6 +2679,63 @@ class ApiClient {
     });
   }
 
+  // Super Admin APIs
+  async getSuperAdminTenants(params?: { status?: string; tier?: string; search?: string }) {
+    const queryParams = new URLSearchParams();
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.tier) queryParams.append('tier', params.tier);
+    if (params?.search) queryParams.append('search', params.search);
+    const query = queryParams.toString();
+    return this.request(`/api/superadmin/tenants${query ? `?${query}` : ''}`);
+  }
+
+  async getSuperAdminTenantDetails(tenantId: string) {
+    return this.request(`/api/superadmin/tenants/${tenantId}`);
+  }
+
+  async updateTenantTier(tenantId: string, tier: 'basic' | 'premium' | 'enterprise') {
+    return this.request(`/api/superadmin/tenants/${tenantId}/tier`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tier }),
+    });
+  }
+
+  async updateTenantStatus(tenantId: string, status: 'active' | 'inactive' | 'suspended' | 'trial') {
+    return this.request(`/api/superadmin/tenants/${tenantId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async getSuperAdminFeatures() {
+    return this.request('/api/superadmin/features');
+  }
+
+  async getTenantFeatures(tenantId: string) {
+    return this.request(`/api/superadmin/tenants/${tenantId}/features`);
+  }
+
+  async updateTenantFeatures(tenantId: string, features: Array<{ feature_key: string; enabled: boolean }>) {
+    return this.request(`/api/superadmin/tenants/${tenantId}/features`, {
+      method: 'PATCH',
+      body: JSON.stringify({ features }),
+    });
+  }
+
+  async getSuperAdminAuditLogs(params?: { tenant_id?: string; action?: string; limit?: number; offset?: number }) {
+    const queryParams = new URLSearchParams();
+    if (params?.tenant_id) queryParams.append('tenant_id', params.tenant_id);
+    if (params?.action) queryParams.append('action', params.action);
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.offset) queryParams.append('offset', params.offset.toString());
+    const query = queryParams.toString();
+    return this.request(`/api/superadmin/audit-logs${query ? `?${query}` : ''}`);
+  }
+
+  async getSuperAdminStats() {
+    return this.request('/api/superadmin/stats');
+  }
+
 }
 
 export const api = new ApiClient(API_URL);

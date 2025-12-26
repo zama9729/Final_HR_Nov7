@@ -88,6 +88,7 @@ import OnboardingWizardPage from "./pages/OnboardingWizardPage";
 import OrganizationSetupEdit from "./pages/OrganizationSetupEdit";
 import OrganizationHierarchy from "./pages/OrganizationHierarchy";
 import OrganizationRules from "./pages/OrganizationRules";
+import SuperAdminTest from "./pages/SuperAdminTest";
 
 const queryClient = new QueryClient();
 
@@ -161,7 +162,8 @@ const App = () => (
               <Route path="/onboarding-wizard" element={<ProtectedRoute><OnboardingWizardPage /></ProtectedRoute>} />
               {/* Old setup route - now points to onboarding wizard */}
               <Route path="/setup" element={<ProtectedRoute><OnboardingWizardPage /></ProtectedRoute>} />
-            <Route path="/super/dashboard" element={<ProtectedRoute allowedRoles={['super_user']}><SuperAdminDashboard /></ProtectedRoute>} />
+            <Route path="/superadmin-test" element={<ProtectedRoute><SuperAdminTest /></ProtectedRoute>} />
+            <Route path="/superadmin" element={<ProtectedRoute requireSuperadmin><SuperAdminDashboard /></ProtectedRoute>} />
             
             {/* Protected routes */}
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

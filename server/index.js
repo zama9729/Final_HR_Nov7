@@ -77,6 +77,7 @@ import documentUploadRoutes from './routes/document-upload.js';
 import backgroundCheckRoutes from './routes/background-check.js';
 import employeeHistoryRoutes from './routes/employee-history.js';
 import healthRoutes from './routes/health.js';
+import superadminRoutes from './routes/superadmin.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders } from './services/cron.js';
 import { scheduleReminderChecks } from './services/reminder-cron.js';
@@ -261,6 +262,7 @@ app.use('/api/designations', authenticateToken, setTenantContext, designationsRo
 app.use('/api/personal-calendar-events', authenticateToken, setTenantContext, personalCalendarEventsRoutes);
 app.use('/api/calendar', smartMemoRoutes);
 app.use('/api/reminders', remindersRoutes);
+app.use('/api/superadmin', superadminRoutes);
 
 // Tenant info endpoint for payroll service compatibility
 app.get('/api/tenant', authenticateToken, async (req, res) => {
@@ -453,20 +455,38 @@ createPool().then(async () => {
     console.error('[Migration] Failed to ensure probation policy enhancements:', error);
   }
 
-  // Initialize MinIO buckets
+  // Initialize S3 buckets (MinIO or AWS S3)
+  // MIGRATION NOTE: Now supports both MinIO and AWS S3
   try {
     const { ensureBucketExists, getStorageProvider, getOnboardingBucket, isS3Available } = await import('./services/storage.js');
     const storageProvider = getStorageProvider();
 
     if (storageProvider === 's3' && isS3Available()) {
       const bucketName = getOnboardingBucket();
-      console.log(`\n[MinIO] Initializing bucket: ${bucketName}`);
-      console.log(`[MinIO] Endpoint: ${process.env.MINIO_ENDPOINT || process.env.AWS_S3_ENDPOINT || 'not set'}`);
+      // Detect if using AWS S3 or MinIO
+      const customEndpoint = process.env.AWS_S3_ENDPOINT || process.env.MINIO_ENDPOINT;
+      const isAWS = !customEndpoint || 
+                    customEndpoint.includes('amazonaws.com') || 
+                    customEndpoint.includes('s3.') ||
+                    (process.env.AWS_ACCESS_KEY_ID && !process.env.MINIO_ENABLED);
+      
+      if (isAWS) {
+        console.log(`\n[AWS S3] Initializing bucket: ${bucketName}`);
+        console.log(`[AWS S3] Region: ${process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1'}`);
+      } else {
+        console.log(`\n[MinIO] Initializing bucket: ${bucketName}`);
+        console.log(`[MinIO] Endpoint: ${process.env.MINIO_ENDPOINT || process.env.AWS_S3_ENDPOINT || 'not set'}`);
+      }
       await ensureBucketExists(bucketName);
-      console.log(`✅ MinIO bucket '${bucketName}' is ready\n`);
+      console.log(`✅ S3 bucket '${bucketName}' is ready\n`);
     } else {
-      console.log('\n⚠️  MinIO/S3 storage is not configured. Document uploads will use local storage.');
-      console.log('   To enable MinIO, ensure these environment variables are set:');
+      console.log('\n⚠️  S3 storage (MinIO or AWS S3) is not configured. Document uploads will use local storage.');
+      console.log('   To enable AWS S3, ensure these environment variables are set:');
+      console.log('   - AWS_ACCESS_KEY_ID=your-access-key');
+      console.log('   - AWS_SECRET_ACCESS_KEY=your-secret-key');
+      console.log('   - AWS_REGION=us-east-1 (or your preferred region)');
+      console.log('   - MINIO_BUCKET_ONBOARDING=hr-onboarding-docs (or DOCS_STORAGE_BUCKET)');
+      console.log('\n   Or to enable MinIO:');
       console.log('   - MINIO_ENABLED=true');
       console.log('   - MINIO_ENDPOINT=localhost (or minio for Docker)');
       console.log('   - MINIO_ACCESS_KEY=minioadmin');
@@ -474,8 +494,8 @@ createPool().then(async () => {
       console.log('   - MINIO_BUCKET_ONBOARDING=hr-onboarding-docs\n');
     }
   } catch (error) {
-    console.error('\n⚠️  Error initializing MinIO buckets:', error.message);
-    console.error('   Document uploads may not work until MinIO is properly configured');
+    console.error('\n⚠️  Error initializing S3 buckets:', error.message);
+    console.error('   Document uploads may not work until S3 (MinIO or AWS S3) is properly configured');
     console.error('   Run: node server/scripts/init-minio.js to diagnose the issue\n');
   }
 

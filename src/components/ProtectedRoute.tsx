@@ -3,11 +3,13 @@ import { useAuth, UserRole } from "@/contexts/AuthContext";
 import { useOrgSetup } from "@/contexts/OrgSetupContext";
 import { ReactNode, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { isSuperAdmin } from "@/utils/superadminCheck";
 
 interface ProtectedRouteProps {
   children: ReactNode;
   allowedRoles?: UserRole[];
   requireOnboarding?: boolean;
+  requireSuperadmin?: boolean;
 }
 
 // Roles that require onboarding
@@ -16,9 +18,13 @@ const ROLES_REQUIRING_ONBOARDING: UserRole[] = ['hr', 'employee', 'director', 'm
 export function ProtectedRoute({ 
   children, 
   allowedRoles,
-  requireOnboarding = false 
+  requireOnboarding = false,
+  requireSuperadmin = false
 }: ProtectedRouteProps) {
   const { user, userRole, isLoading } = useAuth();
+  
+  // Check if user is superadmin (via ADMIN_EMAILS env var)
+  const isSuperadmin = isSuperAdmin(user?.email);
   const location = useLocation();
   const { status: setupStatus, loading: setupLoading, shouldGate } = useOrgSetup();
   const [onboardingStatus, setOnboardingStatus] = useState<{
@@ -104,8 +110,49 @@ export function ProtectedRoute({
     );
   }
 
-  // Check if user has required role
-  if (allowedRoles && userRole && !allowedRoles.includes(userRole)) {
+  // Check superadmin requirement
+  if (requireSuperadmin && !isSuperadmin) {
+    // Log detailed debug info
+    console.error('[SuperAdmin Access Denied]', {
+      userEmail: user?.email,
+      requireSuperadmin,
+      isSuperadmin,
+      adminEmailsEnv: import.meta.env.VITE_ADMIN_EMAILS,
+      allEnvVars: Object.keys(import.meta.env).filter(k => k.includes('ADMIN'))
+    });
+    
+    // Show error message instead of silent redirect (temporary for debugging)
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-md w-full space-y-4">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h2 className="text-lg font-semibold text-red-900 mb-2">Access Denied</h2>
+            <p className="text-sm text-red-800 mb-4">
+              You don't have Super Admin access. Your email ({user?.email}) is not in the admin list.
+            </p>
+            <div className="text-xs text-red-700 space-y-1">
+              <p><strong>Configured Admin Emails:</strong></p>
+              <code className="block bg-red-100 p-2 rounded mt-1">
+                {import.meta.env.VITE_ADMIN_EMAILS || '(not set)'}
+              </code>
+              <p className="mt-2">
+                <strong>To fix:</strong> Add your email to VITE_ADMIN_EMAILS in .env and restart the dev server.
+              </p>
+            </div>
+            <button
+              onClick={() => window.location.href = '/dashboard'}
+              className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Check if user has required role (skip if superadmin)
+  if (allowedRoles && userRole && !allowedRoles.includes(userRole) && !isSuperadmin) {
     return <Navigate to="/dashboard" replace />;
   }
 
