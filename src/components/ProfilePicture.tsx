@@ -10,14 +10,16 @@ interface ProfilePictureProps {
 }
 
 /**
- * ProfilePicture component that automatically converts MinIO URLs to presigned URLs
- * This ensures profile pictures are accessible even when MinIO buckets are not publicly readable.
+ * ProfilePicture component that automatically converts storage URLs (MinIO/AWS S3) to presigned URLs
+ * This ensures profile pictures are accessible even when storage buckets are not publicly readable.
+ * 
+ * MIGRATION NOTE: Now supports both MinIO and AWS S3 URLs.
  *
  * Behaviour:
  * - If only userId is provided, it will fetch the latest profile picture URL from the API.
  * - If userId + src are provided, it will:
- *   - use src directly for non-MinIO URLs
- *   - fetch a presigned URL for MinIO URLs.
+ *   - use src directly for non-storage URLs
+ *   - fetch a presigned URL for MinIO/AWS S3 URLs.
  */
 export function ProfilePicture({ userId, src, className, alt }: ProfilePictureProps) {
   const [presignedUrl, setPresignedUrl] = useState<string | undefined>(src);
@@ -60,15 +62,19 @@ export function ProfilePicture({ userId, src, className, alt }: ProfilePicturePr
       return;
     }
 
-    // When src exists, only fetch presigned URL if it looks like a MinIO URL
-    const isMinIOUrl =
+    // When src exists, only fetch presigned URL if it looks like a MinIO or AWS S3 URL
+    // MIGRATION NOTE: Now supports both MinIO and AWS S3 URLs
+    const isStorageUrl =
       src.includes('localhost:9000') ||
       src.includes('minio') ||
+      src.includes('amazonaws.com') ||
+      src.includes('s3.') ||
       src.includes('/docshr/') ||
       src.includes('/hr-onboarding-docs/') ||
-      (src.startsWith('http://') && (src.includes(':9000') || src.includes('minio')));
+      (src.startsWith('http://') && (src.includes(':9000') || src.includes('minio'))) ||
+      (src.startsWith('https://') && src.includes('amazonaws.com'));
 
-    if (!isMinIOUrl) {
+    if (!isStorageUrl) {
       setPresignedUrl(src);
       return;
     }

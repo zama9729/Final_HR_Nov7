@@ -23,77 +23,135 @@ const S3_BUCKET = process.env.MINIO_BUCKET_ONBOARDING ||
                   'hr-onboarding-docs';
 
 // Initialize S3 client for MinIO or AWS S3
-if (DRIVER === 's3' || process.env.MINIO_ENABLED === 'true') {
-  // Support new standardized env vars with fallback to old ones
-  const endpoint = process.env.MINIO_ENDPOINT || process.env.AWS_S3_ENDPOINT;
-  const port = process.env.MINIO_PORT || '9000';
-  const accessKeyId = process.env.MINIO_ACCESS_KEY || 
-                      process.env.MINIO_ROOT_USER || 
-                      process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.MINIO_SECRET_KEY || 
-                          process.env.MINIO_ROOT_PASSWORD || 
-                          process.env.AWS_SECRET_ACCESS_KEY;
-  const region = process.env.MINIO_REGION || 
-                 process.env.AWS_REGION || 
+// MIGRATION NOTE: This code now supports both MinIO and AWS S3 seamlessly.
+// It automatically detects which one to use based on environment variables.
+if (DRIVER === 's3' || process.env.MINIO_ENABLED === 'true' || process.env.AWS_ACCESS_KEY_ID) {
+  // Support both MinIO and AWS S3 environment variables
+  // Priority: AWS S3 vars first (for migration), then MinIO vars (for backward compatibility)
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID || 
+                      process.env.MINIO_ACCESS_KEY || 
+                      process.env.MINIO_ROOT_USER;
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || 
+                          process.env.MINIO_SECRET_KEY || 
+                          process.env.MINIO_ROOT_PASSWORD;
+  const region = process.env.AWS_REGION || 
                  process.env.AWS_DEFAULT_REGION || 
+                 process.env.MINIO_REGION || 
                  'us-east-1';
-  const useSSL = process.env.MINIO_USE_SSL === 'true' || 
-                 process.env.MINIO_USE_SSL === '1' ||
-                 (endpoint && endpoint.startsWith('https://'));
   
-  // Construct full endpoint URL if port is separate
-  let fullEndpoint = endpoint;
-  if (endpoint && !endpoint.includes(':')) {
-    const protocol = useSSL ? 'https' : 'http';
-    fullEndpoint = `${protocol}://${endpoint}:${port}`;
-  }
+  // Detect if this is AWS S3 or MinIO
+  // AWS S3 indicators: endpoint contains 'amazonaws.com' or 's3.', or no custom endpoint is set
+  const customEndpoint = process.env.AWS_S3_ENDPOINT || process.env.MINIO_ENDPOINT;
+  const isAWS = !customEndpoint || 
+                customEndpoint.includes('amazonaws.com') || 
+                customEndpoint.includes('s3.') ||
+                (process.env.AWS_ACCESS_KEY_ID && !process.env.MINIO_ENABLED);
   
-  // Determine public URL for presigned URLs (browser access)
-  // If MINIO_PUBLIC_URL is set, use it; otherwise convert internal hostname to localhost
-  let publicEndpoint = process.env.MINIO_PUBLIC_URL;
-  if (!publicEndpoint) {
-    if (fullEndpoint && fullEndpoint.includes('minio:')) {
-      // Replace internal Docker hostname with localhost for browser access
-      publicEndpoint = fullEndpoint.replace(/minio:\d+/, 'localhost:9000');
+  let fullEndpoint = null;
+  let publicEndpoint = null;
+  let useSSL = false;
+  let forcePathStyle = true; // Default to path-style (works for both MinIO and AWS S3)
+  
+  if (isAWS) {
+    // AWS S3 Configuration
+    // AWS S3 uses region-based endpoints or custom endpoints without ports
+    if (customEndpoint) {
+      // Custom endpoint (e.g., for S3-compatible services or custom domains)
+      fullEndpoint = customEndpoint;
+      if (!fullEndpoint.startsWith('http')) {
+        useSSL = process.env.AWS_USE_SSL !== 'false';
+        const protocol = useSSL ? 'https' : 'http';
+        fullEndpoint = `${protocol}://${fullEndpoint}`;
+      } else {
+        useSSL = fullEndpoint.startsWith('https');
+      }
     } else {
-      publicEndpoint = fullEndpoint;
+      // Standard AWS S3 endpoint - SDK will construct it automatically
+      // We don't set endpoint for standard AWS S3, let the SDK handle it
+      fullEndpoint = undefined;
+      useSSL = true;
+      // AWS S3 can use virtual-hosted style, but path-style is safer and works everywhere
+      forcePathStyle = process.env.AWS_FORCE_PATH_STYLE !== 'false';
     }
-  }
-  // Ensure publicEndpoint has protocol
-  if (publicEndpoint && !publicEndpoint.startsWith('http')) {
-    const protocol = useSSL ? 'https' : 'http';
-    publicEndpoint = `${protocol}://${publicEndpoint}`;
+    publicEndpoint = fullEndpoint; // AWS S3 doesn't need separate public endpoint
+    
+    console.log(`[storage] Detected AWS S3 configuration (region: ${region})`);
+  } else {
+    // MinIO Configuration (backward compatibility)
+    const endpoint = customEndpoint;
+    const port = process.env.MINIO_PORT || '9000';
+    useSSL = process.env.MINIO_USE_SSL === 'true' || 
+             process.env.MINIO_USE_SSL === '1' ||
+             (endpoint && endpoint.startsWith('https://'));
+    
+    // Construct full endpoint URL if port is separate
+    if (endpoint && !endpoint.includes(':')) {
+      const protocol = useSSL ? 'https' : 'http';
+      fullEndpoint = `${protocol}://${endpoint}:${port}`;
+    } else if (endpoint) {
+      fullEndpoint = endpoint;
+    }
+    
+    // Determine public URL for presigned URLs (browser access)
+    // If MINIO_PUBLIC_URL is set, use it; otherwise convert internal hostname to localhost
+    publicEndpoint = process.env.MINIO_PUBLIC_URL;
+    if (!publicEndpoint) {
+      if (fullEndpoint && fullEndpoint.includes('minio:')) {
+        // Replace internal Docker hostname with localhost for browser access
+        publicEndpoint = fullEndpoint.replace(/minio:\d+/, 'localhost:9000');
+      } else {
+        publicEndpoint = fullEndpoint;
+      }
+    }
+    // Ensure publicEndpoint has protocol
+    if (publicEndpoint && !publicEndpoint.startsWith('http')) {
+      const protocol = useSSL ? 'https' : 'http';
+      publicEndpoint = `${protocol}://${publicEndpoint}`;
+    }
+    
+    forcePathStyle = true; // Required for MinIO
+    console.log(`[storage] Detected MinIO configuration (endpoint: ${fullEndpoint})`);
   }
   
   if (!S3_BUCKET) {
     console.warn(
       '[storage] MINIO_BUCKET_ONBOARDING/DOCS_STORAGE_BUCKET/MINIO_BUCKET missing, falling back to local storage'
     );
-  } else if (fullEndpoint && accessKeyId && secretAccessKey) {
+  } else if (accessKeyId && secretAccessKey) {
     try {
-      s3Client = new S3Client({
+      // Build S3 client configuration
+      const s3Config = {
         region: region,
-        endpoint: fullEndpoint,
         credentials: {
           accessKeyId: accessKeyId,
           secretAccessKey: secretAccessKey,
         },
-        forcePathStyle: true, // Required for MinIO
-        // Disable SSL verification for local MinIO (can be overridden)
-        ...(process.env.MINIO_SSL_VERIFY === 'false' ? {
-          requestHandler: {
-            httpsAgent: new (require('https').Agent)({
-              rejectUnauthorized: false
-            })
-          }
-        } : {}),
-      });
-      console.log(`[storage] Initialized S3 client for ${fullEndpoint} with bucket ${S3_BUCKET}`);
+        forcePathStyle: forcePathStyle,
+      };
+      
+      // Only set endpoint if it's a custom endpoint (MinIO or custom S3-compatible)
+      if (fullEndpoint) {
+        s3Config.endpoint = fullEndpoint;
+      }
+      
+      // Disable SSL verification for local MinIO (can be overridden)
+      if (!isAWS && process.env.MINIO_SSL_VERIFY === 'false') {
+        s3Config.requestHandler = {
+          httpsAgent: new (require('https').Agent)({
+            rejectUnauthorized: false
+          })
+        };
+      }
+      
+      s3Client = new S3Client(s3Config);
+      const endpointDisplay = fullEndpoint || `s3.${region}.amazonaws.com (AWS S3)`;
+      console.log(`[storage] ✅ Initialized S3 client for ${endpointDisplay} with bucket ${S3_BUCKET}`);
       usingS3 = true;
       
       // Create a separate S3 client for presigned URLs using the public endpoint
       // This ensures presigned URLs are signed for the correct hostname (localhost vs minio)
-      if (publicEndpoint && publicEndpoint !== fullEndpoint) {
+      // For AWS S3, this is usually not needed, but we keep it for MinIO compatibility
+      if (!isAWS && publicEndpoint && publicEndpoint !== fullEndpoint) {
         try {
           s3ClientPublic = new S3Client({
             region: region,
@@ -117,22 +175,26 @@ if (DRIVER === 's3' || process.env.MINIO_ENABLED === 'true') {
           s3ClientPublic = s3Client; // Fallback to internal client
         }
       } else {
-        s3ClientPublic = s3Client; // Use same client if endpoints match
+        s3ClientPublic = s3Client; // Use same client if endpoints match or for AWS S3
       }
       
       // Try to ensure bucket exists during initialization (non-blocking)
       // It will be retried on server startup in server/index.js
+      // Note: For AWS S3, bucket must already exist (AWS doesn't auto-create)
       ensureBucketExists(S3_BUCKET).catch(err => {
         console.warn(`[storage] ⚠️  Bucket creation during init failed: ${err.message}`);
         console.warn(`[storage]    Bucket will be created on server startup or first use`);
+        if (isAWS) {
+          console.warn(`[storage]    Note: AWS S3 buckets must be created manually or via infrastructure`);
+        }
       });
     } catch (error) {
       console.error('[storage] Failed to initialize S3 client:', error.message);
       console.warn('[storage] Falling back to local storage');
     }
   } else {
-      console.warn('[storage] Missing MinIO/S3 credentials, falling back to local storage');
-      console.warn(`[storage] Endpoint: ${fullEndpoint || 'missing'}, AccessKey: ${accessKeyId ? 'provided' : 'missing'}, SecretKey: ${secretAccessKey ? 'provided' : 'missing'}`);
+      console.warn('[storage] Missing S3 credentials, falling back to local storage');
+      console.warn(`[storage] Endpoint: ${fullEndpoint || 'AWS S3 (default)'}, AccessKey: ${accessKeyId ? 'provided' : 'missing'}, SecretKey: ${secretAccessKey ? 'provided' : 'missing'}`);
   }
 }
 
@@ -303,10 +365,14 @@ export async function calculateChecksum(buffer) {
  * Ensure S3 bucket exists, create if it doesn't
  * @param {string} bucketName - Name of the bucket
  * @returns {Promise<void>}
+ * 
+ * MIGRATION NOTE: For AWS S3, buckets typically need to be created manually via AWS Console/CLI.
+ * This function will attempt to create the bucket, but may fail due to AWS permissions.
+ * For MinIO, buckets are created automatically if they don't exist.
  */
 export async function ensureBucketExists(bucketName) {
   if (!usingS3 || !s3Client) {
-    console.warn(`[storage] Cannot create bucket ${bucketName}: S3/MinIO is not configured`);
+    console.warn(`[storage] Cannot create bucket ${bucketName}: S3 is not configured`);
     return; // Not using S3, skip
   }
 
@@ -318,14 +384,24 @@ export async function ensureBucketExists(bucketName) {
       return;
     } catch (error) {
       if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404 || error.Code === 'NoSuchBucket') {
-        // Bucket doesn't exist, create it
+        // Bucket doesn't exist, try to create it
+        // Note: AWS S3 may require manual bucket creation or specific permissions
         try {
           console.log(`[storage] Creating bucket '${bucketName}'...`);
           await s3Client.send(new CreateBucketCommand({ Bucket: bucketName }));
           console.log(`[storage] ✅ Successfully created bucket '${bucketName}'`);
         } catch (createError) {
+          // For AWS S3, bucket creation might fail due to:
+          // - Bucket already exists in another region
+          // - Insufficient permissions
+          // - Bucket name conflicts
           console.error(`[storage] ❌ Failed to create bucket '${bucketName}':`, createError.message);
           console.error(`[storage] Error details:`, createError);
+          if (createError.name === 'BucketAlreadyOwnedByYou' || createError.Code === 'BucketAlreadyOwnedByYou') {
+            console.log(`[storage] ℹ️  Bucket exists but may be in a different region`);
+          } else {
+            console.warn(`[storage] ⚠️  For AWS S3, ensure the bucket exists manually or check IAM permissions`);
+          }
           throw createError;
         }
       } else {
@@ -338,10 +414,11 @@ export async function ensureBucketExists(bucketName) {
   } catch (error) {
     console.error(`[storage] ❌ Error ensuring bucket '${bucketName}' exists:`, error.message);
     console.error(`[storage] This may indicate:`);
-    console.error(`[storage]   1. MinIO is not running or not accessible`);
-    console.error(`[storage]   2. Incorrect credentials (MINIO_ACCESS_KEY/MINIO_SECRET_KEY)`);
+    console.error(`[storage]   1. Storage service (S3/MinIO) is not running or not accessible`);
+    console.error(`[storage]   2. Incorrect credentials (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or MINIO_ACCESS_KEY/MINIO_SECRET_KEY)`);
     console.error(`[storage]   3. Network connectivity issues`);
-    console.error(`[storage]   4. Insufficient permissions`);
+    console.error(`[storage]   4. Insufficient permissions (for AWS S3, check IAM policies)`);
+    console.error(`[storage]   5. Bucket needs to be created manually (common for AWS S3)`);
     // Don't throw - allow fallback to local storage, but log the issue clearly
   }
 }
