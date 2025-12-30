@@ -26,6 +26,13 @@ import {
   ArrowUpCircle,
   ShieldAlert,
   Download,
+  Database,
+  Key,
+  Shield,
+  Server,
+  Cloud,
+  Globe,
+  Lock,
 } from "lucide-react";
 
 export type NavItem = {
@@ -47,7 +54,7 @@ export type NavGroup = {
 export const roleNavItems: Record<string, NavGroup[]> = {
   employee: [
     {
-      id: "employee-overview",
+      id: "overview",
       label: "Overview",
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -55,180 +62,130 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       ],
     },
     {
-      id: "employee-self",
-      label: "My Workspace",
+      id: "work",
+      label: "Work",
       items: [
-        { title: "My Profile", url: "/my/profile", icon: Users },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "My Shifts", url: "/my/shifts", icon: CalendarClock },
-        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
         { title: "Leave Requests", url: "/leaves", icon: Calendar },
-        { title: "Request Resignation", url: "/offboarding/new", icon: LogOut },
-        { title: "Documents", url: "/documents", icon: Inbox },
-        { title: "My Appraisal", url: "/my-appraisal", icon: Award },
       ],
     },
     {
-      id: "employee-payroll",
-      label: "Payroll",
-      items: [
-        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
-      ],
-    },
-    {
-      id: "employee-compliance",
-      label: "Compliance",
-      items: [
-        { title: "Tax Declaration", url: "/tax/declaration", icon: Receipt },
-        { title: "Form 16", url: "/reports/form16", icon: Receipt },
-      ],
-    },
-    {
-      id: "employee-org",
-      label: "Company",
+      id: "people",
+      label: "People",
       items: [
         { title: "Org Chart", url: "/org-chart", icon: Network },
-        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
+      ],
+    },
+    {
+      id: "governance",
+      label: "Governance",
+      items: [
+        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
+        { title: "Tax Declaration", url: "/tax/declaration", icon: Receipt },
+        { title: "Form 16", url: "/reports/form16", icon: Receipt },
       ],
     },
   ],
   admin: [
     {
-      id: "admin-overview",
+      id: "overview",
       label: "Overview",
       items: [
-        { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-        { title: "Analytics", url: "/analytics", icon: BarChart3 },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        { title: "System Dashboard", url: "/superadmin", icon: LayoutDashboard },
+        { title: "Usage Analytics", url: "/admin", icon: BarChart3 },
       ],
     },
     {
-      id: "admin-people",
-      label: "People Operations",
+      id: "work",
+      label: "Work",
       items: [
-        { title: "My Profile", url: "/my/profile", icon: Users },
-        { title: "Employees", url: "/employees", icon: Users },
-        { title: "Teams", url: "/teams", icon: Building2 },
-        { title: "Projects", url: "/projects", icon: Briefcase },
-        { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
-        { title: "Offboarding", url: "/offboarding", icon: LogOut },
-        { title: "Org Chart", url: "/org-chart", icon: Network },
-        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
-        { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
-        { title: "Policy Management", url: "/policies/management", icon: FileText },
-        { title: "New Project", url: "/projects/new", icon: Building2 },
-        { title: "Background Checks", url: "/background-checks", icon: UserCheck },
-        { title: "Appraisals", url: "/appraisals", icon: Award },
-        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle },
-        { title: "Workflows", url: "/workflows", icon: GitBranch, roles: ["admin", "hr", "ceo"] },
-        { title: "Audit Logs", url: "/audit-logs", icon: ShieldAlert, roles: ["admin", "hr", "ceo"] },
+        { title: "Tenant Management", url: "/superadmin", icon: Database },
+        { title: "Data Imports", url: "/employees/import", icon: Upload },
+        { title: "Integrations", url: "/settings", icon: Cloud },
       ],
     },
     {
-      id: "admin-attendance",
-      label: "Attendance & Leave",
+      id: "people",
+      label: "People",
       items: [
-        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
-        { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
-        { title: "Timesheet", url: "/timesheets", icon: Clock },
-        { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
-        { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
-        { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
-        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock, roles: ["manager","hr","ceo"] },
-        { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
+        { title: "Role Management", url: "/settings", icon: Key },
+        { title: "Permission Mapping", url: "/settings", icon: Shield },
       ],
     },
     {
-      id: "admin-payroll",
-      label: "Payroll",
+      id: "governance",
+      label: "Governance",
       items: [
-        { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
-      ],
-    },
-    {
-      id: "admin-compliance",
-      label: "Compliance",
-      items: [
-        { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
-        { title: "Form 16", url: "/reports/form16", icon: Receipt },
-        { title: "Attendance Upload", url: "/attendance/upload", icon: Upload },
-        { title: "Upload History", url: "/attendance/history", icon: History },
+        { title: "Global Policies", url: "/policies/management", icon: FileText },
+        { title: "Audit Logs", url: "/audit-logs", icon: ShieldAlert },
+        { title: "Security", url: "/settings", icon: Lock },
+        { title: "Compliance", url: "/settings", icon: Shield },
       ],
     },
   ],
   hr: [
     {
-      id: "hr-overview",
+      id: "overview",
       label: "Overview",
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         { title: "Analytics", url: "/analytics", icon: BarChart3 },
+        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
         { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {
-      id: "hr-people",
-      label: "People Operations",
+      id: "work",
+      label: "Work",
       items: [
-        { title: "My Profile", url: "/my/profile", icon: Users },
-        { title: "Employees", url: "/employees", icon: Users },
-        { title: "Teams", url: "/teams", icon: Building2 },
-        { title: "Projects", url: "/projects", icon: Briefcase },
-        { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
-        { title: "Offboarding", url: "/offboarding", icon: LogOut },
-        { title: "Org Chart", url: "/org-chart", icon: Network },
-        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
-        { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
-        { title: "Policy Management", url: "/policies/management", icon: FileText },
-        { title: "New Project", url: "/projects/new", icon: Building2 },
-        { title: "Background Checks", url: "/background-checks", icon: UserCheck },
-        { title: "Appraisals", url: "/appraisals", icon: Award },
-        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle },
-        { title: "Workflows", url: "/workflows", icon: GitBranch, roles: ["admin", "hr", "ceo"] },
-        { title: "Audit Logs", url: "/audit-logs", icon: ShieldAlert, roles: ["admin", "hr", "ceo"] },
-      ],
-    },
-    {
-      id: "hr-attendance",
-      label: "Attendance & Leave",
-      items: [
-        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
-        { title: "Timesheet", url: "/timesheets", icon: Clock },
-        { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
-        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock, roles: ["manager","hr","ceo"] },
-        { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
+        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock },
         { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
-        { title: "Leave Policies", url: "/policies", icon: FileText },
-        { title: "Probation Policies", url: "/probation-policies", icon: UserCheck, roles: ["admin", "hr", "ceo"] },
-      ],
-    },
-    {
-      id: "hr-compliance",
-      label: "Compliance",
-      items: [
         { title: "Attendance Upload", url: "/attendance/upload", icon: Upload },
         { title: "Upload History", url: "/attendance/history", icon: History },
-        { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
-        { title: "Form 16", url: "/reports/form16", icon: Receipt },
+        { title: "Leave Policies", url: "/policies", icon: FileText },
+        { title: "Probation Policies", url: "/probation-policies", icon: UserCheck },
+        { title: "Timesheet", url: "/timesheets", icon: Clock },
+        { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
+        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
+        { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
+        { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
+        { title: "Offboarding", url: "/offboarding", icon: LogOut },
+        { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
+        { title: "Background Check", url: "/background-checks", icon: UserCheck },
       ],
     },
     {
-      id: "hr-payroll",
-      label: "Payroll",
+      id: "people",
+      label: "People",
+      items: [
+        { title: "Employees", url: "/employees", icon: Users },
+        { title: "Teams", url: "/teams", icon: Building2 },
+        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle },
+        { title: "Projects", url: "/projects", icon: Briefcase },
+        { title: "Org Chart", url: "/org-chart", icon: Network },
+      ],
+    },
+    {
+      id: "governance",
+      label: "Governance",
       items: [
         { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
+        { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
+        { title: "Form 16", url: "/reports/form16", icon: Receipt },
+        { title: "Policy Management", url: "/policies/management", icon: FileText },
+        { title: "Workflow", url: "/workflows", icon: GitBranch },
+        { title: "Audit Logs", url: "/audit-logs", icon: ShieldAlert },
       ],
     },
   ],
   ceo: [
     {
-      id: "ceo-overview",
+      id: "overview",
       label: "Overview",
       items: [
         { title: "CEO Dashboard", url: "/ceo/dashboard", icon: BarChart3 },
@@ -237,64 +194,41 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       ],
     },
     {
-      id: "ceo-people",
-      label: "People Operations",
+      id: "work",
+      label: "Work",
+      items: [
+        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
+        { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
+        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock },
+        { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
+      ],
+    },
+    {
+      id: "people",
+      label: "People",
       items: [
         { title: "Employees", url: "/employees", icon: Users },
         { title: "Teams", url: "/teams", icon: Building2 },
+        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle },
         { title: "Projects", url: "/projects", icon: Briefcase },
-        { title: "Onboarding", url: "/onboarding-tracker", icon: UserCheck },
-        { title: "Offboarding", url: "/offboarding", icon: LogOut },
         { title: "Org Chart", url: "/org-chart", icon: Network },
-        { title: "Hierarchy", url: "/organization/hierarchy", icon: Network },
-        { title: "Offboarding Policies", url: "/offboarding/policies", icon: ClipboardList },
-        { title: "Policy Management", url: "/policies/management", icon: FileText },
-        { title: "New Project", url: "/projects/new", icon: Building2 },
-        { title: "Workflows", url: "/workflows", icon: GitBranch, roles: ["admin", "hr", "ceo"] },
-        { title: "Appraisals", url: "/appraisals", icon: Award },
-        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle, roles: ["admin", "hr", "ceo", "director", "manager"] },
       ],
     },
     {
-      id: "ceo-attendance",
-      label: "Attendance & Leave",
-      items: [
-        { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
-        { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
-        { title: "Timesheet", url: "/timesheets", icon: Clock },
-        { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
-        { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
-        { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
-        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock, roles: ["manager","hr","ceo"] },
-        { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
-        { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
-        { title: "Leave Policies", url: "/policies", icon: FileText },
-        { title: "Probation Policies", url: "/probation-policies", icon: UserCheck, roles: ["admin", "hr", "ceo"] },
-      ],
-    },
-    {
-      id: "ceo-compliance",
-      label: "Compliance",
-      items: [
-        { title: "Attendance Upload", url: "/attendance/upload", icon: Upload },
-        { title: "Upload History", url: "/attendance/history", icon: History },
-        { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
-        { title: "Form 16", url: "/reports/form16", icon: Receipt },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
-      ],
-    },
-    {
-      id: "ceo-payroll",
-      label: "Payroll",
+      id: "governance",
+      label: "Governance",
       items: [
         { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
+        { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
+        { title: "Form 16", url: "/reports/form16", icon: Receipt },
+        { title: "Policy Management", url: "/policies/management", icon: FileText },
+        { title: "Audit Logs", url: "/audit-logs", icon: ShieldAlert },
       ],
     },
   ],
   manager: [
     {
-      id: "manager-overview",
+      id: "overview",
       label: "Overview",
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -302,40 +236,34 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       ],
     },
     {
-      id: "manager-people",
-      label: "People Operations",
-      items: [
-        { title: "My Profile", url: "/my/profile", icon: Users },
-        { title: "Employees", url: "/employees", icon: Users },
-        { title: "Org Chart", url: "/org-chart", icon: Network },
-        { title: "Appraisals", url: "/appraisals", icon: Award },
-        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle, roles: ["admin", "hr", "ceo", "director", "manager"] },
-      ],
-    },
-    {
-      id: "manager-attendance",
-      label: "Attendance & Leave",
+      id: "work",
+      label: "Work",
       items: [
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
+        { title: "My Shifts", url: "/my/shifts", icon: CalendarClock },
+        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
-        { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
+        { title: "Team Schedule", url: "/team-schedule", icon: CalendarDays },
+        { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true },
       ],
     },
     {
-      id: "manager-payroll",
-      label: "Payroll",
+      id: "people",
+      label: "People",
+      items: [
+        { title: "Employees", url: "/employees", icon: Users },
+        { title: "Promotions", url: "/promotions", icon: ArrowUpCircle },
+        { title: "Org Chart", url: "/org-chart", icon: Network },
+      ],
+    },
+    {
+      id: "governance",
+      label: "Governance",
       items: [
         { title: "Payroll", url: "/payroll", icon: DollarSign, sso: true },
-      ],
-    },
-    {
-      id: "manager-compliance",
-      label: "Compliance",
-      items: [
-        { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
+        { title: "Tax Declaration", url: "/tax/declaration", icon: Receipt },
         { title: "Form 16", url: "/reports/form16", icon: Receipt },
       ],
     },
@@ -400,6 +328,60 @@ export const getMenuItemsForProfile = (config: NavigationConfig): NavGroup[] => 
       items: group.items.filter(shouldRenderItem),
     }))
     .filter((group) => group.items.length > 0);
+};
+
+export type AvatarDropdownItem = {
+  title: string;
+  url: string;
+  icon: typeof LayoutDashboard;
+};
+
+export const getAvatarDropdownItems = (userRole?: string): AvatarDropdownItem[] => {
+  const role = (userRole || '').toLowerCase();
+  
+  switch (role) {
+    case 'employee':
+      return [
+        { title: 'My Profile', url: '/my/profile', icon: Users },
+        { title: 'Documents', url: '/documents', icon: Inbox },
+        { title: 'My Appraisal', url: '/my-appraisal', icon: Award },
+        { title: 'Request Resignation', url: '/offboarding/new', icon: LogOut },
+        { title: 'Settings', url: '/settings', icon: Settings },
+        { title: 'Logout', url: '/auth/login', icon: LogOut },
+      ];
+    case 'manager':
+      return [
+        { title: 'My Profile', url: '/my/profile', icon: Users },
+        { title: 'Documents', url: '/documents', icon: Inbox },
+        { title: 'My Appraisal', url: '/my-appraisal', icon: Award },
+        { title: 'Settings', url: '/settings', icon: Settings },
+        { title: 'Logout', url: '/auth/login', icon: LogOut },
+      ];
+    case 'hr':
+      return [
+        { title: 'My Profile', url: '/my/profile', icon: Users },
+        { title: 'Documents', url: '/documents', icon: Inbox },
+        { title: 'My Appraisal', url: '/my-appraisal', icon: Award },
+        { title: 'Settings', url: '/settings', icon: Settings },
+        { title: 'Logout', url: '/auth/login', icon: LogOut },
+      ];
+    case 'ceo':
+      return [
+        { title: 'Settings', url: '/settings', icon: Settings },
+        { title: 'Logout', url: '/auth/login', icon: LogOut },
+      ];
+    case 'admin':
+      return [
+        { title: 'Platform Settings', url: '/settings', icon: Settings },
+        { title: 'Logout', url: '/auth/login', icon: LogOut },
+      ];
+    default:
+      return [
+        { title: 'My Profile', url: '/my/profile', icon: Users },
+        { title: 'Settings', url: '/settings', icon: Settings },
+        { title: 'Logout', url: '/auth/login', icon: LogOut },
+      ];
+  }
 };
 
 

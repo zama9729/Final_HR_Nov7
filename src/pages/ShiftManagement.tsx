@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -208,9 +209,8 @@ export default function ShiftManagement() {
   const loadEmployees = async () => {
     try {
       const data = await api.getEmployees();
-      setEmployees(
-        (Array.isArray(data) ? data : []).filter((emp: any) => emp.status === "active")
-      );
+      // Get all employees - filtering by status should be explicit and user-controlled
+      setEmployees(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Employee load failed", error);
     }
@@ -1145,25 +1145,21 @@ export default function ShiftManagement() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div>
-                <Label>Start date</Label>
-                <Input
-                  type="date"
-                  value={generateForm.startDate}
-                  onChange={(e) =>
-                    setGenerateForm((prev) => ({ ...prev, startDate: e.target.value }))
-                  }
-                />
-              </div>
-              <div>
-                <Label>End date</Label>
-                <Input
-                  type="date"
-                  value={generateForm.endDate}
-                  onChange={(e) => setGenerateForm((prev) => ({ ...prev, endDate: e.target.value }))}
-                />
-              </div>
+            <div>
+              <Label>Date range</Label>
+              <DateRangePicker
+                startDate={generateForm.startDate ? parseISO(generateForm.startDate) : undefined}
+                endDate={generateForm.endDate ? parseISO(generateForm.endDate) : undefined}
+                onChange={(start, end) => {
+                  setGenerateForm((prev) => ({
+                    ...prev,
+                    startDate: start ? format(start, "yyyy-MM-dd") : "",
+                    endDate: end ? format(end, "yyyy-MM-dd") : "",
+                  }));
+                }}
+                mode="range"
+                placeholder="Select date range"
+              />
             </div>
             <div className="flex items-center justify-between rounded border p-3">
               <div>

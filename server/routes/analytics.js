@@ -118,13 +118,12 @@ router.get('/', authenticateToken, setTenantContext, requireRole('ceo', 'hr', 'd
       orgId
     );
 
-    // Overall stats - ensure all subqueries are properly scoped
-    // Use COALESCE to handle NULL status as 'active' and exclude only terminated/on_hold/resigned
+    // Overall stats - return ALL employees (no implicit filtering by status)
+    // Total employees should reflect all employees regardless of status
     const overallResult = await queryWithOrg(
       `SELECT 
          (SELECT COUNT(*) FROM employees 
-          WHERE tenant_id = $1 
-            AND COALESCE(status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')) as total_employees,
+          WHERE tenant_id = $1) as total_employees,
          (SELECT COUNT(DISTINCT e.id) FROM employees e 
           WHERE e.tenant_id = $1 
             AND COALESCE(e.status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')
@@ -209,16 +208,29 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
     // Build branch filter
     const branchFilter = branch_id ? 'AND ae.work_location_branch_id = $4' : '';
 
-    // Total employees - count ALL active employees, not just those with attendance events
+    // Total employees - count ALL employees (no implicit status filtering)
+    // Note: For attendance metrics, we may filter to active employees in specific queries below,
+    // but the total count should reflect all employees
     const totalEmployeesResult = await queryWithOrg(
       `SELECT COUNT(*) as count
        FROM employees
-       WHERE tenant_id = $1 
-         AND COALESCE(status, 'active') NOT IN ('terminated', 'on_hold', 'resigned')`,
+       WHERE tenant_id = $1`,
       [orgId],
       orgId
     );
     const totalEmployees = parseInt(totalEmployeesResult.rows[0]?.count || '0');
+    
+    // For attendance-specific metrics, we count active employees only (explicit filter)
+    // This is a business rule: attendance tracking applies to active employees
+    const activeEmployeesResult = await queryWithOrg(
+      `SELECT COUNT(*) as count
+       FROM employees
+       WHERE tenant_id = $1 
+         AND COALESCE(status, 'active') = 'active'`,
+      [orgId],
+      orgId
+    );
+    const activeEmployees = parseInt(activeEmployeesResult.rows[0]?.count || '0');
     
     console.log(`[Analytics Attendance Overview] OrgId: ${orgId}, Total Employees: ${totalEmployees}`);
 
@@ -240,7 +252,8 @@ router.get('/attendance/overview', authenticateToken, setTenantContext, requireR
       orgId
     );
     const todayPresent = parseInt(todayPresentResult.rows[0]?.count || '0');
-    const todayPresentPercent = totalEmployees > 0 ? Math.round((todayPresent / totalEmployees) * 100) : 0;
+    // Use activeEmployees for percentage calculation (attendance is only relevant for active employees)
+    const todayPresentPercent = activeEmployees > 0 ? Math.round((todayPresent / activeEmployees) * 100) : 0;
 
     // On-time percentage (assuming 9 AM as standard start time)
     const onTimeParams = [orgId, fromDate, toDate];

@@ -11,6 +11,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { User, Briefcase, Clock, DollarSign, Calendar } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
+import { format } from "date-fns";
 
 interface EmployeeStat {
   employee_id: string;
@@ -42,8 +44,8 @@ export default function EmployeeStats() {
   const { toast } = useToast();
   const [stats, setStats] = useState<EmployeeStat[]>([]);
   const [loading, setLoading] = useState(true);
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
+  const [startDate, setStartDate] = useState<Date | undefined>();
+  const [endDate, setEndDate] = useState<Date | undefined>();
   const [allocationFilter, setAllocationFilter] = useState<string>('all');
   const [billableFilter, setBillableFilter] = useState<string>('all');
   const [weeklyHoursFilter, setWeeklyHoursFilter] = useState<string>('all');
@@ -64,8 +66,8 @@ export default function EmployeeStats() {
     try {
       setLoading(true);
       const params: any = {};
-      if (startDate) params.startDate = startDate;
-      if (endDate) params.endDate = endDate;
+      if (startDate) params.startDate = format(startDate, "yyyy-MM-dd");
+      if (endDate) params.endDate = format(endDate, "yyyy-MM-dd");
       
       const data = await api.getEmployeeStats(params);
       // Ensure data is an array
@@ -169,23 +171,16 @@ export default function EmployeeStats() {
               <span className="font-bold text-lg">Filters</span>
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                <Label htmlFor="startDate" className="text-sm">Start Date</Label>
-                <Input
-                  id="startDate"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-auto h-9"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="endDate" className="text-sm">End Date</Label>
-                <Input
-                  id="endDate"
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-auto h-9"
+                <DateRangePicker
+                  startDate={startDate}
+                  endDate={endDate}
+                  onChange={(start, end) => {
+                    setStartDate(start);
+                    setEndDate(end);
+                  }}
+                  mode="range"
+                  placeholder="Select date range"
+                  className="h-9"
                 />
               </div>
               <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>

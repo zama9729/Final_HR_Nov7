@@ -22,7 +22,7 @@ async function loadOpenAI() {
 // Initialize OpenAI client
 let openaiClient = null;
 
-async function getOpenAIClient() {
+export async function getOpenAIClient() {
   // Try to load OpenAI if not already loaded
   if (!OpenAI && !openaiImportAttempted) {
     await loadOpenAI();

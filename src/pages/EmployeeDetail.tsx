@@ -52,6 +52,7 @@ import { format, differenceInCalendarDays } from 'date-fns';
 import { DocumentReviewPanel } from '@/components/hr/DocumentReviewPanel';
 import { BackgroundCheckPanel } from '@/components/hr/BackgroundCheckPanel';
 import { TeamReportingSection } from '@/components/TeamReportingSection';
+import { SmartMemoAI } from '@/components/smartmemo/SmartMemoAI';
 
 // Helper component to display team members
 function TeamMembersList({ teamId, employeeId }: { teamId: string; employeeId: string }) {
@@ -521,6 +522,24 @@ export default function EmployeeDetail() {
             </DropdownMenu>
           )}
         </div>
+
+        {/* Smart Memo Widget - Contextual to Employee */}
+        {employee?.id && (
+          <Card className="border-purple-200 bg-purple-50/30">
+            <CardContent className="pt-4">
+              <SmartMemoAI
+                embedded={true}
+                currentEntityId={employee.id}
+                currentEntityType="employee"
+                currentEntityName={getFullName()}
+                onEventsCreated={() => {
+                  // Refresh if needed
+                  window.dispatchEvent(new CustomEvent('smart-memo-created'));
+                }}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Profile Header Card */}
         <Card>

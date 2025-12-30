@@ -14,8 +14,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
 import { DateRange } from "react-day-picker";
 
 interface TimesheetEntry {
@@ -71,7 +70,6 @@ export default function Timesheets() {
   const [employeeId, setEmployeeId] = useState<string>('');
   const [employeeState, setEmployeeState] = useState<string>('');
   const [assignedProjects, setAssignedProjects] = useState<Array<{id: string; project_id: string; project_name: string}>>([]);
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfWeek(new Date(), { weekStartsOn: 1 }),
@@ -93,36 +91,40 @@ export default function Timesheets() {
     });
   }, [currentWeek]);
 
-  // Handle date range selection from calendar
-  const handleDateRangeSelect = (range: DateRange | undefined) => {
-    if (range?.from) {
-      const weekStart = startOfWeek(range.from, { weekStartsOn: 1 });
+  // Handle date range selection from DateRangePicker
+  const handleDateRangeSelect = (start: Date | undefined, end: Date | undefined) => {
+    if (start) {
+      const weekStart = startOfWeek(start, { weekStartsOn: 1 });
       const weekEnd = addDays(weekStart, 6);
       
-      // If only 'from' is selected, auto-select the full week
-      if (!range.to) {
+      // If only start is selected, auto-select the full week
+      if (!end) {
         const fullWeekRange: DateRange = {
           from: weekStart,
           to: weekEnd,
         };
         setDateRange(fullWeekRange);
         setCurrentWeek(weekStart);
-        setCalendarOpen(false);
         return;
       }
       
-      // If range has both from and to, set currentWeek to start of week containing 'from'
+      // If range has both start and end, set currentWeek to start of week containing start
+      const range: DateRange = {
+        from: start,
+        to: end,
+      };
       setDateRange(range);
       setCurrentWeek(weekStart);
       
       // If the range spans multiple weeks, ensure we show the week containing the start date
-      const toWeekStart = startOfWeek(range.to, { weekStartsOn: 1 });
+      const toWeekStart = startOfWeek(end, { weekStartsOn: 1 });
       if (toWeekStart.getTime() !== weekStart.getTime()) {
         // If selection spans multiple weeks, use the week containing the start date
         setCurrentWeek(weekStart);
       }
-      
-      setCalendarOpen(false);
+    } else {
+      // Clear selection
+      setDateRange(undefined);
     }
   };
 
@@ -1081,39 +1083,14 @@ export default function Timesheets() {
         </div>
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           <div className="flex flex-wrap gap-2 items-center">
-            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 border-2 bg-background/50 backdrop-blur-sm"
-                >
-                  <CalendarIcon className="h-4 w-4" />
-                  {dateRange?.from ? (
-                    dateRange.to ? (
-                      <>
-                        {format(dateRange.from, "MMM dd")} - {format(dateRange.to, "MMM dd, yyyy")}
-                      </>
-                    ) : (
-                      format(dateRange.from, "MMM dd, yyyy")
-                    )
-                  ) : (
-                    "Pick a date range"
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <Calendar
-                  initialFocus
-                  mode="range"
-                  defaultMonth={dateRange?.from}
-                  selected={dateRange}
-                  onSelect={handleDateRangeSelect}
-                  numberOfMonths={2}
-                  weekStartsOn={1}
-                />
-              </PopoverContent>
-            </Popover>
+            <DateRangePicker
+              startDate={dateRange?.from}
+              endDate={dateRange?.to}
+              onChange={handleDateRangeSelect}
+              mode="range"
+              placeholder="Pick a date range"
+              className="border-2 bg-background/50 backdrop-blur-sm"
+            />
 
             <Button
               variant="outline"

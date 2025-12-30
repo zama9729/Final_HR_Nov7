@@ -175,9 +175,26 @@ export default function Employees() {
       }
 
       if (statusFilter !== "all") {
-        if (statusFilter === "active" && status !== "active") return false;
-        if (statusFilter === "waiting" && presence !== "waiting_for_onboarding") return false;
-        if (statusFilter === "offline" && presence === "online") return false;
+        // Explicit, user-controlled status filtering
+        switch (statusFilter) {
+          case "active":
+            if (status !== "active") return false;
+            break;
+          case "inactive":
+            if (status !== "inactive") return false;
+            break;
+          case "on_notice":
+            if (status !== "on_notice") return false;
+            break;
+          case "exited":
+            // Treat common exit-like statuses as exited
+            if (!["exited", "terminated", "resigned"].includes(status)) return false;
+            break;
+          case "future_joining":
+            // Future joining / offer accepted-type statuses
+            if (!["future_joining", "offer_accepted", "joining_soon"].includes(status)) return false;
+            break;
+        }
       }
 
       return true;
@@ -191,7 +208,15 @@ export default function Employees() {
   }, [filteredEmployees, currentPage]);
 
   const totalEmployees = employees.length;
-  const activeEmployees = employees.filter((e) => (e.status || "").toLowerCase() === "active").length;
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const e of employees) {
+      const key = (e.status || "unknown").toLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+  }, [employees]);
+  const activeEmployees = statusCounts["active"] || 0;
   const waitingOnboarding = employees.filter(
     (e) =>
       (e.onboarding_status && e.onboarding_status !== "completed") ||
@@ -405,18 +430,26 @@ export default function Employees() {
               <CardContent className="p-5 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium uppercase text-muted-foreground">
-                    Active
+                    Status Breakdown
                   </p>
                   <div className="flex items-baseline gap-2 mt-2">
-                    <span className="text-2xl font-bold text-emerald-600">
-                      {activeEmployees}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {activeEmployees} active
-                    </span>
+                    <div className="flex flex-col text-xs text-muted-foreground gap-1">
+                      <div>
+                        <span className="font-semibold text-emerald-600">
+                          Active:
+                        </span>{" "}
+                        {activeEmployees}
+                      </div>
+                      <div>
+                        <span className="font-semibold">
+                          Inactive / On notice / Exited / Future:
+                        </span>{" "}
+                        {totalEmployees - activeEmployees}
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="h-10 w-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 shadow-sm">
+                <div className="h-10 w-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-500 shadow-sm">
                   <CheckCircle2 className="h-5 w-5" />
                 </div>
               </CardContent>
@@ -533,13 +566,15 @@ export default function Employees() {
                     }}
                   >
                     <SelectTrigger className="bg-[#f8f9fb] border-none">
-                      <SelectValue placeholder="All status" />
+                      <SelectValue placeholder="All statuses" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All status</SelectItem>
+                      <SelectItem value="all">All</SelectItem>
                       <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="waiting">Waiting for onboarding</SelectItem>
-                      <SelectItem value="offline">Offline</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                      <SelectItem value="on_notice">On Notice</SelectItem>
+                      <SelectItem value="exited">Exited</SelectItem>
+                      <SelectItem value="future_joining">Future Joining</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
