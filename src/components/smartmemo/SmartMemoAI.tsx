@@ -13,6 +13,18 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { format, parseISO } from "date-fns";
 
+// Helper function to get icon for action type
+const getActionIcon = (type: string) => {
+  switch (type) {
+    case "calendar_event":
+      return <Calendar className="h-4 w-4" />;
+    case "reminder":
+      return <Clock className="h-4 w-4" />;
+    default:
+      return <Edit2 className="h-4 w-4" />;
+  }
+};
+
 interface DraftAction {
   intents: string[];
   confidence: number;
@@ -164,17 +176,39 @@ export function SmartMemoAI({
 
     setIsExecuting(true);
     try {
-      const result = await api.executeSmartMemoActions({
-        confirmedActions: editedActions,
+      // Validate actions before sending
+      const validatedActions = editedActions.map(action => {
+        if (action.type === 'reminder') {
+          if (!action.reminderTime) {
+            throw new Error('Reminder must have a reminder time');
+          }
+          if (!action.message && !action.title) {
+            throw new Error('Reminder must have a message or title');
+          }
+        }
+        return action;
       });
+
+      const result = await api.executeSmartMemoActions({
+        confirmedActions: validatedActions,
+      });
+
+      console.log('[SmartMemoAI] Execution result:', result);
+
+      const summary = result.summary || {
+        calendarEvents: result.results?.calendarEvents?.length || 0,
+        reminders: result.results?.reminders?.length || 0,
+        notes: result.results?.notes?.length || 0,
+      };
 
       toast({
         title: "Success!",
-        description: `Created ${result.summary.calendarEvents} event(s), ${result.summary.reminders} reminder(s), ${result.summary.notes} note(s)`,
+        description: `Created ${summary.calendarEvents} event(s), ${summary.reminders} reminder(s), ${summary.notes} note(s)`,
       });
 
       // Trigger refresh
-      if (result.summary.reminders > 0) {
+      const reminderCount = summary.reminders || 0;
+      if (reminderCount > 0) {
         window.dispatchEvent(new CustomEvent('reminder-created'));
       }
 
@@ -252,17 +286,6 @@ export function SmartMemoAI({
         return "bg-green-100 text-green-800";
       default:
         return "bg-gray-100 text-gray-800";
-    }
-  };
-
-  const getActionIcon = (type: string) => {
-    switch (type) {
-      case "calendar_event":
-        return <Calendar className="h-4 w-4" />;
-      case "reminder":
-        return <Clock className="h-4 w-4" />;
-      default:
-        return <Edit2 className="h-4 w-4" />;
     }
   };
 

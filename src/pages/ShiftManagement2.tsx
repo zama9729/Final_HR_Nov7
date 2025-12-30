@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
@@ -18,6 +18,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DateRangeSelector } from "@/components/common/DateRangeSelector";
 
 type ShiftType = "morning" | "evening" | "night" | "custom";
 
@@ -32,7 +34,23 @@ interface ShiftTemplate {
 interface EmployeeLite {
   id: string;
   name: string;
-  status?: string; // Employee status for explicit filtering
+  status?: string;
+  home_assignment?: {
+    branch_id?: string;
+    branch_name?: string;
+    department_id?: string;
+    department_name?: string;
+    team_id?: string;
+    team_name?: string;
+  };
+  assignments?: Array<{
+    branch_id?: string;
+    branch_name?: string;
+    department_id?: string;
+    department_name?: string;
+    team_id?: string;
+    team_name?: string;
+  }>;
 }
 
 interface TeamLite {
@@ -41,6 +59,11 @@ interface TeamLite {
 }
 
 interface BranchLite {
+  id: string;
+  name: string;
+}
+
+interface DepartmentLite {
   id: string;
   name: string;
 }
@@ -479,6 +502,7 @@ export default function ShiftManagement2() {
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [teams, setTeams] = useState<TeamLite[]>([]);
   const [branches, setBranches] = useState<BranchLite[]>([]);
+  const [departments, setDepartments] = useState<DepartmentLite[]>([]);
 
   const [rules, setRules] = useState<Rules>({
     enableEqualDistribution: true,
@@ -535,8 +559,7 @@ export default function ShiftManagement2() {
     total_shifts: number;
   }>>([]);
 
-  const [selectedScope, setSelectedScope] = useState<string>("all"); // all | team:<id> | branch:<id>
-  const [employeeStatusFilter, setEmployeeStatusFilter] = useState<string>("all"); // all | active | inactive | on_notice | exited
+  const [selectedScope, setSelectedScope] = useState<string>("all"); // all | team:<id> | branch:<id> | department:<id>
   const [dateRange, setDateRange] = useState<DateRange>({});
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -626,16 +649,17 @@ export default function ShiftManagement2() {
     const now = new Date();
     const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     loadStatistics(lastMonthStart, now);
-  }, []);
+  }, [sortOrder]); // Reload when sort order changes
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [tpls, emps, teamList, branchList] = await Promise.all([
+        const [tpls, emps, teamList, branchList, branchHierarchy] = await Promise.all([
           api.getShiftTemplates(),
           api.getEmployees(),
           api.getTeams({} as any),
           api.getBranches(),
+          api.getBranchHierarchy(),
         ]);
         setTemplates(
           (tpls || []).map((t: any) => ({
@@ -649,7 +673,9 @@ export default function ShiftManagement2() {
         const mappedEmployees = (emps || []).map((e: any) => ({
             id: e.id,
             name: `${e.profiles?.first_name || ""} ${e.profiles?.last_name || ""}`.trim() || e.employee_id || "Employee",
-            status: e.status || "active", // Include status for filtering
+            status: e.status || "active",
+            home_assignment: e.home_assignment || {},
+            assignments: e.assignments || [],
           }));
         setEmployees(mappedEmployees);
         // Initialize scoped employees to all employees when first loaded
@@ -657,20 +683,29 @@ export default function ShiftManagement2() {
         setSelectedEmployeeIds(mappedEmployees.map((e: EmployeeLite) => e.id));
         setTeams((teamList || []).map((t: any) => ({ id: t.id, name: t.name || "Team" })));
         setBranches((branchList || []).map((b: any) => ({ id: b.id, name: b.name || b.branch_name || "Branch" })));
+        setDepartments((branchHierarchy?.departments || []).map((d: any) => ({ id: d.id, name: d.name || "Department" })));
         
         // Load published schedules
         try {
-          const schedules = await api.get("/api/scheduling/schedules?status=published");
+          const schedules = await api.getSchedules({ status: "published" });
           console.log("[ShiftManagement2] Published schedules response:", schedules);
           if (Array.isArray(schedules) && schedules.length > 0) {
             const formatted = schedules.map((s: any) => {
+              // Handle date strings or Date objects
               const startDate = s.week_start_date || s.start_date;
               const endDate = s.week_end_date || s.end_date;
+              const start = startDate ? (typeof startDate === 'string' ? parseISO(startDate.split('T')[0]) : new Date(startDate)) : new Date();
+              const end = endDate ? (typeof endDate === 'string' ? parseISO(endDate.split('T')[0]) : new Date(endDate)) : new Date();
+              
+              // Get unique employee count from assignments if available
+              const employeeCount = s.unique_employee_count || s.employee_count || 0;
+              const shiftCount = s.assignment_count || s.shift_count || 0;
+              
               return {
                 id: s.id,
-                period: `${format(new Date(startDate), "MMM d")} - ${format(new Date(endDate), "MMM d, yyyy")}`,
-                employeeCount: s.assignment_count || s.employee_count || 0,
-                shiftCount: s.assignment_count || s.shift_count || 0,
+                period: `${format(start, "MMM d")} - ${format(end, "MMM d, yyyy")}`,
+                employeeCount,
+                shiftCount,
                 publishedAt: s.created_at || s.updated_at || s.published_at || new Date().toISOString(),
               };
             });
@@ -683,6 +718,7 @@ export default function ShiftManagement2() {
         } catch (err: any) {
           console.warn("[ShiftManagement2] Could not load published schedules:", err);
           // Don't show error toast for this, just log it
+          setPublishedSchedules([]);
         }
       } catch (e: any) {
         console.error("[ShiftManagement2] Init error", e);
@@ -754,21 +790,31 @@ export default function ShiftManagement2() {
           const memberEmployeeIds = new Set(
             members.map((m: any) => {
               // The API returns employee_id field from team_memberships
-              return m.employee_id || m.id;
+              return m.employee_id || m.id || m.employee?.id;
             }).filter(Boolean)
           );
           console.log("[ShiftManagement2] Member employee_ids from team:", Array.from(memberEmployeeIds));
           console.log("[ShiftManagement2] All employees IDs:", employees.map(e => e.id));
+          console.log("[ShiftManagement2] All employees:", employees.map(e => ({ id: e.id, name: e.name })));
           
           // Filter employees where their id matches the employee_id from team members
-          const filtered = employees.filter((e) => memberEmployeeIds.has(e.id));
+          // Include ALL employees that match, regardless of status
+          const filtered = employees.filter((e) => {
+            const matches = memberEmployeeIds.has(e.id);
+            if (matches) {
+              console.log("[ShiftManagement2] Matched employee:", e.id, e.name);
+            }
+            return matches;
+          });
           console.log("[ShiftManagement2] Filtered employees count:", filtered.length);
           console.log("[ShiftManagement2] Filtered employee names:", filtered.map(e => e.name));
           
           if (filtered.length === 0) {
+            console.warn("[ShiftManagement2] No employees matched team members. Team members:", members);
+            console.warn("[ShiftManagement2] Available employee IDs:", employees.map(e => e.id));
             toast({
               title: "No team members found",
-              description: "This team may not have any active members, or members may not be loaded yet.",
+              description: `Team has ${members.length} member(s) but none match loaded employees. Check team assignments.`,
               variant: "destructive",
             });
           } else {
@@ -793,9 +839,129 @@ export default function ShiftManagement2() {
         return;
       }
       if (selectedScope.startsWith("branch:")) {
-        // For now, return all employees (branch filtering would need employee_assignments)
-        setScopedEmployees(employees);
-        setSelectedEmployeeIds(employees.map((e) => e.id));
+        const branchId = selectedScope.replace("branch:", "");
+        console.log("[ShiftManagement2] Filtering by branch:", branchId);
+        console.log("[ShiftManagement2] Total employees:", employees.length);
+        console.log("[ShiftManagement2] Sample employee assignments:", employees.slice(0, 3).map(e => ({
+          id: e.id,
+          name: e.name,
+          home_assignment: e.home_assignment,
+          assignments: e.assignments,
+          home_branch_id: e.home_assignment?.branch_id,
+          assignment_branch_ids: (e.assignments || []).map((a: any) => a.branch_id).filter(Boolean)
+        })));
+        
+        // Filter employees by branch using home_assignment or assignments
+        // Include ALL employees that match, regardless of status
+        // Normalize IDs to strings for comparison (handles UUIDs)
+        const normalizedBranchId = String(branchId).trim();
+        const filtered = employees.filter((e) => {
+          // Check home assignment first
+          const homeBranchId = e.home_assignment?.branch_id;
+          if (homeBranchId && String(homeBranchId).trim() === normalizedBranchId) {
+            console.log("[ShiftManagement2] Matched via home_assignment:", e.id, e.name, homeBranchId);
+            return true;
+          }
+          
+          // Check all assignments
+          const hasBranchAssignment = (e.assignments || []).some((a: any) => {
+            const assignmentBranchId = a.branch_id;
+            if (assignmentBranchId && String(assignmentBranchId).trim() === normalizedBranchId) {
+              console.log("[ShiftManagement2] Matched via assignment:", e.id, e.name, assignmentBranchId);
+              return true;
+            }
+            return false;
+          });
+          
+          return hasBranchAssignment;
+        });
+        
+        console.log("[ShiftManagement2] Branch employees filtered:", filtered.length);
+        console.log("[ShiftManagement2] Filtered employee names:", filtered.map(e => e.name));
+        console.log("[ShiftManagement2] Branch ID used for filtering:", normalizedBranchId);
+        
+        if (filtered.length === 0) {
+          // Provide more helpful error message
+          const employeesWithAssignments = employees.filter(e => 
+            e.home_assignment?.branch_id || (e.assignments || []).some((a: any) => a.branch_id)
+          );
+          console.warn("[ShiftManagement2] No employees matched branch. Employees with assignments:", employeesWithAssignments.length);
+          toast({
+            title: "No branch employees found",
+            description: `No employees are assigned to this branch. ${employeesWithAssignments.length > 0 ? `${employeesWithAssignments.length} employee(s) have other branch assignments.` : 'Check employee assignments.'}`,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Branch selected",
+            description: `Found ${filtered.length} employee(s) in this branch.`,
+          });
+        }
+        setScopedEmployees(filtered);
+        setSelectedEmployeeIds(filtered.map((e) => e.id));
+        return;
+      }
+      if (selectedScope.startsWith("department:")) {
+        const departmentId = selectedScope.replace("department:", "");
+        console.log("[ShiftManagement2] Filtering by department:", departmentId);
+        console.log("[ShiftManagement2] Total employees:", employees.length);
+        console.log("[ShiftManagement2] Sample employee assignments:", employees.slice(0, 3).map(e => ({
+          id: e.id,
+          name: e.name,
+          home_assignment: e.home_assignment,
+          assignments: e.assignments,
+          home_department_id: e.home_assignment?.department_id,
+          assignment_department_ids: (e.assignments || []).map((a: any) => a.department_id).filter(Boolean)
+        })));
+        
+        // Filter employees by department using home_assignment or assignments
+        // Include ALL employees that match, regardless of status
+        // Normalize IDs to strings for comparison (handles UUIDs)
+        const normalizedDepartmentId = String(departmentId).trim();
+        const filtered = employees.filter((e) => {
+          // Check home assignment first
+          const homeDepartmentId = e.home_assignment?.department_id;
+          if (homeDepartmentId && String(homeDepartmentId).trim() === normalizedDepartmentId) {
+            console.log("[ShiftManagement2] Matched via home_assignment:", e.id, e.name, homeDepartmentId);
+            return true;
+          }
+          
+          // Check all assignments
+          const hasDepartmentAssignment = (e.assignments || []).some((a: any) => {
+            const assignmentDepartmentId = a.department_id;
+            if (assignmentDepartmentId && String(assignmentDepartmentId).trim() === normalizedDepartmentId) {
+              console.log("[ShiftManagement2] Matched via assignment:", e.id, e.name, assignmentDepartmentId);
+              return true;
+            }
+            return false;
+          });
+          
+          return hasDepartmentAssignment;
+        });
+        
+        console.log("[ShiftManagement2] Department employees filtered:", filtered.length);
+        console.log("[ShiftManagement2] Filtered employee names:", filtered.map(e => e.name));
+        console.log("[ShiftManagement2] Department ID used for filtering:", normalizedDepartmentId);
+        
+        if (filtered.length === 0) {
+          // Provide more helpful error message
+          const employeesWithAssignments = employees.filter(e => 
+            e.home_assignment?.department_id || (e.assignments || []).some((a: any) => a.department_id)
+          );
+          console.warn("[ShiftManagement2] No employees matched department. Employees with assignments:", employeesWithAssignments.length);
+          toast({
+            title: "No department employees found",
+            description: `No employees are assigned to this department. ${employeesWithAssignments.length > 0 ? `${employeesWithAssignments.length} employee(s) have other department assignments.` : 'Check employee assignments.'}`,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Department selected",
+            description: `Found ${filtered.length} employee(s) in this department.`,
+          });
+        }
+        setScopedEmployees(filtered);
+        setSelectedEmployeeIds(filtered.map((e) => e.id));
         return;
       }
       setScopedEmployees(employees);
@@ -805,28 +971,9 @@ export default function ShiftManagement2() {
   }, [selectedScope, employees]);
 
   const employeesForSchedule = useMemo(() => {
-    // Apply status filter if specified (explicit, user-controlled)
-    let filtered = scopedEmployees;
-    if (employeeStatusFilter !== "all") {
-      filtered = scopedEmployees.filter((e) => {
-        const status = (e.status || "").toLowerCase();
-        switch (employeeStatusFilter) {
-          case "active":
-            return status === "active";
-          case "inactive":
-            return status === "inactive";
-          case "on_notice":
-            return status === "on_notice";
-          case "exited":
-            return ["exited", "terminated", "resigned"].includes(status);
-          default:
-            return true;
-        }
-      });
-    }
-    // Only show selected employees
-    return filtered.filter((e) => selectedEmployeeIds.includes(e.id));
-  }, [scopedEmployees, selectedEmployeeIds, employeeStatusFilter]);
+    // Only show selected employees (scope filtering already applied)
+    return scopedEmployees.filter((e) => selectedEmployeeIds.includes(e.id));
+  }, [scopedEmployees, selectedEmployeeIds]);
 
   const handleCreateTemplate = async () => {
     if (!newTemplateForm.name || !newTemplateForm.start_time || !newTemplateForm.end_time) {
@@ -1068,20 +1215,115 @@ export default function ShiftManagement2() {
             <TabsTrigger value="statistics">Shift Statistics</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="generate" className="mt-4">
+          <TabsContent value="generate" className="mt-4 space-y-4">
+            {/* General Scheduling Block - Redesigned */}
+            <Card className="border-2 border-gray-200 shadow-lg">
+              <CardHeader className="bg-gradient-to-r from-gray-50 to-white pb-4 border-b">
+                <div className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle className="text-lg font-semibold">General Scheduling</CardTitle>
+                    <CardDescription className="mt-1">Configure scope, date range, and generate schedules</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="flex flex-col md:flex-row items-start md:items-end gap-3">
+                  <div className="flex-1 space-y-1 min-w-0">
+                    <Label className="text-sm font-medium">Scope</Label>
+                    <Select value={selectedScope} onValueChange={setSelectedScope}>
+                      <SelectTrigger className="h-10">
+                        <SelectValue placeholder="All employees" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All employees</SelectItem>
+                        {teams.length > 0 && (
+                          <>
+                            <SelectItem value="__teams_header" disabled>
+                              Teams
+                            </SelectItem>
+                            {teams.map((t) => (
+                              <SelectItem key={t.id} value={`team:${t.id}`}>
+                                {t.name}
+                              </SelectItem>
+                            ))}
+                          </>
+                        )}
+                        {branches.length > 0 && (
+                          <>
+                            <SelectItem value="__branches_header" disabled>
+                              Branches
+                            </SelectItem>
+                            {branches.map((b) => (
+                              <SelectItem key={b.id} value={`branch:${b.id}`}>
+                                {b.name}
+                              </SelectItem>
+                            ))}
+                          </>
+                        )}
+                        {departments.length > 0 && (
+                          <>
+                            <SelectItem value="__departments_header" disabled>
+                              Departments
+                            </SelectItem>
+                            {departments.map((d) => (
+                              <SelectItem key={d.id} value={`department:${d.id}`}>
+                                {d.name}
+                              </SelectItem>
+                            ))}
+                          </>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex-1 space-y-1 min-w-0">
+                    <Label className="text-sm font-medium">Scheduling Period</Label>
+                    <DateRangeSelector
+                      value={dateRange}
+                      onChange={setDateRange}
+                      placeholder="Select date range"
+                    />
+                  </div>
+                  <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:flex-shrink-0 w-full md:w-auto">
+                    <div className="text-xs text-muted-foreground flex items-center gap-1 whitespace-nowrap px-2 py-1 bg-gray-50 rounded-md">
+                      <Users className="h-3 w-3" />
+                      <span className="font-medium">{selectedEmployeeIds.length}</span>
+                      <span className="text-gray-500">of</span>
+                      <span className="font-medium">{scopedEmployees.length}</span>
+                      <span className="text-gray-500">selected</span>
+                    </div>
+                    <Button 
+                      size="default" 
+                      onClick={handleGenerate} 
+                      disabled={generating || scopedEmployees.length === 0} 
+                      className="bg-[#E53935] hover:bg-[#D32F2F] text-white h-10 px-6 w-full md:w-auto"
+                    >
+                      {generating ? (
+                        <>
+                          <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />
+                          Generating…
+                        </>
+                      ) : (
+                        "Generate Schedule"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
         <div className="grid gap-4 lg:grid-cols-3">
           {/* Left Panel - Shift Rules & Templates */}
-          <Card className="space-y-0">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <Card className="space-y-0 border shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-gray-50/50">
               <div>
-                <CardTitle className="text-base">Shift Rules &amp; Templates</CardTitle>
-                <CardDescription>Define reusable shift patterns</CardDescription>
+                <CardTitle className="text-base font-semibold">Shift Rules &amp; Templates</CardTitle>
+                <CardDescription className="text-xs">Define reusable shift patterns</CardDescription>
               </div>
-              <Button size="sm" variant="outline" onClick={() => setNewTemplateOpen(true)}>
+              <Button size="sm" variant="outline" onClick={() => setNewTemplateOpen(true)} className="border-gray-300">
                 + New Template
               </Button>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 pt-4">
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground">Fairness &amp; Constraints</Label>
                 <div className="flex items-center justify-between rounded-md border px-3 py-2">
@@ -1089,9 +1331,9 @@ export default function ShiftManagement2() {
                     <p className="text-sm font-medium">Equal Distribution</p>
                     <p className="text-xs text-muted-foreground">Try to keep shifts balanced across the team.</p>
                   </div>
-                  <Switch
+                  <ToggleSwitch
                     checked={rules.enableEqualDistribution}
-                    onCheckedChange={(v) => setRules((r) => ({ ...r, enableEqualDistribution: v }))}
+                    onChange={(v) => setRules((r) => ({ ...r, enableEqualDistribution: v }))}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
@@ -1148,9 +1390,9 @@ export default function ShiftManagement2() {
                       <p className="text-sm font-medium">Alternate Week Shifts</p>
                       <p className="text-xs text-muted-foreground">Balance shifts across weeks</p>
                     </div>
-                    <Switch
+                    <ToggleSwitch
                       checked={rules.alternateWeekShifts}
-                      onCheckedChange={(v) => setRules((r) => ({ ...r, alternateWeekShifts: v }))}
+                      onChange={(v) => setRules((r) => ({ ...r, alternateWeekShifts: v }))}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1239,9 +1481,9 @@ export default function ShiftManagement2() {
                       <p className="text-sm font-medium">Exclude Weekends</p>
                       <p className="text-xs text-muted-foreground">Skip Saturday and Sunday</p>
                     </div>
-                    <Switch
+                    <ToggleSwitch
                       checked={rules.excludeWeekends}
-                      onCheckedChange={(v) => setRules((r) => ({ ...r, excludeWeekends: v }))}
+                      onChange={(v) => setRules((r) => ({ ...r, excludeWeekends: v }))}
                     />
                   </div>
                   <div className="flex items-center justify-between rounded-md border px-3 py-2">
@@ -1249,9 +1491,9 @@ export default function ShiftManagement2() {
                       <p className="text-sm font-medium">Exclude Holidays</p>
                       <p className="text-xs text-muted-foreground">Skip published holidays</p>
                     </div>
-                    <Switch
+                    <ToggleSwitch
                       checked={rules.excludeHolidays}
-                      onCheckedChange={(v) => setRules((r) => ({ ...r, excludeHolidays: v }))}
+                      onChange={(v) => setRules((r) => ({ ...r, excludeHolidays: v }))}
                     />
                   </div>
                 </div>
@@ -1286,23 +1528,20 @@ export default function ShiftManagement2() {
                             {tpl.start_time} – {tpl.end_time} • {tpl.shift_type}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 w-6 p-0"
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="h-6 w-6 p-0 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
                             onClick={(e) => {
                               e.stopPropagation();
                               setEditingTemplate(tpl);
                               setEditTemplateOpen(true);
                             }}
+                            title="Edit template"
                           >
-                            <Edit className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          <button
+                            className="h-6 w-6 p-0 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
                             onClick={async (e) => {
                               e.stopPropagation();
                               if (confirm(`Delete template "${tpl.name}"?`)) {
@@ -1320,9 +1559,10 @@ export default function ShiftManagement2() {
                                 }
                               }
                             }}
+                            title="Delete template"
                           >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       </div>
                     ))
@@ -1332,97 +1572,13 @@ export default function ShiftManagement2() {
             </CardContent>
           </Card>
 
-          {/* Center Panel - Generate Schedule */}
-          <Card className="lg:col-span-1 space-y-0">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Generate Schedule</CardTitle>
-              <CardDescription>Pick team, dates and templates</CardDescription>
+          {/* Center Panel - Schedule Grid */}
+          <Card className="lg:col-span-1 space-y-0 border shadow-md">
+            <CardHeader className="pb-2 bg-gray-50/50">
+              <CardTitle className="text-base font-semibold">Schedule Grid</CardTitle>
+              <CardDescription className="text-xs">Weekly schedule view</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <Label>Scope</Label>
-                  <Select value={selectedScope} onValueChange={setSelectedScope}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="All employees" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All employees</SelectItem>
-                      {teams.length > 0 && (
-                        <>
-                          <SelectItem value="__teams_header" disabled>
-                            Teams
-                          </SelectItem>
-                          {teams.map((t) => (
-                            <SelectItem key={t.id} value={`team:${t.id}`}>
-                              {t.name}
-                            </SelectItem>
-                          ))}
-                        </>
-                      )}
-                      {branches.length > 0 && (
-                        <>
-                          <SelectItem value="__branches_header" disabled>
-                            Branches
-                          </SelectItem>
-                          {branches.map((b) => (
-                            <SelectItem key={b.id} value={`branch:${b.id}`}>
-                              {b.name}
-                            </SelectItem>
-                          ))}
-                        </>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label>Employee Status</Label>
-                  <Select value={employeeStatusFilter} onValueChange={setEmployeeStatusFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="All employees" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All employees</SelectItem>
-                      <SelectItem value="active">Active only</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
-                      <SelectItem value="on_notice">On Notice</SelectItem>
-                      <SelectItem value="exited">Exited</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {employeeStatusFilter !== "all" && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Showing {employeeStatusFilter === "active" ? "active" : employeeStatusFilter} employees only
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label>Scheduling period</Label>
-                  <DateRangePicker
-                    startDate={dateRange.from}
-                    endDate={dateRange.to}
-                    onChange={(start, end) => setDateRange({ from: start, to: end })}
-                    mode="range"
-                    placeholder="Select date range"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Users className="h-3 w-3" />
-                  {selectedEmployeeIds.length} of {scopedEmployees.length} employees selected
-                </div>
-                <Button size="sm" onClick={handleGenerate} disabled={generating}>
-                  {generating ? (
-                    <>
-                      <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />
-                      Generating…
-                    </>
-                  ) : (
-                    "Generate Schedule"
-                  )}
-                </Button>
-              </div>
+            <CardContent className="space-y-4 pt-4">
 
               <div className="border rounded-lg overflow-hidden">
                 <div className="bg-muted/60 px-3 py-2 text-xs font-medium flex items-center justify-between">
@@ -1819,10 +1975,9 @@ export default function ShiftManagement2() {
                       <CardTitle>Shift Statistics</CardTitle>
                       <CardDescription>Last month to this month comparison</CardDescription>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
+                    <div className="flex items-center gap-3">
+                      <button
+                        className="text-sm font-semibold text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
                         onClick={() => {
                           const now = new Date();
                           const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -1831,10 +1986,9 @@ export default function ShiftManagement2() {
                         }}
                       >
                         Last Month
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      </button>
+                      <button
+                        className="text-sm font-semibold text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
                         onClick={() => {
                           const now = new Date();
                           const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -1842,7 +1996,7 @@ export default function ShiftManagement2() {
                         }}
                       >
                         Last Month → This Month
-                      </Button>
+                      </button>
                       <Select value={sortOrder} onValueChange={(v: "asc" | "desc") => {
                         setSortOrder(v);
                         setShiftStatistics((prev) => [...prev].sort((a, b) => {

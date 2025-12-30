@@ -286,34 +286,101 @@ function fallbackIntentInference(memoText, context) {
   // Use existing regex-based parser as fallback
   const intents = [];
   const proposedActions = [];
+  const now = new Date();
   
   // Check for calendar event indicators
   if (/\d{1,2}[-:]\d{1,2}/.test(memoText) || 
       /meeting|call|standup|1:1|one-on-one/i.test(memoText)) {
     intents.push('calendar_event');
+    
+    // Try to extract time range
+    const timeRangeMatch = memoText.match(/(\d{1,2})[-:](\d{1,2})\s*[-:]\s*(\d{1,2})[-:](\d{1,2})/);
+    if (timeRangeMatch) {
+      const startHour = parseInt(timeRangeMatch[1], 10);
+      const startMin = parseInt(timeRangeMatch[2], 10);
+      const endHour = parseInt(timeRangeMatch[3], 10);
+      const endMin = parseInt(timeRangeMatch[4], 10);
+      
+      const startDate = new Date(now);
+      startDate.setHours(startHour, startMin, 0, 0);
+      const endDate = new Date(now);
+      endDate.setHours(endHour, endMin, 0, 0);
+      
+      proposedActions.push({
+        type: 'calendar_event',
+        title: memoText.substring(0, 50) || 'Calendar Event',
+        startDateTime: startDate.toISOString(),
+        duration: Math.round((endDate - startDate) / 60000), // minutes
+        description: memoText,
+      });
+    }
   }
   
   // Check for reminder indicators
   if (/remind|reminder|notify|alert/i.test(memoText)) {
     intents.push('reminder');
+    
+    // Try to extract reminder time
+    let remindAt = new Date(now);
+    remindAt.setHours(now.getHours() + 1, 0, 0, 0); // Default to 1 hour from now
+    
+    // Parse relative time
+    const lowerText = memoText.toLowerCase();
+    if (lowerText.includes('tomorrow')) {
+      remindAt.setDate(now.getDate() + 1);
+      remindAt.setHours(9, 0, 0, 0); // Default to 9 AM tomorrow
+    } else if (lowerText.includes('in') && /\d+/.test(memoText)) {
+      const minutesMatch = memoText.match(/in\s+(\d+)\s+minute/i);
+      const hoursMatch = memoText.match(/in\s+(\d+)\s+hour/i);
+      if (minutesMatch) {
+        remindAt = new Date(now.getTime() + parseInt(minutesMatch[1], 10) * 60000);
+      } else if (hoursMatch) {
+        remindAt = new Date(now.getTime() + parseInt(hoursMatch[1], 10) * 3600000);
+      }
+    } else if (lowerText.includes('morning')) {
+      remindAt.setHours(9, 0, 0, 0);
+    } else if (lowerText.includes('afternoon')) {
+      remindAt.setHours(14, 0, 0, 0);
+    } else if (lowerText.includes('evening')) {
+      remindAt.setHours(18, 0, 0, 0);
+    }
+    
+    // Extract message (remove reminder keywords)
+    const message = memoText
+      .replace(/remind\s+me\s+/i, '')
+      .replace(/reminder\s+to\s+/i, '')
+      .replace(/remind\s+/i, '')
+      .trim() || 'Reminder from Smart Memo';
+    
+    proposedActions.push({
+      type: 'reminder',
+      reminderTime: remindAt.toISOString(),
+      message: message,
+      title: message.substring(0, 50),
+    });
   }
   
   // Default to note if nothing else detected
   if (intents.length === 0) {
     intents.push('note');
+    proposedActions.push({
+      type: 'note',
+      title: 'Quick Note',
+      content: memoText,
+    });
   }
   
   return {
     intents,
     confidence: 0.5, // Lower confidence for fallback
-    proposedActions: [],
+    proposedActions,
     extractedEntities: {
       people: [],
       dates: [],
       times: [],
       topics: [],
     },
-    clarificationNeeded: true,
+    clarificationNeeded: proposedActions.length === 0,
   };
 }
 

@@ -522,7 +522,8 @@ router.get('/schedules', authenticateToken, setTenantContext, async (req, res) =
 
     let queryStr = `
       SELECT s.*,
-        (SELECT COUNT(*) FROM schedule_assignments a WHERE a.schedule_id = s.id) as assignment_count
+        (SELECT COUNT(*) FROM schedule_assignments a WHERE a.schedule_id = s.id) as assignment_count,
+        (SELECT COUNT(DISTINCT a.employee_id) FROM schedule_assignments a WHERE a.schedule_id = s.id) as unique_employee_count
       FROM generated_schedules s
       WHERE s.tenant_id = $1
     `;
@@ -546,6 +547,8 @@ router.get('/schedules', authenticateToken, setTenantContext, async (req, res) =
     queryStr += ` ORDER BY s.week_start_date DESC, s.created_at DESC`;
 
     const result = await query(queryStr, params);
+    
+    console.log(`[Scheduling] Fetched ${result.rows.length} schedule(s) with status=${status || 'all'} for orgId=${orgId}`);
 
     // Format dates as strings (yyyy-MM-dd) for all schedules
     const formattedSchedules = result.rows.map(schedule => {
@@ -1001,6 +1004,64 @@ router.patch('/schedules/:id/manual-edit', authenticateToken, setTenantContext, 
     res.json({ success: true });
   } catch (error) {
     console.error('Error manually editing schedule:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PATCH /api/scheduling/schedules/:id/publish
+router.patch('/schedules/:id/publish', authenticateToken, setTenantContext, requireRole('hr', 'director', 'ceo', 'admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+
+    // Check if schedule exists
+    const scheduleCheck = await query(
+      `SELECT status FROM generated_schedules WHERE id = $1 AND tenant_id = $2`,
+      [id, orgId]
+    );
+
+    if (scheduleCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    const currentStatus = scheduleCheck.rows[0].status;
+    if (currentStatus !== 'approved' && currentStatus !== 'active') {
+      return res.status(400).json({ 
+        error: `Schedule must be approved or active to publish. Current status: ${currentStatus}` 
+      });
+    }
+
+    // Update schedule to published status
+    const result = await query(
+      `UPDATE generated_schedules
+       SET status = 'published', updated_at = now()
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING *`,
+      [id, orgId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    const schedule = result.rows[0];
+
+    // Audit log
+    try {
+      await query(
+        `INSERT INTO schedule_audit_log (tenant_id, schedule_id, action, entity_type, created_by)
+         VALUES ($1, $2, 'publish', 'schedule', $3)`,
+        [orgId, id, req.user.id]
+      );
+    } catch (auditError) {
+      // Audit log table might not exist, ignore error
+      console.warn('Could not create audit log entry:', auditError);
+    }
+
+    console.log(`[Scheduling] Schedule ${id} published by user ${req.user.id}`);
+    res.json({ success: true, schedule });
+  } catch (error) {
+    console.error('Error publishing schedule:', error);
     res.status(500).json({ error: error.message });
   }
 });
