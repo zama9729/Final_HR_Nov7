@@ -15,12 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -568,36 +563,18 @@ export default function AttendanceAnalytics() {
             </Select>
 
             {selectedPeriod === "custom" && (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="w-[260px] justify-start text-left font-normal rounded-full border-slate-200 bg-white shadow-sm text-xs"
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {dateRange.from && dateRange.to ? (
-                      `${format(dateRange.from, "MMM dd")} - ${format(
-                        dateRange.to,
-                        "MMM dd, yyyy",
-                      )}`
-                    ) : (
-                      <span>Pick a date range</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="range"
-                    selected={{ from: dateRange.from, to: dateRange.to }}
-                    onSelect={(range) => {
-                      if (range?.from && range?.to) {
-                        setDateRange({ from: range.from, to: range.to });
-                      }
-                    }}
-                    numberOfMonths={2}
-                  />
-                </PopoverContent>
-              </Popover>
+              <DateRangePicker
+                startDate={dateRange.from}
+                endDate={dateRange.to}
+                onChange={(start, end) => {
+                  if (start && end) {
+                    setDateRange({ from: start, to: end });
+                  }
+                }}
+                mode="range"
+                placeholder="Pick a date range"
+                className="w-[260px] text-xs rounded-full border-slate-200 bg-white shadow-sm"
+              />
             )}
 
             <Button

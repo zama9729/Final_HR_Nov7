@@ -897,7 +897,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
         ) as profiles
       FROM employees e
       JOIN profiles p ON p.id = e.user_id
-      WHERE e.reporting_manager_id = $1 AND e.tenant_id = $2 AND e.status = 'active'
+      WHERE e.reporting_manager_id = $1 AND e.tenant_id = $2
       ORDER BY e.employee_id`,
       [id, userTenantId]
     );
@@ -1479,6 +1479,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
       if (reportingManagerId !== undefined) {
         // The trigger will handle auto-promotion automatically
         // But we can also manually check if needed by counting direct reports
+        // NOTE: For promotion eligibility, we count active direct reports only (business rule)
         const managerCheckResult = await query(
           `SELECT COUNT(*) as count FROM employees 
            WHERE reporting_manager_id = $1 AND status = 'active'`,
@@ -1509,6 +1510,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
       }
       
       // Also check if this employee should be promoted (if they now have 2+ reports)
+      // NOTE: For promotion eligibility, we count active direct reports only (business rule)
       const directReportsResult = await query(
         `SELECT COUNT(*) as count FROM employees 
          WHERE reporting_manager_id = $1 AND status = 'active'`,

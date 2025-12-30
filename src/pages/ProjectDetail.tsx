@@ -35,6 +35,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { format } from 'date-fns';
+import { SmartMemoAI } from '@/components/smartmemo/SmartMemoAI';
 
 interface ProjectAllocation {
   id: string;
@@ -289,6 +290,23 @@ export default function ProjectDetail() {
   return (
     <AppLayout>
       <div className="space-y-6">
+        {/* Smart Memo Widget - Contextual to Project */}
+        {id && project && (
+          <Card className="border-purple-200 bg-purple-50/30">
+            <CardContent className="pt-4">
+              <SmartMemoAI
+                embedded={true}
+                currentEntityId={id}
+                currentEntityType="project"
+                currentEntityName={project.name}
+                onEventsCreated={() => {
+                  fetchProject();
+                }}
+              />
+            </CardContent>
+          </Card>
+        )}
+
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="sm" onClick={() => navigate('/projects')}>
             <ArrowLeft className="mr-2 h-4 w-4" />

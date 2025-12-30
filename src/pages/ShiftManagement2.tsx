@@ -11,8 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Download, RefreshCcw, Users, Edit, Trash2, ArrowUp, ArrowDown } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -33,6 +32,7 @@ interface ShiftTemplate {
 interface EmployeeLite {
   id: string;
   name: string;
+  status?: string; // Employee status for explicit filtering
 }
 
 interface TeamLite {
@@ -536,6 +536,7 @@ export default function ShiftManagement2() {
   }>>([]);
 
   const [selectedScope, setSelectedScope] = useState<string>("all"); // all | team:<id> | branch:<id>
+  const [employeeStatusFilter, setEmployeeStatusFilter] = useState<string>("all"); // all | active | inactive | on_notice | exited
   const [dateRange, setDateRange] = useState<DateRange>({});
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -648,6 +649,7 @@ export default function ShiftManagement2() {
         const mappedEmployees = (emps || []).map((e: any) => ({
             id: e.id,
             name: `${e.profiles?.first_name || ""} ${e.profiles?.last_name || ""}`.trim() || e.employee_id || "Employee",
+            status: e.status || "active", // Include status for filtering
           }));
         setEmployees(mappedEmployees);
         // Initialize scoped employees to all employees when first loaded
@@ -803,9 +805,28 @@ export default function ShiftManagement2() {
   }, [selectedScope, employees]);
 
   const employeesForSchedule = useMemo(() => {
+    // Apply status filter if specified (explicit, user-controlled)
+    let filtered = scopedEmployees;
+    if (employeeStatusFilter !== "all") {
+      filtered = scopedEmployees.filter((e) => {
+        const status = (e.status || "").toLowerCase();
+        switch (employeeStatusFilter) {
+          case "active":
+            return status === "active";
+          case "inactive":
+            return status === "inactive";
+          case "on_notice":
+            return status === "on_notice";
+          case "exited":
+            return ["exited", "terminated", "resigned"].includes(status);
+          default:
+            return true;
+        }
+      });
+    }
     // Only show selected employees
-    return scopedEmployees.filter((e) => selectedEmployeeIds.includes(e.id));
-  }, [scopedEmployees, selectedEmployeeIds]);
+    return filtered.filter((e) => selectedEmployeeIds.includes(e.id));
+  }, [scopedEmployees, selectedEmployeeIds, employeeStatusFilter]);
 
   const handleCreateTemplate = async () => {
     if (!newTemplateForm.name || !newTemplateForm.start_time || !newTemplateForm.end_time) {
@@ -1318,7 +1339,7 @@ export default function ShiftManagement2() {
               <CardDescription>Pick team, dates and templates</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <Label>Scope</Label>
                   <Select value={selectedScope} onValueChange={setSelectedScope}>
@@ -1355,69 +1376,34 @@ export default function ShiftManagement2() {
                   </Select>
                 </div>
                 <div className="space-y-1">
+                  <Label>Employee Status</Label>
+                  <Select value={employeeStatusFilter} onValueChange={setEmployeeStatusFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All employees" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All employees</SelectItem>
+                      <SelectItem value="active">Active only</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                      <SelectItem value="on_notice">On Notice</SelectItem>
+                      <SelectItem value="exited">Exited</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {employeeStatusFilter !== "all" && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Showing {employeeStatusFilter === "active" ? "active" : employeeStatusFilter} employees only
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
                   <Label>Scheduling period</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-full justify-start text-left font-normal border-white/60 bg-white/60 backdrop-blur-md shadow-sm hover:bg-white/80",
-                            !dateRange.from && "text-muted-foreground"
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {dateRange.from ? format(dateRange.from, "MMM d, yyyy") : "Start date"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        className="w-auto p-0 bg-white/80 backdrop-blur-xl border-white/60 shadow-xl rounded-xl"
-                        align="start"
-                      >
-                        <Calendar
-                          mode="single"
-                          selected={dateRange.from}
-                          onSelect={(d) => setDateRange((r) => ({ ...r, from: d || undefined }))}
-                          initialFocus
-                          className="rounded-lg"
-                          classNames={{
-                            day_selected: "bg-red-500 text-white hover:bg-red-600 focus:bg-red-600",
-                            day_today: "bg-accent text-accent-foreground",
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-full justify-start text-left font-normal border-white/60 bg-white/60 backdrop-blur-md shadow-sm hover:bg-white/80",
-                            !dateRange.to && "text-muted-foreground"
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {dateRange.to ? format(dateRange.to, "MMM d, yyyy") : "End date"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        className="w-auto p-0 bg-white/80 backdrop-blur-xl border-white/60 shadow-xl rounded-xl"
-                        align="start"
-                      >
-                        <Calendar
-                          mode="single"
-                          selected={dateRange.to}
-                          onSelect={(d) => setDateRange((r) => ({ ...r, to: d || undefined }))}
-                          initialFocus
-                          className="rounded-lg"
-                          classNames={{
-                            day_selected: "bg-red-500 text-white hover:bg-red-600 focus:bg-red-600",
-                            day_today: "bg-accent text-accent-foreground",
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
+                  <DateRangePicker
+                    startDate={dateRange.from}
+                    endDate={dateRange.to}
+                    onChange={(start, end) => setDateRange({ from: start, to: end })}
+                    mode="range"
+                    placeholder="Select date range"
+                  />
                 </div>
               </div>
 

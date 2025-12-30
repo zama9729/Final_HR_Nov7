@@ -983,6 +983,8 @@ router.get('/exceptions', authenticateToken, requireCapability(CAPABILITIES.PAYR
     }
 
     // Get timesheets with exceptions (pending, rejected, or missing)
+    // NOTE: Payroll exceptions are only relevant for active employees (business rule)
+    // This is an explicit filter for payroll processing, not a general employee filter
     const exceptionsResult = await query(
       `SELECT 
         e.employee_id,
@@ -1002,7 +1004,7 @@ router.get('/exceptions', authenticateToken, requireCapability(CAPABILITIES.PAYR
          AND t.week_start_date >= CURRENT_DATE - INTERVAL '14 days'
          AND t.week_end_date <= CURRENT_DATE
        WHERE e.tenant_id = $1
-       AND e.status = 'active'
+       AND e.status = 'active'  -- Explicit filter: Payroll exceptions only for active employees
        AND (t.status IN ('pending', 'rejected') OR t.id IS NULL)
        ORDER BY e.employee_id`,
       [tenantId]

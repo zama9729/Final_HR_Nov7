@@ -6,6 +6,7 @@ import { DateRange } from "react-day-picker";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useEffect } from "react";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
 
 type MetricsResponse = {
   totals: {
@@ -81,10 +82,13 @@ export default function AdminDashboard() {
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <div className="text-sm text-muted-foreground">Filter range (payments export):</div>
-        {/* Minimal date inputs instead of a full picker to avoid extra deps */}
-        <input type="date" onChange={(e)=> setRange(r=> ({...r, from: e.target.value ? new Date(e.target.value) : undefined} as any))} />
-        <span>to</span>
-        <input type="date" onChange={(e)=> setRange(r=> ({...r, to: e.target.value ? new Date(e.target.value) : undefined} as any))} />
+        <DateRangePicker
+          startDate={range?.from}
+          endDate={range?.to}
+          onChange={(start, end) => setRange({ from: start, to: end })}
+          mode="range"
+          placeholder="Select date range"
+        />
         <Button variant="secondary" onClick={exportCsv}>Export Payments CSV</Button>
       </div>
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

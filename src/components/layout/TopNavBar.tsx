@@ -5,6 +5,9 @@ import {
   X,
   User,
   LogOut,
+  FileText,
+  Award,
+  Sparkles,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -29,7 +32,7 @@ import {
 import { Notifications } from "@/components/Notifications";
 import { ReminderCountdown } from "@/components/ReminderCountdown";
 import { useNavigate } from "react-router-dom";
-import { getMenuItemsForProfile, type NavItem, type NavGroup } from "@/config/navigation";
+import { getMenuItemsForProfile, getAvatarDropdownItems, type NavItem, type NavGroup } from "@/config/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ProfilePicture } from "@/components/ProfilePicture";
 
@@ -338,8 +341,13 @@ export function TopNavBar() {
     );
   };
 
-  // Navigation groups are already filtered by getMenuItemsForProfile
+  // Use navigation groups directly - they already contain exactly what we need
   const filteredGroups = navigationGroups;
+
+  // Get avatar dropdown items based on role
+  const avatarDropdownItems = useMemo(() => {
+    return getAvatarDropdownItems(userRole || undefined);
+  }, [userRole]);
 
   return (
     <>
@@ -402,26 +410,21 @@ export function TopNavBar() {
                 </DropdownMenu>
               );
             })}
-            {/* Settings Link - Only for HR and Admin */}
-            {(userRole === 'hr' || userRole === 'admin') && (
-              <NavLink
-                to="/settings"
-                className={({ isActive }) =>
-                  `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium liquid-glass-nav-item ${
-                    isActive 
-                      ? 'liquid-glass-nav-item-active text-slate-900'
-                      : 'text-slate-700 hover:text-slate-900'
-                  }`
-                }
-              >
-                <Settings className="h-4 w-4" />
-                <span>Settings</span>
-              </NavLink>
-            )}
           </nav>
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* Smart Memo Quick Access */}
+            <button
+              onClick={() => {
+                // Trigger Smart Memo via custom event
+                window.dispatchEvent(new CustomEvent('open-smart-memo'));
+              }}
+              className="h-9 w-9 p-0 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
+              title="Smart Memo (Cmd/Ctrl+K)"
+            >
+              <Sparkles className="h-5 w-5" />
+            </button>
             <div className="relative">
               <ReminderCountdown />
             </div>
@@ -484,23 +487,36 @@ export function TopNavBar() {
                   </span>
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 liquid-glass-dropdown">
+              <DropdownMenuContent align="end" className="w-56 liquid-glass-dropdown">
                 <DropdownMenuLabel className="text-sm font-semibold">My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => navigate('/my/profile')}
-                  className="text-sm liquid-glass-dropdown-item"
-                >
-                  <User className="mr-2 h-4 w-4" />
-                  Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={handleLogout}
-                  className="text-sm liquid-glass-dropdown-item"
-                >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
+                {avatarDropdownItems.map((item, index) => {
+                  if (item.title === 'Logout') {
+                    return (
+                      <DropdownMenuItem
+                        key={index}
+                        onClick={handleLogout}
+                        className="text-sm liquid-glass-dropdown-item"
+                      >
+                        <item.icon className="mr-2 h-4 w-4" />
+                        {item.title}
+                      </DropdownMenuItem>
+                    );
+                  }
+                  return (
+                    <DropdownMenuItem
+                      key={index}
+                      onClick={() => {
+                        navigate(item.url);
+                        setMobileMenuOpen(false);
+                      }}
+                      className="text-sm liquid-glass-dropdown-item"
+                    >
+                      <item.icon className="mr-2 h-4 w-4" />
+                      {item.title}
+                    </DropdownMenuItem>
+                  );
+                })}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -582,21 +598,6 @@ export function TopNavBar() {
                   </div>
                 );
               })}
-              {/* Settings Link - Only for HR and Admin */}
-              {(userRole === 'hr' || userRole === 'admin') && (
-                <NavLink
-                  to="/settings"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-3 rounded-lg text-sm liquid-glass-nav-item ${
-                      isActive ? 'liquid-glass-nav-item-active text-slate-900 font-medium' : 'text-slate-700'
-                    }`
-                  }
-                >
-                  <Settings className="h-4 w-4" />
-                  <span>Settings</span>
-                </NavLink>
-              )}
             </div>
           </div>
         )}

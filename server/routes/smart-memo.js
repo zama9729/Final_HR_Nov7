@@ -3,6 +3,7 @@ import { query, queryWithOrg } from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { setTenantContext } from '../middleware/tenant.js';
 import { getTenantIdForUser } from '../utils/tenant.js';
+import { inferSmartMemoIntents } from '../services/smartMemoAI.js';
 
 const router = express.Router();
 
@@ -603,6 +604,278 @@ router.post('/smart-memo', authenticateToken, setTenantContext, async (req, res)
     res.status(500).json({ error: error.message || 'Failed to process smart memo' });
   }
 });
+
+/**
+ * POST /api/calendar/smart-memo/ai-infer
+ * AI-powered intent inference - returns draft actions without saving
+ */
+router.post('/ai-infer', authenticateToken, setTenantContext, async (req, res) => {
+  try {
+    const { memoText, currentPage, currentEntityId, currentEntityType, currentEntityName } = req.body;
+
+    if (!memoText || !memoText.trim()) {
+      return res.status(400).json({ error: 'memoText is required' });
+    }
+
+    const tenantId = await getTenantIdForUser(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Get user role
+    const profileResult = await query(
+      'SELECT role FROM profiles WHERE id = $1',
+      [req.user.id]
+    );
+    const userRole = profileResult.rows[0]?.role || 'employee';
+
+    // Build context for AI inference
+    const context = {
+      userId: req.user.id,
+      userRole,
+      tenantId,
+      currentPage: currentPage || 'dashboard',
+      currentEntityId,
+      currentEntityType,
+      currentEntityName,
+    };
+
+    // Infer intents using AI
+    const draftAction = await inferSmartMemoIntents(memoText, context);
+
+    res.json(draftAction);
+  } catch (error) {
+    console.error('Error in AI intent inference:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to infer intents',
+      fallback: true 
+    });
+  }
+});
+
+/**
+ * POST /api/calendar/smart-memo/ai-execute
+ * Execute confirmed draft actions (create calendar events, reminders, notes)
+ */
+router.post('/ai-execute', authenticateToken, setTenantContext, async (req, res) => {
+  try {
+    const { draftActionId, confirmedActions } = req.body;
+
+    if (!confirmedActions || !Array.isArray(confirmedActions) || confirmedActions.length === 0) {
+      return res.status(400).json({ error: 'confirmedActions array is required' });
+    }
+
+    const tenantId = await getTenantIdForUser(req.user.id);
+    if (!tenantId) {
+      return res.status(403).json({ error: 'No organization found' });
+    }
+
+    // Get employee ID
+    const empResult = await query(
+      'SELECT id FROM employees WHERE user_id = $1 AND tenant_id = $2',
+      [req.user.id, tenantId]
+    );
+
+    if (empResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee record not found' });
+    }
+
+    const employeeId = empResult.rows[0].id;
+    const results = {
+      calendarEvents: [],
+      reminders: [],
+      notes: [],
+      errors: [],
+    };
+
+    // Process each confirmed action
+    for (const action of confirmedActions) {
+      try {
+        if (action.type === 'calendar_event') {
+          const event = await createCalendarEvent(action, employeeId, tenantId, req.user.id);
+          results.calendarEvents.push(event);
+        } else if (action.type === 'reminder') {
+          const reminder = await createReminder(action, employeeId, tenantId, req.user.id);
+          results.reminders.push(reminder);
+        } else if (action.type === 'note') {
+          const note = await createNote(action, employeeId, tenantId, req.user.id);
+          results.notes.push(note);
+        }
+      } catch (error) {
+        console.error(`Error creating ${action.type}:`, error);
+        results.errors.push({
+          type: action.type,
+          error: error.message,
+        });
+      }
+    }
+
+    // Log audit entry
+    try {
+      const { audit } = await import('../utils/auditLog.js');
+      await audit({
+        actorId: req.user.id,
+        action: 'smart_memo_execute',
+        entityType: 'smart_memo',
+        entityId: draftActionId || 'batch',
+        details: {
+          actionsCount: confirmedActions.length,
+          actionTypes: confirmedActions.map(a => a.type),
+          results: {
+            calendarEvents: results.calendarEvents.length,
+            reminders: results.reminders.length,
+            notes: results.notes.length,
+            errors: results.errors.length,
+          },
+        },
+      });
+    } catch (auditError) {
+      console.error('Error logging audit event:', auditError);
+      // Don't fail the request if audit logging fails
+    }
+
+    res.json({
+      success: true,
+      results,
+      summary: {
+        calendarEvents: results.calendarEvents.length,
+        reminders: results.reminders.length,
+        notes: results.notes.length,
+        errors: results.errors.length,
+      },
+    });
+  } catch (error) {
+    console.error('Error executing smart memo actions:', error);
+    res.status(500).json({ error: error.message || 'Failed to execute actions' });
+  }
+});
+
+/**
+ * Helper: Create calendar event from action
+ */
+async function createCalendarEvent(action, employeeId, tenantId, userId) {
+  const { title, startDateTime, duration, participants = [], linkedEntityId, description } = action;
+  
+  const startDate = new Date(startDateTime);
+  const endDate = new Date(startDate.getTime() + (duration || 30) * 60 * 1000);
+
+  // Ensure team_schedule_events table exists
+  await query(`
+    CREATE TABLE IF NOT EXISTS team_schedule_events (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      tenant_id UUID NOT NULL,
+      employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      start_time TIMESTAMPTZ NOT NULL,
+      end_time TIMESTAMPTZ NOT NULL,
+      description TEXT,
+      linked_entity_type TEXT,
+      linked_entity_id UUID,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      created_by UUID REFERENCES profiles(id)
+    )
+  `);
+
+  const result = await query(
+    `INSERT INTO team_schedule_events 
+     (tenant_id, employee_id, title, start_time, end_time, description, linked_entity_type, linked_entity_id, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id, title, start_time, end_time`,
+    [
+      tenantId,
+      employeeId,
+      title,
+      startDate,
+      endDate,
+      description || null,
+      action.linkedEntity || null,
+      linkedEntityId || null,
+      userId,
+    ]
+  );
+
+  return result.rows[0];
+}
+
+/**
+ * Helper: Create reminder from action
+ */
+async function createReminder(action, employeeId, tenantId, userId) {
+  const { reminderTime, message, linkedEntityId } = action;
+  
+  // Ensure reminders table exists
+  await query(`
+    CREATE TABLE IF NOT EXISTS reminders (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      tenant_id UUID NOT NULL,
+      user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      remind_at TIMESTAMPTZ NOT NULL,
+      linked_entity_type TEXT,
+      linked_entity_id UUID,
+      is_read BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+
+  const remindAt = new Date(reminderTime);
+  const result = await query(
+    `INSERT INTO reminders 
+     (tenant_id, user_id, message, remind_at, linked_entity_type, linked_entity_id)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, message, remind_at`,
+    [
+      tenantId,
+      userId,
+      message,
+      remindAt,
+      action.linkedEntity || null,
+      linkedEntityId || null,
+    ]
+  );
+
+  return result.rows[0];
+}
+
+/**
+ * Helper: Create note from action
+ */
+async function createNote(action, employeeId, tenantId, userId) {
+  const { title, content, linkedEntityId } = action;
+  
+  // Ensure notes table exists (or use existing document/notes system)
+  await query(`
+    CREATE TABLE IF NOT EXISTS smart_memo_notes (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      tenant_id UUID NOT NULL,
+      employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      linked_entity_type TEXT,
+      linked_entity_id UUID,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      created_by UUID REFERENCES profiles(id)
+    )
+  `);
+
+  const result = await query(
+    `INSERT INTO smart_memo_notes 
+     (tenant_id, employee_id, title, content, linked_entity_type, linked_entity_id, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, title, content, created_at`,
+    [
+      tenantId,
+      employeeId,
+      title || 'Note',
+      content || '',
+      action.linkedEntity || null,
+      linkedEntityId || null,
+      userId,
+    ]
+  );
+
+  return result.rows[0];
+}
 
 export default router;
 

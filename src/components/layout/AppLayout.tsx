@@ -1,5 +1,6 @@
 import { TopNavBar } from "./TopNavBar";
 import { AIAssistant } from "@/components/AIAssistant";
+import { SmartMemoCommandPalette } from "@/components/smartmemo/SmartMemoCommandPalette";
 import { useOrgSetup } from "@/contexts/OrgSetupContext";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
@@ -35,6 +36,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         </div>
       </main>
       <AIAssistant />
+      <SmartMemoCommandPalette />
     </div>
   );
 }

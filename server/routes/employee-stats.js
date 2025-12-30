@@ -35,13 +35,19 @@ router.get('/', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'No organization found' });
     }
     
-    const { startDate, endDate, employeeId } = req.query;
+    const { startDate, endDate, employeeId, status } = req.query;
     
     // Build base query with proper parameterization
     const params = [tenantId];
     let paramIndex = 2;
     
-    let whereClause = 'WHERE e.tenant_id = $1 AND e.status = \'active\'';
+    // Only filter by status if explicitly requested (for backward compatibility, default to all)
+    let whereClause = 'WHERE e.tenant_id = $1';
+    if (status && status !== 'all') {
+      whereClause += ` AND e.status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
+    }
     let timesheetJoinCondition = '';
     
     if (startDate) {

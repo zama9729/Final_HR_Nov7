@@ -387,8 +387,9 @@ router.get('/', authenticateToken, async (req, res) => {
       } else if (!isEmployeeView && isManager && myEmployeeId) {
         // Manager Organization view: Show events for manager's team (direct reports + manager)
         // Get direct reports
+        // Get all direct reports (not just active) - filtering should be explicit in UI if needed
         const directReportsRes = await query(
-          `SELECT id FROM employees WHERE reporting_manager_id = $1 AND tenant_id = $2 AND status = 'active'`,
+          `SELECT id FROM employees WHERE reporting_manager_id = $1 AND tenant_id = $2`,
           [myEmployeeId, tenantId]
         );
         const directReportIds = directReportsRes.rows.map(r => r.id);
@@ -505,8 +506,8 @@ router.get('/', authenticateToken, async (req, res) => {
           JOIN profiles p ON p.id = e.user_id
           LEFT JOIN onboarding_data od ON od.employee_id = e.id
           WHERE e.tenant_id = $1
-            AND e.status = 'active'
             AND od.date_of_birth IS NOT NULL
+            -- Removed implicit active filter - birthdays should show for all employees
         `;
         const birthdayParams = [tenantId];
         
@@ -517,8 +518,9 @@ router.get('/', authenticateToken, async (req, res) => {
           birthdayParams.push(myEmployeeId);
         } else if (!isEmployeeView && isManager && myEmployeeId) {
           // Manager Organization view: Show birthdays for manager's team (direct reports + manager)
+          // Get all direct reports (not just active) - filtering should be explicit in UI if needed
           const directReportsRes = await query(
-            `SELECT id FROM employees WHERE reporting_manager_id = $1 AND tenant_id = $2 AND status = 'active'`,
+            `SELECT id FROM employees WHERE reporting_manager_id = $1 AND tenant_id = $2`,
             [myEmployeeId, tenantId]
           );
           const directReportIds = directReportsRes.rows.map(r => r.id);

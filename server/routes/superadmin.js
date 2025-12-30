@@ -8,11 +8,16 @@ const router = express.Router();
 router.use(authenticateToken);
 router.use(requireSuperadmin);
 
+// Health check route to verify superadmin routes are working
+router.get('/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Superadmin routes are working' });
+});
+
 /**
  * GET /api/superadmin/tenants
  * List all tenants with their tier, status, and usage stats
  */
-router.get('/tenants', async (req, res) => {
+router.get('/tenants', async (req, res, next) => {
   try {
     const { status, tier, search } = req.query;
     
@@ -434,7 +439,7 @@ router.get('/audit-logs', async (req, res) => {
  * GET /api/superadmin/stats
  * Get platform-wide statistics
  */
-router.get('/stats', async (req, res) => {
+router.get('/stats', async (req, res, next) => {
   try {
     const [tenantsByTier, tenantsByStatus, totalFeatures, recentActivity] = await Promise.all([
       query(`

@@ -418,6 +418,29 @@ class ApiClient {
   }
 
   // Smart Memo
+  async inferSmartMemoIntents(data: {
+    memoText: string;
+    currentPage?: string;
+    currentEntityId?: string;
+    currentEntityType?: string;
+    currentEntityName?: string;
+  }) {
+    return this.request('/api/calendar/smart-memo/ai-infer', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async executeSmartMemoActions(data: {
+    draftActionId?: string;
+    confirmedActions: any[];
+  }) {
+    return this.request('/api/calendar/smart-memo/ai-execute', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async saveSmartMemo(data: { memoText: string; baseDate: string; mentions?: any[] }) {
     return this.request('/api/calendar/smart-memo', {
       method: 'POST',

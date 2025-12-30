@@ -610,7 +610,7 @@ router.get('/schedules/:id', authenticateToken, setTenantContext, async (req, re
        FROM employees e
        JOIN profiles p ON p.id = e.user_id
        WHERE e.tenant_id = $1
-         AND e.status = 'active'
+         -- Removed implicit active filter - all employees should be included
        ORDER BY p.first_name, p.last_name`,
       [orgId]
     );
