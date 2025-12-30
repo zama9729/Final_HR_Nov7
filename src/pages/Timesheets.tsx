@@ -16,6 +16,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { DateRangePicker } from "@/components/ui/DateRangePicker";
 import { DateRange } from "react-day-picker";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DayPicker } from "react-day-picker";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { DayPicker } from "react-day-picker";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface TimesheetEntry {
   id?: string;
@@ -1081,44 +1088,91 @@ export default function Timesheets() {
           </h1>
           <p className="text-muted-foreground text-sm">Track and manage your work hours</p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-          <div className="flex flex-wrap gap-2 items-center">
-            <DateRangePicker
-              startDate={dateRange?.from}
-              endDate={dateRange?.to}
-              onChange={handleDateRangeSelect}
-              mode="range"
-              placeholder="Pick a date range"
-              className="border-2 bg-background/50 backdrop-blur-sm"
-            />
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentWeek(startOfWeek(new Date(), { weekStartsOn: 1 }))}
-              className="border-2 bg-background/50 backdrop-blur-sm"
-            >
-              Today
-            </Button>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentWeek(addDays(currentWeek, -7))}
-              className="border-2 bg-background/50 backdrop-blur-sm"
-            >
-              ← Prev
-            </Button>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentWeek(addDays(currentWeek, 7))}
-              className="border-2 bg-background/50 backdrop-blur-sm"
-            >
-              Next →
-            </Button>
-          </div>
+        <div className="flex flex-row items-center gap-6">
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="font-bold text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none cursor-pointer flex items-center gap-1.5"
+              >
+                <CalendarIcon className="h-4 w-4" />
+                {dateRange?.from && dateRange?.to
+                  ? `${format(dateRange.from, "MMM d, yyyy")} - ${format(dateRange.to, "MMM d, yyyy")}`
+                  : "Select date range"}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0 bg-white/80 backdrop-blur-xl border-white/60 shadow-xl rounded-xl overflow-hidden" align="start">
+              <DayPicker
+                mode="range"
+                selected={dateRange}
+                onSelect={(range) => {
+                  if (range && 'from' in range && 'to' in range) {
+                    handleDateRangeSelect(range.from, range.to);
+                  }
+                }}
+                numberOfMonths={2}
+                className="p-3"
+                classNames={{
+                  months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+                  month: "space-y-4",
+                  caption: "flex justify-center pt-1 relative items-center",
+                  caption_label: "text-sm font-medium text-gray-900",
+                  nav: "space-x-1 flex items-center",
+                  nav_button: cn(
+                    "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100 hover:scale-105 transition-all duration-150 ease-out text-gray-700 hover:text-gray-900"
+                  ),
+                  nav_button_previous: "absolute left-1",
+                  nav_button_next: "absolute right-1",
+                  table: "w-full border-collapse space-y-1",
+                  head_row: "flex",
+                  head_cell: "text-gray-600 rounded-md w-9 font-normal text-[0.8rem]",
+                  row: "flex w-full mt-2",
+                  cell: "h-9 w-9 text-center text-sm p-0 relative",
+                  day: cn(
+                    "h-9 w-9 p-0 font-normal rounded-md transition-all duration-150 ease-out",
+                    "text-gray-900 hover:scale-[1.05] hover:shadow-md",
+                    "focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:ring-offset-0"
+                  ),
+                  day_range_start: "bg-red-500 text-white rounded-l-full hover:bg-red-600",
+                  day_range_end: "bg-red-500 text-white rounded-r-full hover:bg-red-600",
+                  day_selected: "bg-red-500 text-white hover:bg-red-600 focus:bg-red-600 rounded-full",
+                  day_range_middle: "bg-red-500/12 text-gray-900 hover:bg-red-500/20",
+                  day_today: "font-semibold border border-gray-300",
+                  day_outside: "text-gray-400 opacity-50",
+                  day_disabled: "text-gray-300 opacity-30 cursor-not-allowed",
+                  day_hidden: "invisible",
+                }}
+                components={{
+                  IconLeft: ({ ...props }) => <ChevronLeft className="h-4 w-4" {...props} />,
+                  IconRight: ({ ...props }) => <ChevronRight className="h-4 w-4" {...props} />,
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+          
+          <button
+            type="button"
+            onClick={() => setCurrentWeek(startOfWeek(new Date(), { weekStartsOn: 1 }))}
+            className="font-bold text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none cursor-pointer"
+          >
+            Today
+          </button>
+          
+          <button
+            type="button"
+            onClick={() => setCurrentWeek(addDays(currentWeek, -7))}
+            className="font-bold text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none cursor-pointer"
+          >
+            ← Prev
+          </button>
+          
+          <button
+            type="button"
+            onClick={() => setCurrentWeek(addDays(currentWeek, 7))}
+            className="font-bold text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none cursor-pointer"
+          >
+            Next →
+          </button>
         </div>
         {hasShiftEntries && (
           <Alert className="border-primary/30 bg-primary/5 text-primary-foreground/90 dark:bg-primary/10 space-y-2">

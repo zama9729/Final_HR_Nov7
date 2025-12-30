@@ -609,7 +609,7 @@ router.post('/smart-memo', authenticateToken, setTenantContext, async (req, res)
  * POST /api/calendar/smart-memo/ai-infer
  * AI-powered intent inference - returns draft actions without saving
  */
-router.post('/ai-infer', authenticateToken, setTenantContext, async (req, res) => {
+router.post('/smart-memo/ai-infer', authenticateToken, setTenantContext, async (req, res) => {
   try {
     const { memoText, currentPage, currentEntityId, currentEntityType, currentEntityName } = req.body;
 
@@ -622,12 +622,9 @@ router.post('/ai-infer', authenticateToken, setTenantContext, async (req, res) =
       return res.status(403).json({ error: 'No organization found' });
     }
 
-    // Get user role
-    const profileResult = await query(
-      'SELECT role FROM profiles WHERE id = $1',
-      [req.user.id]
-    );
-    const userRole = profileResult.rows[0]?.role || 'employee';
+    // Get user role from JWT (preferred) and fall back to 'employee' if missing.
+    // We used to read this from profiles.role, but that column does not exist in some schemas.
+    const userRole = (req.user.role || 'employee').toLowerCase();
 
     // Build context for AI inference
     const context = {
@@ -657,7 +654,7 @@ router.post('/ai-infer', authenticateToken, setTenantContext, async (req, res) =
  * POST /api/calendar/smart-memo/ai-execute
  * Execute confirmed draft actions (create calendar events, reminders, notes)
  */
-router.post('/ai-execute', authenticateToken, setTenantContext, async (req, res) => {
+router.post('/smart-memo/ai-execute', authenticateToken, setTenantContext, async (req, res) => {
   try {
     const { draftActionId, confirmedActions } = req.body;
 
@@ -695,6 +692,13 @@ router.post('/ai-execute', authenticateToken, setTenantContext, async (req, res)
           const event = await createCalendarEvent(action, employeeId, tenantId, req.user.id);
           results.calendarEvents.push(event);
         } else if (action.type === 'reminder') {
+          // Validate reminder action has required fields
+          if (!action.reminderTime) {
+            throw new Error('Reminder action missing reminderTime');
+          }
+          if (!action.message && !action.title) {
+            throw new Error('Reminder action missing message or title');
+          }
           const reminder = await createReminder(action, employeeId, tenantId, req.user.id);
           results.reminders.push(reminder);
         } else if (action.type === 'note') {
@@ -801,38 +805,60 @@ async function createCalendarEvent(action, employeeId, tenantId, userId) {
  * Helper: Create reminder from action
  */
 async function createReminder(action, employeeId, tenantId, userId) {
-  const { reminderTime, message, linkedEntityId } = action;
+  const { reminderTime, message, title, linkedEntityId } = action;
   
-  // Ensure reminders table exists
+  // Ensure reminders table exists with correct schema
   await query(`
     CREATE TABLE IF NOT EXISTS reminders (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      tenant_id UUID NOT NULL,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
       user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-      message TEXT NOT NULL,
+      employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
       remind_at TIMESTAMPTZ NOT NULL,
-      linked_entity_type TEXT,
-      linked_entity_id UUID,
-      is_read BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMPTZ DEFAULT now()
+      message TEXT,
+      source_memo_text TEXT,
+      is_read BOOLEAN NOT NULL DEFAULT false,
+      is_dismissed BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
 
+  // Create indexes if they don't exist
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id);
+    CREATE INDEX IF NOT EXISTS idx_reminders_tenant ON reminders(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_reminders_remind_at ON reminders(remind_at);
+    CREATE INDEX IF NOT EXISTS idx_reminders_unread ON reminders(user_id, is_read, is_dismissed) WHERE is_read = false AND is_dismissed = false;
+  `).catch(() => {
+    // Indexes might already exist, ignore error
+  });
+
   const remindAt = new Date(reminderTime);
+  if (isNaN(remindAt.getTime())) {
+    throw new Error(`Invalid reminder time: ${reminderTime}`);
+  }
+
+  // Use message or title, fallback to a default message
+  const reminderMessage = message || title || 'Reminder from Smart Memo';
+
   const result = await query(
     `INSERT INTO reminders 
-     (tenant_id, user_id, message, remind_at, linked_entity_type, linked_entity_id)
+     (tenant_id, user_id, employee_id, remind_at, message, source_memo_text)
      VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id, message, remind_at`,
+     RETURNING id, message, remind_at, created_at`,
     [
       tenantId,
       userId,
-      message,
-      remindAt,
-      action.linkedEntity || null,
-      linkedEntityId || null,
+      employeeId,
+      remindAt.toISOString(),
+      reminderMessage,
+      action.content || action.message || action.title || 'Smart Memo reminder',
     ]
   );
+
+  if (!result.rows || result.rows.length === 0) {
+    throw new Error('Failed to create reminder - no row returned');
+  }
 
   return result.rows[0];
 }

@@ -342,7 +342,7 @@ class ApiClient {
 
   async getBranches() {
     const data = await this.getBranchHierarchy();
-    return data?.departments || [];
+    return data?.branches || [];
   }
 
   async upsertBranch(payload: Record<string, any>) {

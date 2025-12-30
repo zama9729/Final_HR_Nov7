@@ -6,12 +6,13 @@ import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { parseSmartMemo, extractReminders, ParsedEntry, extractMentions } from "@/utils/smartMemoParser";
 import { format } from "date-fns";
-import { Calendar, Clock, Loader2, CheckCircle2, User, X } from "lucide-react";
+import { Calendar, Clock, Loader2, CheckCircle2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { SmartMemoMentions } from "@/components/common/SmartMemoMentions";
 
 interface SmartMemoProps {
   selectedDate: Date;
@@ -44,13 +45,11 @@ export function SmartMemoEnhanced({ selectedDate, onEventsCreated }: SmartMemoPr
   const [showPreview, setShowPreview] = useState(false);
   const [suggestions, setSuggestions] = useState<EmployeeSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestionPosition, setSuggestionPosition] = useState({ top: 0, left: 0 });
   const [currentMentionQuery, setCurrentMentionQuery] = useState("");
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [mentions, setMentions] = useState<Map<string, MentionData>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const suggestionsRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -193,6 +192,7 @@ export function SmartMemoEnhanced({ selectedDate, onEventsCreated }: SmartMemoPr
       }
     }
   };
+
 
   // Render text with highlighted mentions
   const renderTextWithMentions = (text: string) => {
@@ -394,59 +394,6 @@ export function SmartMemoEnhanced({ selectedDate, onEventsCreated }: SmartMemoPr
               rows={4}
               className="resize-none"
             />
-            {showSuggestions && (
-              <div
-                ref={suggestionsRef}
-                className="absolute z-[9999] w-full mt-1 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg max-h-72 overflow-y-auto"
-                style={{ top: '100%', left: 0, marginTop: '4px' }}
-              >
-                {suggestions.length > 0 ? (
-                  suggestions.map((employee, idx) => (
-                    <div
-                      key={employee.id}
-                      className={cn(
-                        "px-3 py-2 cursor-pointer hover:bg-muted/70 transition-colors",
-                        idx === selectedSuggestionIndex && "bg-muted"
-                      )}
-                      onClick={() => handleSelectSuggestion(employee)}
-                      onMouseEnter={() => setSelectedSuggestionIndex(idx)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="font-medium text-sm truncate">
-                            {employee.name}
-                            {employee.employee_id && (
-                              <span className="ml-1 text-xs text-muted-foreground">
-                                · {employee.employee_id}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground truncate">
-                            {employee.designation}
-                            {employee.department && ` • ${employee.department}`}
-                            {employee.team && employee.team !== 'No Team' && ` • ${employee.team}`}
-                          </div>
-                          {employee.email && (
-                            <div className="text-[11px] text-muted-foreground truncate">
-                              {employee.email}
-                            </div>
-                          )}
-                        </div>
-                        <User className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                    </div>
-                  ))
-                ) : currentMentionQuery.length > 0 ? (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">
-                    No employees found matching "{currentMentionQuery}"
-                  </div>
-                ) : (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">
-                    Type a name after @ to search...
-                  </div>
-                )}
-              </div>
-            )}
           </div>
           <div className="flex gap-2">
             <Button
@@ -478,6 +425,18 @@ export function SmartMemoEnhanced({ selectedDate, onEventsCreated }: SmartMemoPr
           </div>
         </CardContent>
       </Card>
+
+      {/* Mention suggestions dropdown - rendered via portal with improved positioning */}
+      <SmartMemoMentions
+        show={showSuggestions}
+        suggestions={suggestions}
+        selectedIndex={selectedSuggestionIndex}
+        onSelect={handleSelectSuggestion}
+        onHover={setSelectedSuggestionIndex}
+        query={currentMentionQuery}
+        textareaElement={textareaRef.current}
+        onClose={() => setShowSuggestions(false)}
+      />
 
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
         <DialogContent>

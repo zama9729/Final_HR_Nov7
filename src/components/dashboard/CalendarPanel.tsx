@@ -705,31 +705,32 @@ export function CalendarPanel() {
               </div>
             )}
             <div className="flex items-center gap-2 rounded-lg bg-white border border-gray-200 px-3 py-2 shadow-sm">
-              <Button
-                variant="ghost"
-                size="icon"
+              <button
+                type="button"
                 onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-                className="h-8 w-8 rounded-md hover:bg-gray-100"
+                className="h-8 w-8 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
+                aria-label="Previous month"
               >
                 <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <div className="text-sm font-bold text-gray-900 min-w-[120px] text-center">{format(currentMonth, 'MMMM yyyy')}</div>
-              <Button
-                variant="ghost"
-                size="icon"
+              </button>
+              <div className="text-sm font-bold text-gray-900 min-w-[120px] text-center">
+                {format(currentMonth, 'MMMM yyyy')}
+              </div>
+              <button
+                type="button"
                 onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-                className="h-8 w-8 rounded-md hover:bg-gray-100"
+                className="h-8 w-8 flex items-center justify-center text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
+                aria-label="Next month"
               >
                 <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
+              </button>
+              <button
+                type="button"
                 onClick={() => setCurrentMonth(startOfMonth(new Date()))}
-                className="ml-2"
+                className="ml-2 text-sm font-semibold text-slate-700 hover:text-slate-900 transition-transform duration-300 hover:scale-110 focus:outline-none"
               >
                 Today
-              </Button>
+              </button>
             </div>
           </div>
         </CardHeader>
