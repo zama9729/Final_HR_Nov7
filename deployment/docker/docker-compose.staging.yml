@@ -1,0 +1,164 @@
+# Staging Docker Compose Configuration for HR Suite
+# Usage: docker-compose -f docker-compose.staging.yml up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: hr-suite-postgres-staging
+    environment:
+      POSTGRES_DB: ${DB_NAME:-hr_suite}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: hr-suite-redis-staging
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # Backend API Server
+  api:
+    build:
+      context: ../../server
+      dockerfile: ../../Dockerfile.api
+    image: hr-suite-api:staging
+    container_name: hr-suite-api-staging
+    ports:
+      - "${API_PORT:-3001}:3001"
+    env_file:
+      - ../env-templates/.env.staging
+    environment:
+      - NODE_ENV=staging
+      - PORT=3001
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-hr_suite}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # Frontend application
+  frontend:
+    build:
+      context: ../..
+      dockerfile: ../../Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
+        - VITE_ADMIN_EMAILS=${VITE_ADMIN_EMAILS}
+    image: hr-suite-frontend:staging
+    container_name: hr-suite-frontend-staging
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # RAG Service
+  rag-postgres:
+    image: postgres:15-alpine
+    container_name: rag-postgres-staging
+    environment:
+      POSTGRES_DB: ${RAG_DB_NAME:-rag_db}
+      POSTGRES_USER: ${RAG_DB_USER:-rag_user}
+      POSTGRES_PASSWORD: ${RAG_DB_PASSWORD}
+    ports:
+      - "${RAG_DB_PORT:-5433}:5432"
+    volumes:
+      - rag_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  rag-redis:
+    image: redis:7-alpine
+    container_name: rag-redis-staging
+    ports:
+      - "${RAG_REDIS_PORT:-6381}:6379"
+    volumes:
+      - rag_redis_data:/data
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  chroma:
+    image: chromadb/chroma:0.4.24
+    container_name: rag-chroma-staging
+    ports:
+      - "${CHROMA_PORT:-8000}:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+    volumes:
+      - chroma_data:/chroma/chroma
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  rag-api:
+    build:
+      context: ../../rag-service
+      dockerfile: ../../rag-service/Dockerfile
+    image: hr-suite-rag-api:staging
+    container_name: rag-api-staging
+    ports:
+      - "${RAG_API_PORT:-8001}:8000"
+    environment:
+      - DATABASE_URL=postgresql://${RAG_DB_USER:-rag_user}:${RAG_DB_PASSWORD}@rag-postgres:5432/${RAG_DB_NAME:-rag_db}
+      - REDIS_URL=redis://rag-redis:6379/0
+      - CHROMA_URL=http://chroma:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+    volumes:
+      - rag_uploads:/app/uploads
+    depends_on:
+      - rag-postgres
+      - rag-redis
+      - chroma
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  rag_postgres_data:
+  rag_redis_data:
+  chroma_data:
+  rag_uploads:
+
+networks:
+  hr-suite-network:
+    driver: bridge
+

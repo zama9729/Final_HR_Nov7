@@ -2,7 +2,7 @@
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from app.models import Employee, LeaveRequest, Paystub, Document, Tenant, Timesheet, TimesheetEntry
 from app.auth import RBACPolicy
 from app.database import get_db
@@ -18,7 +18,350 @@ class ToolRegistry:
     def __init__(self, db: Session):
         self.db = db
     
-    # ... existing methods ...
+    def get_leave_balance(self, tenant_id: str, employee_id: str) -> Dict[str, Any]:
+        """Get leave balance for an employee."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            employee_uuid = uuid.UUID(employee_id)
+            
+            # Query leave requests to calculate balance
+            leave_requests = self.db.query(LeaveRequest).filter(
+                and_(
+                    LeaveRequest.tenant_id == tenant_uuid,
+                    LeaveRequest.employee_id == employee_uuid,
+                    LeaveRequest.status == "approved"
+                )
+            ).all()
+            
+            # Calculate used leaves (simplified - count approved days)
+            used_leaves = sum(
+                (lr.to_date - lr.from_date).days + 1 
+                for lr in leave_requests 
+                if lr.from_date and lr.to_date
+            )
+            
+            # Default entitlement (can be fetched from leave policies if available)
+            default_entitlement = 12  # Default 12 days per year
+            
+            return {
+                "employee_id": employee_id,
+                "entitlement": default_entitlement,
+                "used": used_leaves,
+                "remaining": max(0, default_entitlement - used_leaves)
+            }
+        except Exception as e:
+            logger.error(f"get_leave_balance failed: {e}")
+            return {"error": str(e)}
+    
+    def list_recent_paystubs(self, tenant_id: str, employee_id: str, n: int = 3) -> Dict[str, Any]:
+        """List recent paystubs for an employee."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            employee_uuid = uuid.UUID(employee_id)
+            
+            paystubs = self.db.query(Paystub).filter(
+                and_(
+                    Paystub.tenant_id == tenant_uuid,
+                    Paystub.employee_id == employee_uuid
+                )
+            ).order_by(Paystub.pay_period_end.desc()).limit(n).all()
+            
+            return {
+                "employee_id": employee_id,
+                "paystubs": [
+                    {
+                        "id": str(ps.id),
+                        "pay_period_start": ps.pay_period_start.isoformat() if ps.pay_period_start else None,
+                        "pay_period_end": ps.pay_period_end.isoformat() if ps.pay_period_end else None,
+                        "gross_pay": float(ps.gross_pay) if ps.gross_pay else 0.0,
+                        "net_pay": float(ps.net_pay) if ps.net_pay else 0.0
+                    }
+                    for ps in paystubs
+                ]
+            }
+        except Exception as e:
+            logger.error(f"list_recent_paystubs failed: {e}")
+            return {"error": str(e)}
+    
+    def create_leave_request(self, tenant_id: str, employee_id: str, from_date: str, to_date: str, reason: str = "") -> Dict[str, Any]:
+        """Create a new leave request."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            employee_uuid = uuid.UUID(employee_id)
+            from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+            to_dt = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+            
+            # Create leave request
+            leave_request = LeaveRequest(
+                id=uuid.uuid4(),
+                tenant_id=tenant_uuid,
+                employee_id=employee_uuid,
+                from_date=from_dt,
+                to_date=to_dt,
+                reason=reason or "Leave request",
+                status="pending",
+                created_at=datetime.utcnow()
+            )
+            self.db.add(leave_request)
+            self.db.commit()
+            self.db.refresh(leave_request)
+            
+            return {
+                "status": "created",
+                "leave_id": str(leave_request.id),
+                "message": f"Leave request created for {from_date} to {to_date}"
+            }
+        except Exception as e:
+            logger.error(f"create_leave_request failed: {e}")
+            self.db.rollback()
+            return {"error": str(e)}
+    
+    def approve_leave(self, tenant_id: str, approver_id: str, leave_id: str) -> Dict[str, Any]:
+        """Approve a leave request."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            approver_uuid = uuid.UUID(approver_id)
+            leave_uuid = uuid.UUID(leave_id)
+            
+            # Get approver to check role
+            approver = self.db.query(Employee).filter(Employee.id == approver_uuid).first()
+            if not approver or approver.role not in ["manager", "hr", "ceo"]:
+                return {"error": "Only managers, HR, or CEO can approve leaves"}
+            
+            # Get leave request
+            leave_request = self.db.query(LeaveRequest).filter(
+                and_(
+                    LeaveRequest.id == leave_uuid,
+                    LeaveRequest.tenant_id == tenant_uuid
+                )
+            ).first()
+            
+            if not leave_request:
+                return {"error": "Leave request not found"}
+            
+            if leave_request.status != "pending":
+                return {"error": f"Leave request is already {leave_request.status}"}
+            
+            leave_request.status = "approved"
+            leave_request.approver_id = approver_uuid
+            leave_request.approved_at = datetime.utcnow()
+            self.db.commit()
+            
+            return {
+                "status": "approved",
+                "leave_id": leave_id,
+                "message": "Leave request approved successfully"
+            }
+        except Exception as e:
+            logger.error(f"approve_leave failed: {e}")
+            self.db.rollback()
+            return {"error": str(e)}
+    
+    def summarize_policy(self, tenant_id: str, doc_id: str) -> Dict[str, Any]:
+        """Summarize a policy document."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            doc_uuid = uuid.UUID(doc_id)
+            
+            document = self.db.query(Document).filter(
+                and_(
+                    Document.id == doc_uuid,
+                    Document.tenant_id == tenant_uuid
+                )
+            ).first()
+            
+            if not document:
+                return {"error": "Document not found"}
+            
+            # Get chunks for this document
+            chunks = self.db.query(DocumentChunk).filter(
+                DocumentChunk.document_id == doc_uuid
+            ).limit(10).all()
+            
+            # Simple summary from first few chunks
+            summary_text = " ".join([c.content[:200] for c in chunks[:3] if c.content])
+            
+            return {
+                "document_id": doc_id,
+                "title": document.title or "Policy Document",
+                "summary": summary_text[:500] + "..." if len(summary_text) > 500 else summary_text
+            }
+        except Exception as e:
+            logger.error(f"summarize_policy failed: {e}")
+            return {"error": str(e)}
+    
+    def get_my_leave_requests(self, tenant_id: str, employee_id: str, n: int = 5) -> Dict[str, Any]:
+        """List the status of my recent leave requests."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            employee_uuid = uuid.UUID(employee_id)
+            
+            leave_requests = self.db.query(LeaveRequest).filter(
+                and_(
+                    LeaveRequest.tenant_id == tenant_uuid,
+                    LeaveRequest.employee_id == employee_uuid
+                )
+            ).order_by(LeaveRequest.created_at.desc()).limit(n).all()
+            
+            return {
+                "employee_id": employee_id,
+                "requests": [
+                    {
+                        "id": str(lr.id),
+                        "from_date": lr.from_date.isoformat() if lr.from_date else None,
+                        "to_date": lr.to_date.isoformat() if lr.to_date else None,
+                        "status": lr.status,
+                        "reason": lr.reason
+                    }
+                    for lr in leave_requests
+                ]
+            }
+        except Exception as e:
+            logger.error(f"get_my_leave_requests failed: {e}")
+            return {"error": str(e)}
+    
+    def get_pending_approvals(self, tenant_id: str, manager_id: str) -> Dict[str, Any]:
+        """Show leave requests waiting for my approval."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            manager_uuid = uuid.UUID(manager_id)
+            
+            # Get employees reporting to this manager
+            direct_reports = self.db.query(Employee).filter(
+                and_(
+                    Employee.tenant_id == tenant_uuid,
+                    Employee.reporting_manager_id == manager_uuid,
+                    Employee.is_active == True
+                )
+            ).all()
+            
+            report_ids = [emp.id for emp in direct_reports]
+            
+            # Get pending leave requests for direct reports
+            leave_requests = self.db.query(LeaveRequest).filter(
+                and_(
+                    LeaveRequest.tenant_id == tenant_uuid,
+                    LeaveRequest.employee_id.in_(report_ids),
+                    LeaveRequest.status == "pending"
+                )
+            ).all()
+            
+            return {
+                "manager_id": manager_id,
+                "pending_requests": [
+                    {
+                        "id": str(lr.id),
+                        "employee_id": str(lr.employee_id),
+                        "from_date": lr.from_date.isoformat() if lr.from_date else None,
+                        "to_date": lr.to_date.isoformat() if lr.to_date else None,
+                        "reason": lr.reason
+                    }
+                    for lr in leave_requests
+                ]
+            }
+        except Exception as e:
+            logger.error(f"get_pending_approvals failed: {e}")
+            return {"error": str(e)}
+    
+    def get_dashboard_summary(self, tenant_id: str) -> Dict[str, Any]:
+        """Fetch key HR metrics for my organisation."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            
+            # Get employee count
+            total_employees = self.db.query(Employee).filter(
+                and_(
+                    Employee.tenant_id == tenant_uuid,
+                    Employee.is_active == True
+                )
+            ).count()
+            
+            # Get pending leave requests
+            pending_leaves = self.db.query(LeaveRequest).filter(
+                and_(
+                    LeaveRequest.tenant_id == tenant_uuid,
+                    LeaveRequest.status == "pending"
+                )
+            ).count()
+            
+            return {
+                "tenant_id": tenant_id,
+                "total_employees": total_employees,
+                "pending_leave_requests": pending_leaves,
+                "message": f"Organization has {total_employees} active employees and {pending_leaves} pending leave requests"
+            }
+        except Exception as e:
+            logger.error(f"get_dashboard_summary failed: {e}")
+            return {"error": str(e)}
+    
+    def list_employees(self, tenant_id: str, query: Optional[str] = None, department: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Search employees by department, status, or name."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            
+            q = self.db.query(Employee).filter(
+                and_(
+                    Employee.tenant_id == tenant_uuid,
+                    Employee.is_active == True
+                )
+            )
+            
+            if query:
+                q = q.filter(
+                    or_(
+                        Employee.first_name.ilike(f"%{query}%"),
+                        Employee.last_name.ilike(f"%{query}%"),
+                        Employee.email.ilike(f"%{query}%")
+                    )
+                )
+            
+            if department:
+                q = q.filter(Employee.department == department)
+            
+            employees = q.limit(50).all()
+            
+            return [
+                {
+                    "id": str(emp.id),
+                    "name": f"{emp.first_name} {emp.last_name}",
+                    "email": emp.email,
+                    "department": emp.department,
+                    "role": emp.role
+                }
+                for emp in employees
+            ]
+        except Exception as e:
+            logger.error(f"list_employees failed: {e}")
+            return []
+    
+    def get_employee_profile(self, tenant_id: str, employee_id: str) -> Dict[str, Any]:
+        """Look up a specific employee's profile information."""
+        try:
+            tenant_uuid = uuid.UUID(tenant_id)
+            employee_uuid = uuid.UUID(employee_id)
+            
+            employee = self.db.query(Employee).filter(
+                and_(
+                    Employee.id == employee_uuid,
+                    Employee.tenant_id == tenant_uuid
+                )
+            ).first()
+            
+            if not employee:
+                return {"error": "Employee not found"}
+            
+            return {
+                "id": str(employee.id),
+                "employee_id": employee.employee_id,
+                "name": f"{employee.first_name} {employee.last_name}",
+                "email": employee.email,
+                "department": employee.department,
+                "role": employee.role,
+                "is_active": employee.is_active
+            }
+        except Exception as e:
+            logger.error(f"get_employee_profile failed: {e}")
+            return {"error": str(e)}
 
     def get_attendance_summary(self, tenant_id: str, employee_id: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """Get attendance summary for a period."""

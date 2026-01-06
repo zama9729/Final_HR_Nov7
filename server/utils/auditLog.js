@@ -19,6 +19,7 @@ const ensureAuditLogsTable = async () => {
   ensurePromise = (async () => {
     try {
       await createPool();
+      // First ensure the table exists with org_id column
       await query(`
         CREATE TABLE IF NOT EXISTS audit_logs (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -30,8 +31,33 @@ const ensureAuditLogsTable = async () => {
           payload JSONB DEFAULT '{}'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
-
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_org_id ON audit_logs(org_id);
+      `);
+      
+      // Ensure org_id column exists (in case table was created without it)
+      await query(`
+        DO $$ 
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'audit_logs' AND column_name = 'org_id'
+          ) THEN
+            ALTER TABLE audit_logs ADD COLUMN org_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+          END IF;
+        END $$;
+      `);
+      
+      // Create indexes only if org_id column exists
+      await query(`
+        DO $$ 
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'audit_logs' AND column_name = 'org_id'
+          ) THEN
+            CREATE INDEX IF NOT EXISTS idx_audit_logs_org_id ON audit_logs(org_id);
+          END IF;
+        END $$;
+        
         CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_user_id);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_object ON audit_logs(object_type, object_id);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);

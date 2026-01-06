@@ -20,12 +20,17 @@ interface ProfilePictureProps {
  * - If userId + src are provided, it will:
  *   - use src directly for non-storage URLs
  *   - fetch a presigned URL for MinIO/AWS S3 URLs.
+ * - Handles image load errors gracefully by clearing the URL to show fallback avatar.
  */
 export function ProfilePicture({ userId, src, className, alt }: ProfilePictureProps) {
   const [presignedUrl, setPresignedUrl] = useState<string | undefined>(src);
   const [loading, setLoading] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
+    // Reset error state when userId or src changes
+    setImageError(false);
+    
     // If we have no user, just mirror src (or undefined)
     if (!userId) {
       setPresignedUrl(src);
@@ -71,6 +76,7 @@ export function ProfilePicture({ userId, src, className, alt }: ProfilePicturePr
       src.includes('s3.') ||
       src.includes('/docshr/') ||
       src.includes('/hr-onboarding-docs/') ||
+      src.includes('/hr-docs/') ||
       (src.startsWith('http://') && (src.includes(':9000') || src.includes('minio'))) ||
       (src.startsWith('https://') && src.includes('amazonaws.com'));
 
@@ -103,6 +109,7 @@ export function ProfilePicture({ userId, src, className, alt }: ProfilePicturePr
         if (errorMsg.includes('No profile picture')) {
           setPresignedUrl(undefined);
         } else {
+          // Try to use the original src as fallback
           setPresignedUrl(src);
         }
       } finally {
@@ -113,8 +120,29 @@ export function ProfilePicture({ userId, src, className, alt }: ProfilePicturePr
     fetchPresignedUrl();
   }, [userId, src]);
 
+  // Handle image load errors by clearing the URL
+  useEffect(() => {
+    if (!presignedUrl) return;
+    
+    const img = new Image();
+    img.onerror = () => {
+      console.warn('Profile picture failed to load:', presignedUrl);
+      setImageError(true);
+      setPresignedUrl(undefined);
+    };
+    img.onload = () => {
+      setImageError(false);
+    };
+    img.src = presignedUrl;
+  }, [presignedUrl]);
+
   if (loading) {
     // Return a placeholder while loading
+    return null;
+  }
+
+  // If image errored or no URL, return null so AvatarFallback shows
+  if (imageError || !presignedUrl) {
     return null;
   }
 

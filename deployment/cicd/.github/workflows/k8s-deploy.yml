@@ -1,0 +1,74 @@
+name: Deploy to Kubernetes
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  KUBERNETES_NAMESPACE: hr-suite
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Update Kubernetes manifests with image tags
+        run: |
+          # Update image tags in deployment files
+          sed -i "s|hr-suite-api:latest|${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/api:${{ github.sha }}|g" deployment/k8s/api-deployment.yaml
+          sed -i "s|hr-suite-frontend:latest|${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:${{ github.sha }}|g" deployment/k8s/frontend-deployment.yaml
+          sed -i "s|hr-suite-rag-api:latest|${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/rag-api:${{ github.sha }}|g" deployment/k8s/rag-service-deployment.yaml
+
+      - name: Deploy to Kubernetes
+        run: |
+          export KUBECONFIG=./kubeconfig
+          kubectl apply -f deployment/k8s/namespace.yaml
+          kubectl apply -f deployment/k8s/configmap.yaml
+          kubectl apply -f deployment/k8s/secrets.yaml
+          kubectl apply -f deployment/k8s/postgres-deployment.yaml
+          kubectl apply -f deployment/k8s/redis-deployment.yaml
+          kubectl apply -f deployment/k8s/api-deployment.yaml
+          kubectl apply -f deployment/k8s/frontend-deployment.yaml
+          kubectl apply -f deployment/k8s/rag-service-deployment.yaml
+          kubectl apply -f deployment/k8s/ingress.yaml
+
+      - name: Wait for rollout
+        run: |
+          export KUBECONFIG=./kubeconfig
+          kubectl rollout status deployment/api -n ${{ env.KUBERNETES_NAMESPACE }}
+          kubectl rollout status deployment/frontend -n ${{ env.KUBERNETES_NAMESPACE }}
+          kubectl rollout status deployment/rag-api -n ${{ env.KUBERNETES_NAMESPACE }}
+
+      - name: Verify deployment
+        run: |
+          export KUBECONFIG=./kubeconfig
+          kubectl get all -n ${{ env.KUBERNETES_NAMESPACE }}
+

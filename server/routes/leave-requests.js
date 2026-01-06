@@ -717,6 +717,85 @@ router.patch('/:id/approve', authenticateToken, async (req, res) => {
         `UPDATE leave_requests SET status = 'approved', reviewed_by = $1, reviewed_at = now() WHERE id = $2`,
         [reviewerId, id]
       );
+
+      // Create leave entries in timesheets for each leave day
+      const leaveDetailRes = await query(
+        `SELECT lr.employee_id, lr.tenant_id, lr.start_date, lr.end_date, lp.name as leave_name
+         FROM leave_requests lr
+         LEFT JOIN leave_policies lp ON lp.id = lr.leave_type_id
+         WHERE lr.id = $1`,
+        [id]
+      );
+
+      if (leaveDetailRes.rows.length > 0) {
+        const detail = leaveDetailRes.rows[0];
+        const tenantId = detail.tenant_id;
+        const employeeId = detail.employee_id;
+        const startDate = new Date(detail.start_date);
+        const endDate = new Date(detail.end_date);
+        const leaveLabel = detail.leave_name || 'Leave';
+
+        const getWeekStart = (dateStr) => {
+          const d = new Date(dateStr);
+          const day = d.getDay();
+          const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+          return new Date(d.setDate(diff)).toISOString().split('T')[0];
+        };
+
+        const getWeekEnd = (weekStart) => {
+          const start = new Date(weekStart);
+          start.setDate(start.getDate() + 6);
+          return start.toISOString().split('T')[0];
+        };
+
+        for (let dt = new Date(startDate); dt <= endDate; dt.setDate(dt.getDate() + 1)) {
+          const workDate = new Date(dt).toISOString().split('T')[0];
+          const weekStart = getWeekStart(workDate);
+          const weekEnd = getWeekEnd(weekStart);
+
+          // Ensure timesheet exists
+          const tsRes = await query(
+            `SELECT id FROM timesheets WHERE employee_id = $1 AND week_start_date = $2 AND tenant_id = $3 LIMIT 1`,
+            [employeeId, weekStart, tenantId]
+          );
+          let timesheetId = tsRes.rows[0]?.id;
+          if (!timesheetId) {
+            const newTs = await query(
+              `INSERT INTO timesheets (employee_id, tenant_id, week_start_date, week_end_date, total_hours)
+               VALUES ($1, $2, $3, $4, 0)
+               RETURNING id`,
+              [employeeId, tenantId, weekStart, weekEnd]
+            );
+            timesheetId = newTs.rows[0].id;
+          }
+
+          // Avoid duplicate leave entries for that day
+          const existingEntry = await query(
+            `SELECT id FROM timesheet_entries 
+             WHERE employee_id = $1 AND work_date = $2 AND tenant_id = $3 AND leave_type IS NOT NULL
+             LIMIT 1`,
+            [employeeId, workDate, tenantId]
+          );
+          if (existingEntry.rows.length === 0) {
+            await query(
+              `INSERT INTO timesheet_entries (
+                timesheet_id, employee_id, tenant_id, work_date, hours, source, leave_type, description
+              ) VALUES ($1, $2, $3, $4, $5, 'leave', $6, $7)`,
+              [timesheetId, employeeId, tenantId, workDate, 0, leaveLabel, `Leave - ${leaveLabel}`]
+            );
+          }
+
+          // Recalculate total hours for the timesheet
+          await query(
+            `UPDATE timesheets 
+             SET total_hours = (
+               SELECT COALESCE(SUM(hours),0) FROM timesheet_entries WHERE timesheet_id = $1
+             )
+             WHERE id = $1`,
+            [timesheetId]
+          );
+        }
+      }
     }
 
     // If still pending next stage, return next approver info
@@ -817,6 +896,52 @@ router.patch('/:id/reject', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error rejecting leave request:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// List leave-derived timesheet entries for verification
+// GET /leave-requests/:id/timesheet-entries
+router.get('/:id/timesheet-entries', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get tenant and employee for this leave request
+    const leaveRes = await query(
+      `SELECT lr.employee_id, lr.tenant_id, lr.start_date, lr.end_date
+       FROM leave_requests lr
+       WHERE lr.id = $1`,
+      [id]
+    );
+
+    if (leaveRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+
+    const { employee_id, tenant_id, start_date, end_date } = leaveRes.rows[0];
+
+    // Fetch timesheet entries that have leave_type set within the date range
+    const entriesRes = await query(
+      `SELECT id, work_date, hours, leave_type, description, source
+       FROM timesheet_entries
+       WHERE employee_id = $1
+         AND tenant_id = $2
+         AND work_date BETWEEN $3 AND $4
+         AND leave_type IS NOT NULL
+       ORDER BY work_date`,
+      [employee_id, tenant_id, start_date, end_date]
+    );
+
+    res.json({
+      leave_request_id: id,
+      employee_id,
+      tenant_id,
+      start_date,
+      end_date,
+      entries: entriesRes.rows,
+    });
+  } catch (error) {
+    console.error('Error listing leave timesheet entries:', error);
+    res.status(500).json({ error: error.message || 'Failed to list leave timesheet entries' });
   }
 });
 

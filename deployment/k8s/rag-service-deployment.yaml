@@ -1,0 +1,343 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rag-postgres-pvc
+  namespace: hr-suite
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rag-redis-pvc
+  namespace: hr-suite
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chroma-pvc
+  namespace: hr-suite
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-postgres
+  namespace: hr-suite
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-postgres
+  template:
+    metadata:
+      labels:
+        app: rag-postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: hr-suite-config
+              key: RAG_DB_NAME
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: hr-suite-config
+              key: RAG_DB_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: hr-suite-secrets
+              key: RAG_DB_PASSWORD
+        volumeMounts:
+        - name: rag-postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: rag-postgres-storage
+        persistentVolumeClaim:
+          claimName: rag-postgres-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-postgres-service
+  namespace: hr-suite
+spec:
+  selector:
+    app: rag-postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+  clusterIP: None
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-redis
+  namespace: hr-suite
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-redis
+  template:
+    metadata:
+      labels:
+        app: rag-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --requirepass
+        - $(RAG_REDIS_PASSWORD)
+        ports:
+        - containerPort: 6379
+        env:
+        - name: RAG_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: hr-suite-secrets
+              key: RAG_REDIS_PASSWORD
+        volumeMounts:
+        - name: rag-redis-storage
+          mountPath: /data
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+      volumes:
+      - name: rag-redis-storage
+        persistentVolumeClaim:
+          claimName: rag-redis-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-redis-service
+  namespace: hr-suite
+spec:
+  selector:
+    app: rag-redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chroma
+  namespace: hr-suite
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chroma
+  template:
+    metadata:
+      labels:
+        app: chroma
+    spec:
+      containers:
+      - name: chroma
+        image: chromadb/chroma:0.4.24
+        ports:
+        - containerPort: 8000
+        env:
+        - name: IS_PERSISTENT
+          value: "TRUE"
+        - name: ANONYMIZED_TELEMETRY
+          value: "FALSE"
+        volumeMounts:
+        - name: chroma-storage
+          mountPath: /chroma/chroma
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: chroma-storage
+        persistentVolumeClaim:
+          claimName: chroma-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chroma-service
+  namespace: hr-suite
+spec:
+  selector:
+    app: chroma
+  ports:
+  - port: 8000
+    targetPort: 8000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-api
+  namespace: hr-suite
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rag-api
+  template:
+    metadata:
+      labels:
+        app: rag-api
+    spec:
+      containers:
+      - name: rag-api
+        image: hr-suite-rag-api:latest  # Change to your registry
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: hr-suite-config
+        - secretRef:
+            name: hr-suite-secrets
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://$(RAG_DB_USER):$(RAG_DB_PASSWORD)@rag-postgres-service:5432/$(RAG_DB_NAME)"
+        - name: REDIS_URL
+          value: "redis://:$(RAG_REDIS_PASSWORD)@rag-redis-service:6379/0"
+        - name: CHROMA_URL
+          value: "http://chroma-service:8000"
+        - name: CELERY_BROKER_URL
+          value: "redis://:$(RAG_REDIS_PASSWORD)@rag-redis-service:6379/0"
+        - name: CELERY_RESULT_BACKEND
+          value: "redis://:$(RAG_REDIS_PASSWORD)@rag-redis-service:6379/0"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 5
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-celery-worker
+  namespace: hr-suite
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rag-celery-worker
+  template:
+    metadata:
+      labels:
+        app: rag-celery-worker
+    spec:
+      containers:
+      - name: celery-worker
+        image: hr-suite-rag-api:latest
+        command:
+        - celery
+        - -A
+        - app.celery_app
+        - worker
+        - --loglevel=info
+        - --concurrency=2
+        envFrom:
+        - configMapRef:
+            name: hr-suite-config
+        - secretRef:
+            name: hr-suite-secrets
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://$(RAG_DB_USER):$(RAG_DB_PASSWORD)@rag-postgres-service:5432/$(RAG_DB_NAME)"
+        - name: REDIS_URL
+          value: "redis://:$(RAG_REDIS_PASSWORD)@rag-redis-service:6379/0"
+        - name: CHROMA_URL
+          value: "http://chroma-service:8000"
+        - name: CELERY_BROKER_URL
+          value: "redis://:$(RAG_REDIS_PASSWORD)@rag-redis-service:6379/0"
+        - name: CELERY_RESULT_BACKEND
+          value: "redis://:$(RAG_REDIS_PASSWORD)@rag-redis-service:6379/0"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-api-service
+  namespace: hr-suite
+spec:
+  selector:
+    app: rag-api
+  ports:
+  - port: 80
+    targetPort: 8000
+

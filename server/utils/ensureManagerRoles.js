@@ -16,7 +16,8 @@ export async function ensureManagerRoles() {
       JOIN profiles p ON p.id = ur.user_id
       JOIN employees m ON m.user_id = p.id AND m.id = mgrs.manager_id
       WHERE ur.tenant_id = mgrs.org_id
-        AND ur.role = 'employee';
+        AND ur.role = 'employee'
+        AND EXISTS (SELECT 1 FROM mgrs WHERE mgrs.manager_id = m.id AND mgrs.org_id = ur.tenant_id);
     `);
 
     // Ensure any manager without a user_roles row gets one

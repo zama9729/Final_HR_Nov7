@@ -17,15 +17,29 @@ let s3ClientPublic = null; // Separate client for presigned URLs (uses public UR
 let usingS3 = false; // Declare before initialization to avoid temporal dead zone
 
 // Support both old and new env var names for backward compatibility
-const S3_BUCKET = process.env.MINIO_BUCKET_ONBOARDING || 
-                  process.env.DOCS_STORAGE_BUCKET || 
+// Priority: DOCS_STORAGE_BUCKET (most specific) > MINIO_BUCKET_ONBOARDING > MINIO_BUCKET > default
+const S3_BUCKET = process.env.DOCS_STORAGE_BUCKET || 
+                  process.env.MINIO_BUCKET_ONBOARDING || 
                   process.env.MINIO_BUCKET || 
                   'hr-onboarding-docs';
+
+// Debug logging for S3 configuration
+if (process.env.NODE_ENV !== 'production') {
+  console.log(`[storage] DRIVER: ${DRIVER}, DOCS_STORAGE_DRIVER: ${process.env.DOCS_STORAGE_DRIVER || 'not set'}`);
+  console.log(`[storage] AWS_ACCESS_KEY_ID: ${process.env.AWS_ACCESS_KEY_ID ? 'set' : 'not set'}`);
+  console.log(`[storage] AWS_SECRET_ACCESS_KEY: ${process.env.AWS_SECRET_ACCESS_KEY ? 'set' : 'not set'}`);
+  console.log(`[storage] S3_BUCKET: ${S3_BUCKET}`);
+}
 
 // Initialize S3 client for MinIO or AWS S3
 // MIGRATION NOTE: This code now supports both MinIO and AWS S3 seamlessly.
 // It automatically detects which one to use based on environment variables.
-if (DRIVER === 's3' || process.env.MINIO_ENABLED === 'true' || process.env.AWS_ACCESS_KEY_ID) {
+// Check explicitly for DOCS_STORAGE_DRIVER=s3 or AWS credentials
+const shouldUseS3 = DRIVER === 's3' || 
+                    process.env.MINIO_ENABLED === 'true' || 
+                    (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+
+if (shouldUseS3) {
   // Support both MinIO and AWS S3 environment variables
   // Priority: AWS S3 vars first (for migration), then MinIO vars (for backward compatibility)
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID || 
@@ -40,12 +54,16 @@ if (DRIVER === 's3' || process.env.MINIO_ENABLED === 'true' || process.env.AWS_A
                  'us-east-1';
   
   // Detect if this is AWS S3 or MinIO
-  // AWS S3 indicators: endpoint contains 'amazonaws.com' or 's3.', or no custom endpoint is set
-  const customEndpoint = process.env.AWS_S3_ENDPOINT || process.env.MINIO_ENDPOINT;
-  const isAWS = !customEndpoint || 
-                customEndpoint.includes('amazonaws.com') || 
-                customEndpoint.includes('s3.') ||
-                (process.env.AWS_ACCESS_KEY_ID && !process.env.MINIO_ENABLED);
+  // Priority: Check AWS_S3_ENDPOINT first, then MINIO_ENDPOINT
+  // AWS S3 indicators: endpoint contains 'amazonaws.com' or 's3.', or AWS credentials are set without MINIO_ENABLED
+  const awsEndpoint = process.env.AWS_S3_ENDPOINT;
+  const minioEndpoint = process.env.MINIO_ENDPOINT;
+  const customEndpoint = awsEndpoint || minioEndpoint;
+  
+  // Determine if using AWS S3
+  const isAWS = awsEndpoint !== undefined || // AWS_S3_ENDPOINT is explicitly set
+                (customEndpoint && (customEndpoint.includes('amazonaws.com') || customEndpoint.includes('s3.'))) ||
+                (process.env.AWS_ACCESS_KEY_ID && process.env.MINIO_ENABLED !== 'true');
   
   let fullEndpoint = null;
   let publicEndpoint = null;
@@ -73,9 +91,16 @@ if (DRIVER === 's3' || process.env.MINIO_ENABLED === 'true' || process.env.AWS_A
       // AWS S3 can use virtual-hosted style, but path-style is safer and works everywhere
       forcePathStyle = process.env.AWS_FORCE_PATH_STYLE !== 'false';
     }
+    // For AWS S3, public endpoint is the same as full endpoint (or undefined for SDK auto-construction)
+    // Never use MinIO_PUBLIC_URL for AWS S3
     publicEndpoint = fullEndpoint; // AWS S3 doesn't need separate public endpoint
     
     console.log(`[storage] Detected AWS S3 configuration (region: ${region})`);
+    if (fullEndpoint) {
+      console.log(`[storage] Using AWS S3 endpoint: ${fullEndpoint}`);
+    } else {
+      console.log(`[storage] Using AWS S3 SDK auto-constructed endpoint for region: ${region}`);
+    }
   } else {
     // MinIO Configuration (backward compatibility)
     const endpoint = customEndpoint;
@@ -150,8 +175,13 @@ if (DRIVER === 's3' || process.env.MINIO_ENABLED === 'true' || process.env.AWS_A
       
       // Create a separate S3 client for presigned URLs using the public endpoint
       // This ensures presigned URLs are signed for the correct hostname (localhost vs minio)
-      // For AWS S3, this is usually not needed, but we keep it for MinIO compatibility
-      if (!isAWS && publicEndpoint && publicEndpoint !== fullEndpoint) {
+      // For AWS S3, we always use the same client (no separate public endpoint needed)
+      if (isAWS) {
+        // AWS S3: Use the same client for all operations
+        s3ClientPublic = s3Client;
+        console.log(`[storage] Using AWS S3 client for presigned URLs`);
+      } else if (publicEndpoint && publicEndpoint !== fullEndpoint) {
+        // MinIO: Use separate public client if public endpoint differs
         try {
           s3ClientPublic = new S3Client({
             region: region,
@@ -169,13 +199,13 @@ if (DRIVER === 's3' || process.env.MINIO_ENABLED === 'true' || process.env.AWS_A
               }
             } : {}),
           });
-          console.log(`[storage] Initialized public S3 client for presigned URLs: ${publicEndpoint}`);
+          console.log(`[storage] Initialized public MinIO client for presigned URLs: ${publicEndpoint}`);
         } catch (error) {
           console.warn(`[storage] Failed to create public S3 client, using internal client: ${error.message}`);
           s3ClientPublic = s3Client; // Fallback to internal client
         }
       } else {
-        s3ClientPublic = s3Client; // Use same client if endpoints match or for AWS S3
+        s3ClientPublic = s3Client; // Use same client if endpoints match
       }
       
       // Try to ensure bucket exists during initialization (non-blocking)

@@ -89,8 +89,6 @@ export default function Employees() {
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
 
   const [shiftDialogOpen, setShiftDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<{ id: string; name: string } | null>(null);
@@ -143,7 +141,6 @@ export default function Employees() {
     setRoleFilter("all");
     setDepartmentFilter("all");
     setStatusFilter("all");
-    setCurrentPage(1);
   };
 
   const filteredEmployees = useMemo(() => {
@@ -201,11 +198,7 @@ export default function Employees() {
     });
   }, [employees, search, roleFilter, departmentFilter, statusFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredEmployees.length / pageSize));
-  const pageEmployees = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredEmployees.slice(start, start + pageSize);
-  }, [filteredEmployees, currentPage]);
+  // Pagination removed - using filteredEmployees directly
 
   const totalEmployees = employees.length;
   const statusCounts = useMemo(() => {
@@ -489,7 +482,6 @@ export default function Employees() {
                     value={search}
                     onChange={(e) => {
                       setSearch(e.target.value);
-                      setCurrentPage(1);
                     }}
                   />
                 </div>
@@ -514,7 +506,6 @@ export default function Employees() {
                     value={roleFilter}
                     onValueChange={(v) => {
                       setRoleFilter(v);
-                      setCurrentPage(1);
                     }}
                   >
                     <SelectTrigger className="bg-[#f8f9fb] border-none">
@@ -538,7 +529,6 @@ export default function Employees() {
                     value={departmentFilter}
                     onValueChange={(v) => {
                       setDepartmentFilter(v);
-                      setCurrentPage(1);
                     }}
                   >
                     <SelectTrigger className="bg-[#f8f9fb] border-none">
@@ -562,7 +552,6 @@ export default function Employees() {
                     value={statusFilter}
                     onValueChange={(v) => {
                       setStatusFilter(v);
-                      setCurrentPage(1);
                     }}
                   >
                     <SelectTrigger className="bg-[#f8f9fb] border-none">
@@ -579,12 +568,6 @@ export default function Employees() {
                   </Select>
                 </div>
                 <div className="flex items-end gap-2 justify-end">
-                  <Button
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                    onClick={() => setCurrentPage(1)}
-                  >
-                    Filter
-                  </Button>
                   <Button variant="outline" onClick={clearFilters}>
                     Clear
                   </Button>
@@ -596,41 +579,43 @@ export default function Employees() {
           {/* Employee table */}
           <Card className="border-0 shadow-sm">
             <CardContent className="p-0">
-              <div className="overflow-hidden rounded-xl">
-                <Table>
-                  <TableHeader className="bg-[#f3f4f8]">
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Join Date</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Presence</TableHead>
-                      <TableHead className="w-12" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loading ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="text-center py-12">
-                          Loading employees...
-                        </TableCell>
+              <div className="max-h-[75vh] flex flex-col overflow-hidden rounded-xl border border-slate-200">
+                {/* Scrollable table container with sticky header */}
+                <div className="flex-1 overflow-y-auto min-h-0" style={{ scrollBehavior: 'smooth' }}>
+                  <Table>
+                    <TableHeader className="bg-[#f3f4f8] sticky top-0 z-10">
+                      <TableRow className="hover:bg-[#f3f4f8]">
+                        <TableHead className="bg-[#f3f4f8]">Name</TableHead>
+                        <TableHead className="bg-[#f3f4f8]">Email</TableHead>
+                        <TableHead className="bg-[#f3f4f8]">Role</TableHead>
+                        <TableHead className="bg-[#f3f4f8]">Department</TableHead>
+                        <TableHead className="bg-[#f3f4f8]">Join Date</TableHead>
+                        <TableHead className="bg-[#f3f4f8]">Status</TableHead>
+                        <TableHead className="bg-[#f3f4f8]">Presence</TableHead>
+                        <TableHead className="w-12 bg-[#f3f4f8]" />
                       </TableRow>
-                    ) : pageEmployees.length === 0 ? (
-                      <TableRow>
-                        <TableCell
-                          colSpan={8}
-                          className="text-center py-12 text-muted-foreground"
-                        >
-                          <p>No employees found</p>
-                          <p className="text-sm mt-2">
-                            Get started by adding employees or importing from CSV
-                          </p>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      pageEmployees.map((employee) => {
+                    </TableHeader>
+                    <TableBody>
+                      {loading ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center py-12">
+                            Loading employees...
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredEmployees.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={8}
+                            className="text-center py-12 text-muted-foreground"
+                          >
+                            <p>No employees found</p>
+                            <p className="text-sm mt-2">
+                              Get started by adding employees or importing from CSV
+                            </p>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredEmployees.map((employee) => {
                         const presenceStatus =
                           employee.display_presence_status ||
                           employee.presence_status;
@@ -798,55 +783,32 @@ export default function Employees() {
                         );
                       })
                     )}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Pagination + legend */}
-              <div className="flex flex-col md:flex-row items-center justify-between px-4 py-3 gap-3">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <span>
-                    · Showing {pageEmployees.length} of {filteredEmployees.length}{" "}
-                    result{filteredEmployees.length === 1 ? "" : "s"}
-                  </span>
+                    </TableBody>
+                  </Table>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-green-500 inline-block" />{" "}
-                      Online
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-amber-500 inline-block" />{" "}
-                      Waiting for Onboarding
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-gray-500 inline-block" />{" "}
-                      Offline
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={currentPage === totalPages}
-                      onClick={() =>
-                        setCurrentPage((p) => Math.min(totalPages, p + 1))
-                      }
-                    >
-                      Next
-                    </Button>
+                {/* Fixed footer with legend */}
+                <div className="flex-shrink-0 border-t bg-[#f3f4f8] px-4 py-3">
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>
+                        Showing {filteredEmployees.length} of {totalEmployees}{" "}
+                        employee{filteredEmployees.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-green-500 inline-block" />{" "}
+                        Online
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-amber-500 inline-block" />{" "}
+                        Waiting for Onboarding
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-gray-500 inline-block" />{" "}
+                        Offline
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>

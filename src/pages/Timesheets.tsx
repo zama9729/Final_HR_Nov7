@@ -1339,17 +1339,18 @@ export default function Timesheets() {
                             const entry = dayEntries[entryIndex];
                             const isHoliday = isDateHoliday(dateStr);
                             const hasShift = shifts[dateStr];
+                            const isLeave = entry?.source === 'leave' || Boolean((entry as any)?.leave_type);
 
                             if (!entry && entryIndex === 0) {
                               // Create empty entry for first row if missing
                               return (
-                                                               <td key={dateStr} className={`p-1.5 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}>
-                                   {hasShift && (
-                                     <Badge variant="outline" className="mb-1 text-[10px] px-1 py-0 h-4 border">
-                                       {shifts[dateStr].shift_type}
-                                     </Badge>
-                                   )}
-                                                                     <Input
+                                <td key={dateStr} className={`p-1.5 align-top border-r ${isToday(day) ? "bg-primary/5" : ""}`}>
+                                  {hasShift && (
+                                    <Badge variant="outline" className="mb-1 text-[10px] px-1 py-0 h-4 border">
+                                      {shifts[dateStr].shift_type}
+                                    </Badge>
+                                  )}
+                                  <Input
                                      type="number"
                                      step="0.5"
                                      min="0"
@@ -1380,24 +1381,36 @@ export default function Timesheets() {
                                );
                              }
 
-                             return (
-                                                               <td key={dateStr} className={`p-1.5 align-top border-r ${isToday(day) ? "bg-primary/5" : ""} ${isHoliday && entry.is_holiday ? "bg-green-50/50 dark:bg-green-950/20" : ""}`}>
-                                 {entryIndex === 0 && hasShift && (
-                                   <Badge variant="outline" className="mb-1 text-[10px] px-1 py-0 h-4 border">
-                                     {shifts[dateStr].shift_type}
-                                   </Badge>
-                                 )}
-                                                                 <Input
-                                   type="number"
-                                   step="0.5"
-                                   min="0"
-                                   max="24"
-                                   value={entry.hours || ""}
-                                   onChange={(e) => updateEntry(dateStr, entryIndex, "hours", e.target.value)}
+                            return (
+                              <td key={dateStr} className={`p-1.5 align-top border-r ${isToday(day) ? "bg-primary/5" : ""} ${isHoliday && entry.is_holiday ? "bg-green-50/50 dark:bg-green-950/20" : ""}`}>
+                                {entryIndex === 0 && hasShift && (
+                                  <Badge variant="outline" className="mb-1 text-[10px] px-1 py-0 h-4 border">
+                                    {shifts[dateStr].shift_type}
+                                  </Badge>
+                                )}
+                                {entryIndex === 0 && isLeave && (
+                                  <Badge variant="secondary" className="mb-1 w-fit text-[10px] px-1.5 py-0 h-5 bg-amber-50 text-amber-700 border border-amber-200">
+                                    Leave{(entry as any)?.leave_type ? ` · ${(entry as any).leave_type}` : ""}
+                                  </Badge>
+                                )}
+                                <Input
+                                  type="number"
+                                  step="0.5"
+                                  min="0"
+                                  max="24"
+                                  value={entry.hours || ""}
+                                  onChange={(e) => updateEntry(dateStr, entryIndex, "hours", e.target.value)}
                                   className="text-center text-xs border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:ring-2 focus:ring-blue-500/70 focus:shadow-[0_0_20px_rgba(59,130,246,0.4)]"
-                                   disabled={!isEditable || (isHoliday && entry.is_holiday)}
-                                   placeholder="0"
-                                 />
+                                  disabled={!isEditable || isLeave || (isHoliday && entry.is_holiday)}
+                                  placeholder="0"
+                                />
+                                <Textarea
+                                  value={entry.description || ""}
+                                  onChange={(e) => updateEntry(dateStr, entryIndex, "description", e.target.value)}
+                                  placeholder={isLeave ? "Leave day" : "Description"}
+                                  className="mt-1 h-16 text-xs"
+                                  disabled={isLeave}
+                                />
                               </td>
                             );
                           })}

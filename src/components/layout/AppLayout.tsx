@@ -1,5 +1,5 @@
 import { TopNavBar } from "./TopNavBar";
-import { AIAssistant } from "@/components/AIAssistant";
+import { UnifiedAssistant } from "@/components/UnifiedAssistant";
 import { SmartMemoCommandPalette } from "@/components/smartmemo/SmartMemoCommandPalette";
 import { useOrgSetup } from "@/contexts/OrgSetupContext";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,8 @@ export function AppLayout({ children }: AppLayoutProps) {
           {children}
         </div>
       </main>
-      <AIAssistant />
+      {/* Floating unified assistant (modern chatbox UI) */}
+      <UnifiedAssistant />
       <SmartMemoCommandPalette />
     </div>
   );

@@ -169,12 +169,13 @@ async function enrichDraftAction(content, context) {
   
   // Validate and normalize dates/times
   if (content.proposedActions) {
+    const baseDate = context.baseDate || new Date().toISOString();
     content.proposedActions = content.proposedActions.map(action => {
       if (action.startDateTime) {
-        action.startDateTime = normalizeDateTime(action.startDateTime);
+        action.startDateTime = normalizeDateTime(action.startDateTime, baseDate);
       }
       if (action.reminderTime) {
-        action.reminderTime = normalizeDateTime(action.reminderTime);
+        action.reminderTime = normalizeDateTime(action.reminderTime, baseDate);
       }
       return action;
     });
@@ -233,25 +234,27 @@ async function resolvePeopleMentions(peopleNames, tenantId) {
 /**
  * Normalize date/time strings to ISO format
  */
-function normalizeDateTime(dateTimeStr) {
+function normalizeDateTime(dateTimeStr, baseDate) {
   try {
+    const reference = baseDate ? new Date(baseDate) : new Date();
     const date = new Date(dateTimeStr);
     if (isNaN(date.getTime())) {
       // Try to parse relative dates
-      return parseRelativeDate(dateTimeStr);
+      return parseRelativeDate(dateTimeStr, reference);
     }
     return date.toISOString();
   } catch (error) {
     console.error('Error normalizing date:', error);
-    return new Date().toISOString();
+    const fallback = baseDate ? new Date(baseDate) : new Date();
+    return fallback.toISOString();
   }
 }
 
 /**
  * Parse relative date strings (fallback)
  */
-function parseRelativeDate(dateStr) {
-  const now = new Date();
+function parseRelativeDate(dateStr, baseDate) {
+  const now = baseDate ? new Date(baseDate) : new Date();
   const lower = dateStr.toLowerCase();
   
   if (lower.includes('tomorrow')) {

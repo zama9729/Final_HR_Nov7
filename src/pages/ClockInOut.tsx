@@ -22,6 +22,10 @@ interface ClockSession {
   work_type?: string | null;
   geo_in?: { lat?: number; lng?: number };
   geo_out?: { lat?: number; lng?: number };
+  address_in?: string | null;
+  address_out?: string | null;
+  branch_name_in?: string | null;
+  branch_name_out?: string | null;
 }
 
 interface ClockStatusResponse {
@@ -429,7 +433,7 @@ const ClockInOut = () => {
                       <TableHead>Clock Out</TableHead>
                       <TableHead>Duration</TableHead>
                       <TableHead>Work Type</TableHead>
-                      <TableHead>Devices</TableHead>
+                      <TableHead>Location</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -466,21 +470,53 @@ const ClockInOut = () => {
                               <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {session.device_in && (
-                              <span className="block">In: {session.device_in}</span>
+                          <TableCell>
+                            <div className="space-y-1 text-xs">
+                              {session.work_type && (
+                                <div className="flex items-center gap-1.5">
+                                  {session.work_type === "WFO" ? (
+                                    <Building2 className="h-3 w-3 text-green-600" />
+                                  ) : (
+                                    <Home className="h-3 w-3 text-blue-600" />
+                                  )}
+                                  <span className="font-medium">{session.work_type}</span>
+                                </div>
+                              )}
+                              {session.branch_name_in && (
+                                <div className="text-muted-foreground">
+                                  <span className="font-medium">In:</span> {session.branch_name_in}
+                                </div>
+                              )}
+                              {session.address_in && !session.branch_name_in && (
+                                <div className="text-muted-foreground truncate max-w-[200px]" title={session.address_in}>
+                                  <span className="font-medium">In:</span> {session.address_in}
+                                </div>
+                              )}
+                              {session.branch_name_out && (
+                                <div className="text-muted-foreground">
+                                  <span className="font-medium">Out:</span> {session.branch_name_out}
+                                </div>
                             )}
-                            {session.device_out && (
-                              <span className="block">Out: {session.device_out}</span>
+                              {session.address_out && !session.branch_name_out && (
+                                <div className="text-muted-foreground truncate max-w-[200px]" title={session.address_out}>
+                                  <span className="font-medium">Out:</span> {session.address_out}
+                                </div>
                             )}
-                            {!session.device_in && !session.device_out && "—"}
+                              {!session.branch_name_in && !session.address_in && !session.branch_name_out && !session.address_out && (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-6">
-                          No punches recorded yet.
+                        <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">
+                          <div className="flex flex-col items-center gap-2">
+                            <Clock className="h-8 w-8 opacity-30" />
+                            <p>No punches recorded yet.</p>
+                            <p className="text-xs">Start by clocking in to begin tracking your attendance.</p>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )}

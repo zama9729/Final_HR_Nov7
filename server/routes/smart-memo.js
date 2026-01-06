@@ -611,7 +611,7 @@ router.post('/smart-memo', authenticateToken, setTenantContext, async (req, res)
  */
 router.post('/smart-memo/ai-infer', authenticateToken, setTenantContext, async (req, res) => {
   try {
-    const { memoText, currentPage, currentEntityId, currentEntityType, currentEntityName } = req.body;
+    const { memoText, currentPage, currentEntityId, currentEntityType, currentEntityName, baseDate } = req.body;
 
     if (!memoText || !memoText.trim()) {
       return res.status(400).json({ error: 'memoText is required' });
@@ -635,6 +635,7 @@ router.post('/smart-memo/ai-infer', authenticateToken, setTenantContext, async (
       currentEntityId,
       currentEntityType,
       currentEntityName,
+      baseDate: baseDate || new Date().toISOString(),
     };
 
     // Infer intents using AI

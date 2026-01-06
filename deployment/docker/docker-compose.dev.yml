@@ -1,0 +1,231 @@
+# Development Docker Compose Configuration for HR Suite
+# Usage: docker-compose -f docker-compose.dev.yml up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: hr-suite-postgres-dev
+    environment:
+      POSTGRES_DB: ${DB_NAME:-hr_suite}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../server/db/full-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: hr-suite-redis-dev
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # MinIO for S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: hr-suite-minio-dev
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - minio_data:/data
+      - minio_config:/root/.minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # Backend API Server (with hot reload)
+  api:
+    build:
+      context: ../../server
+      dockerfile: ../../Dockerfile.api
+    image: hr-suite-api:dev
+    container_name: hr-suite-api-dev
+    ports:
+      - "${API_PORT:-3001}:3001"
+    env_file:
+      - ../env-templates/.env.development
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-hr_suite}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+    volumes:
+      - ../../server:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # Frontend application (development with hot reload)
+  frontend:
+    build:
+      context: ../..
+      dockerfile: ../../Dockerfile.dev
+    image: hr-suite-frontend:dev
+    container_name: hr-suite-frontend-dev
+    ports:
+      - "${FRONTEND_PORT:-3000}:8080"
+    volumes:
+      - ../..:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://127.0.0.1:3001
+      - VITE_ADMIN_EMAILS=${VITE_ADMIN_EMAILS:-zama@hr.com}
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  # RAG Service
+  rag-postgres:
+    image: postgres:15-alpine
+    container_name: rag-postgres-dev
+    environment:
+      POSTGRES_DB: ${RAG_DB_NAME:-rag_db}
+      POSTGRES_USER: ${RAG_DB_USER:-rag_user}
+      POSTGRES_PASSWORD: ${RAG_DB_PASSWORD:-rag_password}
+    ports:
+      - "${RAG_DB_PORT:-5433}:5432"
+    volumes:
+      - rag_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  rag-redis:
+    image: redis:7-alpine
+    container_name: rag-redis-dev
+    ports:
+      - "${RAG_REDIS_PORT:-6381}:6379"
+    volumes:
+      - rag_redis_data:/data
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  chroma:
+    image: chromadb/chroma:0.4.24
+    container_name: rag-chroma-dev
+    ports:
+      - "${CHROMA_PORT:-8000}:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    volumes:
+      - chroma_data:/chroma/chroma
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  rag-api:
+    build:
+      context: ../../rag-service
+      dockerfile: ../../rag-service/Dockerfile
+    image: hr-suite-rag-api:dev
+    container_name: rag-api-dev
+    ports:
+      - "${RAG_API_PORT:-8001}:8000"
+    environment:
+      - DATABASE_URL=postgresql://${RAG_DB_USER:-rag_user}:${RAG_DB_PASSWORD:-rag_password}@rag-postgres:5432/${RAG_DB_NAME:-rag_db}
+      - REDIS_URL=redis://rag-redis:6379/0
+      - CHROMA_URL=http://chroma:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-key}
+      - CELERY_BROKER_URL=redis://rag-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://rag-redis:6379/0
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../rag-service:/app
+      - rag_uploads:/app/uploads
+    depends_on:
+      - rag-postgres
+      - rag-redis
+      - chroma
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+  celery-worker:
+    build:
+      context: ../../rag-service
+      dockerfile: ../../rag-service/Dockerfile
+    image: hr-suite-rag-api:dev
+    container_name: rag-celery-worker-dev
+    environment:
+      - DATABASE_URL=postgresql://${RAG_DB_USER:-rag_user}:${RAG_DB_PASSWORD:-rag_password}@rag-postgres:5432/${RAG_DB_NAME:-rag_db}
+      - REDIS_URL=redis://rag-redis:6379/0
+      - CHROMA_URL=http://chroma:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CELERY_BROKER_URL=redis://rag-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://rag-redis:6379/0
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../rag-service:/app
+      - rag_uploads:/app/uploads
+    depends_on:
+      - rag-postgres
+      - rag-redis
+      - chroma
+    command: celery -A app.celery_app worker --loglevel=debug --concurrency=2
+    restart: unless-stopped
+    networks:
+      - hr-suite-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  minio_config:
+  rag_postgres_data:
+  rag_redis_data:
+  chroma_data:
+  rag_uploads:
+
+networks:
+  hr-suite-network:
+    driver: bridge
+

@@ -477,8 +477,9 @@ router.post('/profile-picture/upload', authenticateToken, async (req, res) => {
     // Construct public URL (use presigned URL or public bucket URL)
     // MIGRATION NOTE: This now supports both MinIO and AWS S3 URL formats
     // For AWS S3, we construct a proper S3 URL; for MinIO, we use the endpoint format
-    const bucket = process.env.MINIO_BUCKET_ONBOARDING || 
-                   process.env.DOCS_STORAGE_BUCKET || 
+    // Priority: DOCS_STORAGE_BUCKET (most specific) > MINIO_BUCKET_ONBOARDING > MINIO_BUCKET > default
+    const bucket = process.env.DOCS_STORAGE_BUCKET || 
+                   process.env.MINIO_BUCKET_ONBOARDING || 
                    process.env.MINIO_BUCKET || 
                    'hr-onboarding-docs';
     
@@ -675,7 +676,13 @@ router.get('/profile-picture/:userId', authenticateToken, async (req, res) => {
     if (isAWS) {
       // AWS S3 URL: https://s3.region.amazonaws.com/bucket/key or https://bucket.s3.region.amazonaws.com/key
       // Find the bucket name (it's either in the hostname or after amazonaws.com)
-      const bucketNames = ['hr-onboarding-docs', 'docshr', 'onboarding-docs'];
+      // Include the actual configured bucket name from environment
+      // Priority: DOCS_STORAGE_BUCKET (most specific) > MINIO_BUCKET_ONBOARDING > MINIO_BUCKET > default
+      const configuredBucket = process.env.DOCS_STORAGE_BUCKET || 
+                              process.env.MINIO_BUCKET_ONBOARDING || 
+                              process.env.MINIO_BUCKET || 
+                              'hr-onboarding-docs';
+      const bucketNames = [configuredBucket, 'hr-onboarding-docs', 'docshr', 'onboarding-docs', 'hr-docs'];
       let bucketIndex = -1;
       
       // Check if bucket is in hostname (virtual-hosted style)
@@ -703,7 +710,13 @@ router.get('/profile-picture/:userId', authenticateToken, async (req, res) => {
       }
     } else {
       // MinIO URL format
-      const bucketNames = ['hr-onboarding-docs', 'docshr', 'onboarding-docs'];
+      // Include the actual configured bucket name from environment
+      // Priority: DOCS_STORAGE_BUCKET (most specific) > MINIO_BUCKET_ONBOARDING > MINIO_BUCKET > default
+      const configuredBucket = process.env.DOCS_STORAGE_BUCKET || 
+                              process.env.MINIO_BUCKET_ONBOARDING || 
+                              process.env.MINIO_BUCKET || 
+                              'hr-onboarding-docs';
+      const bucketNames = [configuredBucket, 'hr-onboarding-docs', 'docshr', 'onboarding-docs', 'hr-docs'];
       let bucketIndex = -1;
       
       for (const bucket of bucketNames) {

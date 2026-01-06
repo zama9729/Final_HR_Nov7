@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hr-suite
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.template.yaml
+  - postgres-deployment.yaml
+  - redis-deployment.yaml
+  - api-deployment.yaml
+  - frontend-deployment.yaml
+  - rag-service-deployment.yaml
+  - ingress.yaml
+
+commonLabels:
+  app: hr-suite
+  managed-by: kustomize
+

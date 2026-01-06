@@ -85,11 +85,13 @@ export async function performAutoClockOut(sessionId, employeeId, tenantId, clock
     }
 
     // Create attendance event for auto clock-out
+    // Note: capture_method must be one of: 'geo', 'manual', 'kiosk', 'unknown'
+    // Using 'unknown' for auto clock-out since it's a system action
     const eventResult = await query(
       `INSERT INTO attendance_events (
         tenant_id, employee_id, raw_timestamp, event_type, device_id,
         capture_method, work_type, created_by, is_auto_clockout
-      ) VALUES ($1, $2, $3, 'OUT', NULL, 'auto', 
+      ) VALUES ($1, $2, $3, 'OUT', NULL, 'unknown', 
         (SELECT work_type FROM clock_punch_sessions WHERE id = $4), 
         NULL, true)
       RETURNING id, raw_timestamp, event_type`,

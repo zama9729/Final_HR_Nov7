@@ -1,0 +1,365 @@
+# Production Docker Compose Configuration for HR Suite
+# Usage: docker-compose -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: hr-suite-postgres-prod
+    environment:
+      POSTGRES_DB: ${DB_NAME:-hr_suite}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: always
+    networks:
+      - hr-suite-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: hr-suite-redis-prod
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+    networks:
+      - hr-suite-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # MinIO for S3-compatible object storage (optional if using AWS S3)
+  minio:
+    image: minio/minio:latest
+    container_name: hr-suite-minio-prod
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"  # S3 API
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"  # Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+      - minio_config:/root/.minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 40s
+    restart: always
+    networks:
+      - hr-suite-network
+    profiles:
+      - minio  # Only start if explicitly enabled
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Backend API Server
+  api:
+    build:
+      context: ../../server
+      dockerfile: ../../Dockerfile.api
+    image: hr-suite-api:latest
+    container_name: hr-suite-api-prod
+    ports:
+      - "${API_PORT:-3001}:3001"
+    env_file:
+      - ../env-templates/.env.production
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-hr_suite}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - hr-suite-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"] || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # Frontend application (production build)
+  frontend:
+    build:
+      context: ../..
+      dockerfile: ../../Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
+        - VITE_ADMIN_EMAILS=${VITE_ADMIN_EMAILS}
+    image: hr-suite-frontend:latest
+    container_name: hr-suite-frontend-prod
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
+    depends_on:
+      - api
+    restart: always
+    networks:
+      - hr-suite-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"] || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # RAG Service (AI Assistant)
+  rag-postgres:
+    image: postgres:15-alpine
+    container_name: rag-postgres-prod
+    environment:
+      POSTGRES_DB: ${RAG_DB_NAME:-rag_db}
+      POSTGRES_USER: ${RAG_DB_USER:-rag_user}
+      POSTGRES_PASSWORD: ${RAG_DB_PASSWORD}
+    ports:
+      - "${RAG_DB_PORT:-5433}:5432"
+    volumes:
+      - rag_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RAG_DB_USER:-rag_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - hr-suite-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rag-redis:
+    image: redis:7-alpine
+    container_name: rag-redis-prod
+    command: redis-server --appendonly yes --requirepass ${RAG_REDIS_PASSWORD:-}
+    ports:
+      - "${RAG_REDIS_PORT:-6381}:6379"
+    volumes:
+      - rag_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+    networks:
+      - hr-suite-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  chroma:
+    image: chromadb/chroma:0.4.24
+    container_name: rag-chroma-prod
+    ports:
+      - "${CHROMA_PORT:-8000}:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    volumes:
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/v1/heartbeat\")' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: always
+    networks:
+      - hr-suite-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rag-api:
+    build:
+      context: ../../rag-service
+      dockerfile: ../../rag-service/Dockerfile
+    image: hr-suite-rag-api:latest
+    container_name: rag-api-prod
+    ports:
+      - "${RAG_API_PORT:-8001}:8000"
+    environment:
+      - DATABASE_URL=postgresql://${RAG_DB_USER:-rag_user}:${RAG_DB_PASSWORD}@rag-postgres:5432/${RAG_DB_NAME:-rag_db}
+      - REDIS_URL=redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0
+      - CHROMA_URL=http://chroma:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - JWT_SECRET=${JWT_SECRET}
+      - CELERY_BROKER_URL=redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0
+      - LOG_LEVEL=INFO
+    volumes:
+      - rag_uploads:/app/uploads
+    depends_on:
+      rag-postgres:
+        condition: service_healthy
+      rag-redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    restart: always
+    networks:
+      - hr-suite-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"] || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  celery-worker:
+    build:
+      context: ../../rag-service
+      dockerfile: ../../rag-service/Dockerfile
+    image: hr-suite-rag-api:latest
+    container_name: rag-celery-worker-prod
+    environment:
+      - DATABASE_URL=postgresql://${RAG_DB_USER:-rag_user}:${RAG_DB_PASSWORD}@rag-postgres:5432/${RAG_DB_NAME:-rag_db}
+      - REDIS_URL=redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0
+      - CHROMA_URL=http://chroma:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - CELERY_BROKER_URL=redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0
+      - LOG_LEVEL=INFO
+    volumes:
+      - rag_uploads:/app/uploads
+    depends_on:
+      rag-postgres:
+        condition: service_healthy
+      rag-redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    restart: always
+    networks:
+      - hr-suite-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  minio_config:
+    driver: local
+  rag_postgres_data:
+    driver: local
+  rag_redis_data:
+    driver: local
+  chroma_data:
+    driver: local
+  rag_uploads:
+    driver: local
+
+networks:
+  hr-suite-network:
+    driver: bridge
+

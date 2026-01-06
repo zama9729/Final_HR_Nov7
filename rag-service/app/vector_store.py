@@ -71,12 +71,30 @@ class ChromaVectorStore(VectorStore):
         """Get or create collection for tenant."""
         collection_name = self._get_collection_name(tenant_id)
         try:
+            # Try to get existing collection
             return self.client.get_collection(name=collection_name)
-        except Exception:
-            return self.client.create_collection(
-                name=collection_name,
-                metadata={"tenant_id": tenant_id}
-            )
+        except Exception as e:
+            # Collection doesn't exist, try to create it
+            try:
+                return self.client.create_collection(
+                    name=collection_name,
+                    metadata={"tenant_id": tenant_id}
+                )
+            except Exception as create_error:
+                # If creation fails with UniqueConstraintError, collection might have been created
+                # between get and create calls - try to get it again
+                error_str = str(create_error)
+                if "already exists" in error_str or "UniqueConstraintError" in error_str:
+                    logger.warning(f"Collection {collection_name} already exists, retrieving it...")
+                    try:
+                        return self.client.get_collection(name=collection_name)
+                    except Exception as retry_error:
+                        logger.error(f"Failed to get collection after creation error: {retry_error}")
+                        raise create_error
+                else:
+                    # Some other error during creation
+                    logger.error(f"Failed to create collection {collection_name}: {create_error}")
+                    raise create_error
     
     def add_embeddings(
         self,

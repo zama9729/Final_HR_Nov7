@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sidebar, SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { Bot, Send, X, Loader2, MessageSquare, Trash2, Plus, Edit2, Check, XIcon } from "lucide-react";
@@ -66,14 +67,20 @@ export function AIAssistant() {
   }, [currentConversationId, isOpen]);
 
   useEffect(() => {
-    // Scroll to bottom when messages change
+    // Scroll to bottom when messages change or loading state changes
     if (scrollRef.current) {
       const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
       if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        // Use setTimeout to ensure DOM is updated
+        setTimeout(() => {
+          scrollContainer.scrollTo({
+            top: scrollContainer.scrollHeight,
+            behavior: 'smooth'
+          });
+        }, 100);
       }
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   const loadConversations = async () => {
     try {
@@ -521,7 +528,7 @@ export function AIAssistant() {
         onClick={() => setIsOpen(false)}
       />
       {/* Chat Popup */}
-      <div className="fixed bottom-24 right-6 w-[400px] h-[580px] shadow-2xl z-50 flex flex-col gap-0 bg-background rounded-2xl border overflow-hidden liquid-glass-dropdown">
+      <div className="fixed bottom-24 right-6 w-[400px] max-w-[calc(100vw-3rem)] h-[580px] max-h-[80vh] shadow-2xl z-50 flex flex-col gap-0 bg-background rounded-2xl border overflow-hidden liquid-glass-dropdown">
         {/* Sidebar - Conversation History */}
         {showHistory && (
           <Sidebar className="w-48 border-r flex flex-col">
@@ -642,9 +649,9 @@ export function AIAssistant() {
         )}
 
         {/* Main Chat Area - Minimal */}
-        <div className="flex-1 flex flex-col">
-          {/* Minimal Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {/* Minimal Header - Fixed */}
+          <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0 bg-background">
             <div className="flex items-center gap-2">
               <Bot className="h-4 w-4" />
               <span className="text-sm font-medium">HR Assistant</span>
@@ -669,9 +676,10 @@ export function AIAssistant() {
             </div>
           </div>
 
-          {/* Chat Messages - Minimal */}
-          <ScrollArea className="flex-1 min-h-0 [&>[data-radix-scroll-area-scrollbar]]:flex" ref={scrollRef}>
-            <div className="p-4 space-y-4">
+          {/* Chat Messages - Scrollable Container */}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <ScrollArea className="h-full" ref={scrollRef}>
+              <div className="p-4 space-y-4" style={{ scrollBehavior: 'smooth' }}>
               {messages.length === 0 && (
                 <div className="text-center text-muted-foreground py-12">
                   <Bot className="h-10 w-10 mx-auto mb-3 opacity-50" />
@@ -680,7 +688,22 @@ export function AIAssistant() {
               )}
               {messages
                 .filter(msg => msg.content || msg.role === "user")
-                .map((msg, idx) => (
+                  .map((msg, idx) => {
+                    // Try to detect and format JSON
+                    let formattedContent = msg.content;
+                    try {
+                      // Check if content looks like JSON
+                      const trimmed = msg.content.trim();
+                      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || 
+                          (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                        const parsed = JSON.parse(trimmed);
+                        formattedContent = JSON.stringify(parsed, null, 2);
+                      }
+                    } catch {
+                      // Not JSON, use as-is
+                    }
+
+                    return (
                   <div
                     key={idx}
                     className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
@@ -692,10 +715,17 @@ export function AIAssistant() {
                           : "bg-muted text-foreground"
                       }`}
                     >
+                          {formattedContent !== msg.content ? (
+                            <pre className="whitespace-pre-wrap leading-relaxed text-xs font-mono overflow-x-auto">
+                              {formattedContent}
+                            </pre>
+                          ) : (
                       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                          )}
                     </div>
                   </div>
-                ))}
+                    );
+                  })}
               {isLoading && (
                 <div className="flex justify-start">
                   <div className="bg-muted rounded-lg px-3 py-2 flex items-center gap-2">
@@ -706,23 +736,39 @@ export function AIAssistant() {
               )}
             </div>
           </ScrollArea>
+          </div>
 
-          {/* Minimal Input */}
-          <div className="border-t p-3">
-            <div className="flex gap-2">
-              <Input
+          {/* Input - Fixed at Bottom */}
+          <div className="border-t p-3 flex-shrink-0 bg-background">
+            <div className="flex gap-2 items-end">
+              <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                placeholder="Type your message..."
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="Type your message... (Shift+Enter for new line)"
                 disabled={isLoading}
-                className="text-sm"
+                rows={1}
+                className="flex-1 min-h-[40px] max-h-[120px] resize-none text-sm"
+                style={{
+                  height: 'auto',
+                  overflowY: 'auto'
+                }}
+                onInput={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  target.style.height = 'auto';
+                  target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+                }}
               />
               <Button 
                 onClick={handleSend} 
                 disabled={isLoading || !input.trim()} 
                 size="icon"
-                className="h-9 w-9"
+                className="h-9 w-9 flex-shrink-0"
               >
                 <Send className="h-4 w-4" />
               </Button>

@@ -126,10 +126,16 @@ export function UnifiedAssistant({ embedded = false }: UnifiedAssistantProps) {
         if (scrollRef.current) {
             const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
             if (scrollContainer) {
-                scrollContainer.scrollTop = scrollContainer.scrollHeight;
+                // Use setTimeout to ensure DOM is updated
+                setTimeout(() => {
+                    scrollContainer.scrollTo({
+                        top: scrollContainer.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }, 100);
             }
         }
-    }, [messages]);
+    }, [messages, isLoading]);
 
     const loadConversations = () => {
         try {
@@ -417,7 +423,7 @@ export function UnifiedAssistant({ embedded = false }: UnifiedAssistantProps) {
                 )}
 
                 {/* Main Chat Area */}
-                <div className="flex-1 flex flex-col">
+                <div className="flex-1 flex flex-col min-h-0">
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3 border-b">
                         <div className="flex items-center gap-2">
@@ -451,8 +457,9 @@ export function UnifiedAssistant({ embedded = false }: UnifiedAssistantProps) {
                     </div>
 
                     {/* Chat Messages */}
-                    <ScrollArea className="flex-1 min-h-0" ref={scrollRef}>
-                        <div className="p-4 space-y-4">
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                        <ScrollArea className="h-full" ref={scrollRef}>
+                            <div className="p-4 space-y-4" style={{ scrollBehavior: 'smooth' }}>
                             {messages.length === 0 && (
                                 <div className="space-y-6">
                                     <div className="text-center text-muted-foreground py-8">
@@ -532,7 +539,7 @@ export function UnifiedAssistant({ embedded = false }: UnifiedAssistantProps) {
                                                                         )}
                                                                     </div>
                                                                     {tc.result && (
-                                                                        <pre className="bg-background p-2 rounded border overflow-x-auto text-[10px] text-muted-foreground">
+                                                                        <pre className="bg-background p-2 rounded border overflow-auto max-h-60 text-[10px] text-muted-foreground">
                                                                             {typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2)}
                                                                         </pre>
                                                                     )}
@@ -582,8 +589,9 @@ export function UnifiedAssistant({ embedded = false }: UnifiedAssistantProps) {
                                     </div>
                                 </div>
                             )}
-                        </div>
-                    </ScrollArea>
+                            </div>
+                        </ScrollArea>
+                    </div>
 
                     {/* Input */}
                     <div className="border-t p-3">

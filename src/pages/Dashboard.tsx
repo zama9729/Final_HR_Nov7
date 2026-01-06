@@ -1235,25 +1235,35 @@ export default function Dashboard() {
       <Dialog open={viewAllAnnouncementsOpen} onOpenChange={setViewAllAnnouncementsOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center justify-between text-base font-semibold">
-              <span className="flex items-center gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <DialogTitle className="flex items-center gap-2 text-base font-semibold">
                 <Megaphone className="h-4 w-4 text-amber-600" />
                 All Announcements
-              </span>
-              <div className="flex gap-2">
+              </DialogTitle>
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={handleAnnouncementsClearAll}>
                   Clear All
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => setViewAllAnnouncementsOpen(false)}>
-                  Close
+                <Button variant="ghost" size="icon" onClick={() => setViewAllAnnouncementsOpen(false)} aria-label="Close">
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
-            </DialogTitle>
+            </div>
             <DialogDescription>Review recent announcements.</DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
             {stats.announcements.length === 0 ? (
-              <div className="text-sm text-muted-foreground text-center py-6">No announcements.</div>
+              <div className="flex flex-col items-center justify-center py-12 px-4">
+                <div className="h-16 w-16 rounded-full bg-amber-50 dark:bg-amber-950/20 flex items-center justify-center mb-4">
+                  <Megaphone className="h-8 w-8 text-amber-500 dark:text-amber-400 opacity-50" />
+                </div>
+                <p className="text-base font-medium text-slate-900 dark:text-slate-100 mb-1">
+                  No announcements yet
+                </p>
+                <p className="text-sm text-muted-foreground text-center max-w-sm">
+                  You'll see company updates here when they're published.
+                </p>
+              </div>
             ) : (
               stats.announcements.map((a) => (
                 <div
