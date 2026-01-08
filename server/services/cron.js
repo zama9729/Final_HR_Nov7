@@ -442,4 +442,30 @@ export async function scheduleTimesheetReminders() {
   });
 }
 
-export default { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders };
+export async function scheduleObservabilityAggregation() {
+  if (String(process.env.CRON_ENABLED || 'true') !== 'true') return;
+  let cron;
+  try {
+    ({ default: cron } = await import('node-cron'));
+  } catch (e) {
+    console.error('node-cron not installed, skipping observability scheduler');
+    return;
+  }
+  
+  // Run daily at 2 AM UTC
+  cron.schedule('0 2 * * *', async () => {
+    try {
+      const { runDailyAggregation, updateStorageMetrics } = await import('./observability/aggregationJob.js');
+      console.log('[Observability] Running daily aggregation...');
+      await runDailyAggregation();
+      await updateStorageMetrics();
+      console.log('[Observability] Daily aggregation completed');
+    } catch (error) {
+      console.error('[Observability] Daily aggregation error:', error);
+    }
+  });
+  
+  console.log('[Observability] Scheduled daily aggregation at 2 AM UTC');
+}
+
+export default { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders, scheduleObservabilityAggregation };

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -47,6 +47,29 @@ export function AIAssistant() {
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+  // ✅ 1. LOCK BACKGROUND SCROLL WHEN CHAT IS OPEN (MOST IMPORTANT)
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isOpen]);
+
+  // ✅ FIX AUTO-SCROLL (NOW IT WILL ACTUALLY WORK)
+  useEffect(() => {
+    if (!scrollRef.current) return;
+
+    scrollRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
+  }, [messages.length]);
+
   // Load conversation history and current conversation
   useEffect(() => {
     if (isOpen) {
@@ -81,7 +104,6 @@ export function AIAssistant() {
       }
     }
   }, [messages, isLoading]);
-
   const loadConversations = async () => {
     try {
       const token = localStorage.getItem('auth_token');
@@ -528,10 +550,10 @@ export function AIAssistant() {
         onClick={() => setIsOpen(false)}
       />
       {/* Chat Popup */}
-      <div className="fixed bottom-24 right-6 w-[400px] max-w-[calc(100vw-3rem)] h-[580px] max-h-[80vh] shadow-2xl z-50 flex flex-col gap-0 bg-background rounded-2xl border overflow-hidden liquid-glass-dropdown">
+      <div className="fixed bottom-24 right-6 w-[400px] max-w-[calc(100vw-3rem)] h-[580px] max-h-[80vh] shadow-2xl z-50 flex flex-col gap-0 bg-background rounded-2xl border overflow-hidden liquid-glass-dropdown min-h-0">
         {/* Sidebar - Conversation History */}
         {showHistory && (
-          <Sidebar className="w-48 border-r flex flex-col">
+          <Sidebar className="w-48 border-r flex flex-col flex-shrink-0">
             <SidebarHeader className="p-3 border-b">
               <div className="flex items-center justify-between">
                 <h3 className="font-medium text-sm">Conversations</h3>
@@ -677,65 +699,76 @@ export function AIAssistant() {
           </div>
 
           {/* Chat Messages - Scrollable Container */}
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <ScrollArea className="h-full" ref={scrollRef}>
-              <div className="p-4 space-y-4" style={{ scrollBehavior: 'smooth' }}>
-              {messages.length === 0 && (
-                <div className="text-center text-muted-foreground py-12">
-                  <Bot className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">Ask me anything about HR, leaves, or policies</p>
-                </div>
-              )}
-              {messages
-                .filter(msg => msg.content || msg.role === "user")
-                  .map((msg, idx) => {
-                    // Try to detect and format JSON
-                    let formattedContent = msg.content;
-                    try {
-                      // Check if content looks like JSON
-                      const trimmed = msg.content.trim();
-                      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || 
-                          (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-                        const parsed = JSON.parse(trimmed);
-                        formattedContent = JSON.stringify(parsed, null, 2);
-                      }
-                    } catch {
-                      // Not JSON, use as-is
-                    }
-
-                    return (
-                  <div
-                    key={idx}
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-                        msg.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-foreground"
-                      }`}
-                    >
-                          {formattedContent !== msg.content ? (
-                            <pre className="whitespace-pre-wrap leading-relaxed text-xs font-mono overflow-x-auto">
-                              {formattedContent}
-                            </pre>
-                          ) : (
-                      <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                          )}
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            {/* ✅ STOP SCROLL EVENT BUBBLING (final polish) */}
+            <div
+              className="flex-1 min-h-0"
+              onWheel={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+            >
+              {/* ✅ 1️⃣ FIX ScrollArea CLASS (MOST IMPORTANT) */}
+              <ScrollArea
+                className="flex-1 min-h-0 [&>[data-radix-scroll-area-viewport]]:h-full"
+              >
+                {/* ✅ 2️⃣ MOVE scrollRef TO A REAL DOM ELEMENT */}
+                <div ref={scrollRef} className="p-4 space-y-4" style={{ scrollBehavior: 'smooth' }}>
+                  {messages.length === 0 && (
+                    <div className="text-center text-muted-foreground py-12">
+                      <Bot className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                      <p className="text-sm">Ask me anything about HR, leaves, or policies</p>
                     </div>
-                  </div>
-                    );
-                  })}
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-muted rounded-lg px-3 py-2 flex items-center gap-2">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span className="text-xs text-muted-foreground">Thinking...</span>
-                  </div>
+                  )}
+                  {messages
+                    .filter(msg => msg.content || msg.role === "user")
+                    .map((msg, idx) => {
+                      // Try to detect and format JSON
+                      let formattedContent = msg.content;
+                      try {
+                        // Check if content looks like JSON
+                        const trimmed = msg.content.trim();
+                        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || 
+                            (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                          const parsed = JSON.parse(trimmed);
+                          formattedContent = JSON.stringify(parsed, null, 2);
+                        }
+                      } catch {
+                        // Not JSON, use as-is
+                      }
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                        >
+                          <div
+                            className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
+                              msg.role === "user"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-foreground"
+                            }`}
+                          >
+                            {formattedContent !== msg.content ? (
+                              <pre className="whitespace-pre-wrap leading-relaxed text-xs font-mono overflow-x-auto">
+                                {formattedContent}
+                              </pre>
+                            ) : (
+                              <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  {isLoading && (
+                    <div className="flex justify-start">
+                      <div className="bg-muted rounded-lg px-3 py-2 flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <span className="text-xs text-muted-foreground">Thinking...</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </ScrollArea>
             </div>
-          </ScrollArea>
           </div>
 
           {/* Input - Fixed at Bottom */}

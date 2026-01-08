@@ -58,7 +58,8 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Overview",
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        // AI Assistant - DISABLED: Uncomment below to re-enable
+        // { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {
@@ -134,7 +135,8 @@ export const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         { title: "Analytics", url: "/analytics", icon: BarChart3 },
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        // AI Assistant - DISABLED: Uncomment below to re-enable
+        // { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {
@@ -142,8 +144,9 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Work",
       items: [
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
-        { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
-        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock },
+        // Shift Management - DISABLED: Uncomment below to re-enable
+        // { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
+        { title: "Workforce Scheduling", url: "/shift-management-2", icon: CalendarClock },
         { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
         { title: "Attendance Upload", url: "/attendance/upload", icon: Upload },
         { title: "Upload History", url: "/attendance/history", icon: History },
@@ -198,8 +201,9 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Work",
       items: [
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3 },
-        { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
-        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock },
+        // Shift Management - DISABLED: Uncomment below to re-enable
+        // { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
+        { title: "Workforce Scheduling", url: "/shift-management-2", icon: CalendarClock },
         { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
       ],
     },
@@ -232,7 +236,8 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       label: "Overview",
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        // AI Assistant - DISABLED: Uncomment below to re-enable
+        // { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {
@@ -241,7 +246,7 @@ export const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "Clock In / Out", url: "/attendance/clock", icon: Clock, feature: "clock" },
         { title: "My Shifts", url: "/my/shifts", icon: CalendarClock },
-        { title: "Shift Management 2", url: "/shift-management-2", icon: CalendarClock },
+        { title: "Workforce Scheduling", url: "/shift-management-2", icon: CalendarClock },
         { title: "Timesheet", url: "/timesheets", icon: Clock },
         { title: "Generate Timesheet", url: "/timesheet-generator", icon: Download },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },

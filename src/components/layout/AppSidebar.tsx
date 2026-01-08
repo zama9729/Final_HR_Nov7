@@ -26,7 +26,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
       label: "Overview",
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        // AI Assistant - DISABLED: Uncomment below to re-enable
+        // { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {
@@ -71,7 +72,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         { title: "Analytics", url: "/analytics", icon: BarChart3 },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        // AI Assistant - DISABLED: Uncomment below to re-enable
+        // { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {
@@ -101,7 +103,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
-        { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
+        // Shift Management - DISABLED: Uncomment below to re-enable
+        // { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
       ],
     },
@@ -130,7 +133,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         { title: "Analytics", url: "/analytics", icon: BarChart3 },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        // AI Assistant - DISABLED: Uncomment below to re-enable
+        // { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {
@@ -160,7 +164,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
-        { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
+        // Shift Management - DISABLED: Uncomment below to re-enable
+        // { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
         { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
         { title: "Leave Policies", url: "/policies", icon: FileText },
@@ -221,7 +226,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Attendance Analytics", url: "/analytics/attendance", icon: BarChart3, roles: ["admin", "hr", "ceo", "director"] },
         { title: "Timesheet", url: "/timesheets", icon: Clock, feature: "timesheets" },
         { title: "Timesheet Approvals", url: "/timesheet-approvals", icon: CheckSquare, showBadge: true, feature: "timesheets" },
-        { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
+        // Shift Management - DISABLED: Uncomment below to re-enable
+        // { title: "Shift Management", url: "/scheduling", icon: CalendarClock },
         { title: "Leave Requests", url: "/leaves", icon: Calendar, showBadge: true },
         { title: "Holiday Management", url: "/holidays", icon: CalendarDays },
         { title: "Leave Policies", url: "/policies", icon: FileText },
@@ -236,7 +242,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
         { title: "Upload History", url: "/attendance/history", icon: History },
         { title: "Tax Declaration", url: "/tax/declarations/review", icon: Receipt, showBadge: true },
         { title: "Form 16", url: "/reports/form16", icon: Receipt },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        // AI Assistant - DISABLED: Uncomment below to re-enable
+        // { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {
@@ -254,7 +261,8 @@ const roleNavItems: Record<string, NavGroup[]> = {
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         { title: "Analytics", url: "/analytics", icon: BarChart3 },
-        { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
+        // AI Assistant - DISABLED: Uncomment below to re-enable
+        // { title: "AI Assistant", url: "/ai-assistant", icon: Bot },
       ],
     },
     {

@@ -2759,6 +2759,32 @@ class ApiClient {
     return this.request('/api/superadmin/stats');
   }
 
+  // Observability APIs
+  async getObservabilityOverview() {
+    return this.request('/api/superadmin/observability/overview');
+  }
+
+  async getTenantMetrics(tenantId: string, days: number = 30) {
+    return this.request(`/api/superadmin/observability/tenants/${tenantId}/metrics?days=${days}`);
+  }
+
+  async getTenantHealth(tenantId: string) {
+    return this.request(`/api/superadmin/observability/tenants/${tenantId}/health`);
+  }
+
+  async getTenantFeatureUsage(tenantId: string) {
+    return this.request(`/api/superadmin/observability/tenants/${tenantId}/feature-usage`);
+  }
+
+  async getObservabilityTenants(params?: { status?: string; tier?: string; health_status?: string }) {
+    const queryParams = new URLSearchParams();
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.tier) queryParams.append('tier', params.tier);
+    if (params?.health_status) queryParams.append('health_status', params.health_status);
+    const query = queryParams.toString();
+    return this.request(`/api/superadmin/observability/tenants${query ? `?${query}` : ''}`);
+  }
+
 }
 
 export const api = new ApiClient(API_URL);

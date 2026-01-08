@@ -1201,7 +1201,7 @@ export default function ShiftManagement2() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Shift Management 2</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Workforce Scheduling</h1>
             <p className="text-sm text-muted-foreground">
               Configure shift templates, generate balanced schedules, and review coverage.
             </p>
@@ -1862,7 +1862,7 @@ export default function ShiftManagement2() {
                             employee_count: new Set(schedule.map((s) => s.employeeId)).size,
                             period: `${format(dateRange.from!, "yyyy-MM-dd")} to ${format(dateRange.to!, "yyyy-MM-dd")}`,
                           },
-                          reason: "Schedule published from Shift Management 2",
+                          reason: "Schedule published from Workforce Scheduling",
                         });
                       } catch (auditErr) {
                         console.warn("[ShiftManagement2] Audit log failed:", auditErr);

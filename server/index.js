@@ -20,6 +20,7 @@ import appraisalCycleRoutes from './routes/appraisal-cycles.js';
 import performanceReviewRoutes from './routes/performance-reviews.js';
 import promotionsRoutes from './routes/promotions.js';
 import { authenticateToken } from './middleware/auth.js';
+import { trackApiMetrics } from './middleware/observability.js';
 import shiftsRoutes from './routes/shifts.js';
 import workflowsRoutes from './routes/workflows.js';
 import skillsRoutes from './routes/skills.js';
@@ -78,6 +79,7 @@ import backgroundCheckRoutes from './routes/background-check.js';
 import employeeHistoryRoutes from './routes/employee-history.js';
 import healthRoutes from './routes/health.js';
 import superadminRoutes from './routes/superadmin.js';
+import observabilityRoutes from './routes/observability.js';
 import { setTenantContext } from './middleware/tenant.js';
 import { scheduleHolidayNotifications, scheduleNotificationRules, scheduleProbationJobs, scheduleTimesheetReminders } from './services/cron.js';
 import { scheduleReminderChecks } from './services/reminder-cron.js';
@@ -94,6 +96,7 @@ import { ensureAdminRole } from './utils/runMigration.js';
 import { ensureOnboardingColumns } from './utils/ensureOnboardingColumns.js';
 import { ensureManagerRoles } from './utils/ensureManagerRoles.js';
 import { scheduleAnalyticsRefresh } from './services/analytics-refresh.js';
+import { scheduleObservabilityAggregation } from './services/cron.js';
 
 dotenv.config();
 
@@ -160,6 +163,10 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/health', healthRoutes);
+
+// Apply observability tracking to all API routes (only tracks when tenantId is available)
+app.use('/api', trackApiMetrics);
+
 app.use('/api/employees', authenticateToken, employeesRoutes);
 app.use('/api/profiles', authenticateToken, profilesRoutes);
 app.use('/api/organizations', organizationsRoutes);
@@ -263,6 +270,7 @@ app.use('/api/personal-calendar-events', authenticateToken, setTenantContext, pe
 app.use('/api/calendar', smartMemoRoutes);
 app.use('/api/reminders', remindersRoutes);
 app.use('/api/superadmin', superadminRoutes);
+app.use('/api/superadmin/observability', observabilityRoutes);
 
 // Tenant info endpoint for payroll service compatibility
 app.get('/api/tenant', authenticateToken, async (req, res) => {
@@ -672,6 +680,7 @@ createPool().then(async () => {
   scheduleHolidayNotifications();
   scheduleNotificationRules();
   scheduleAnalyticsRefresh();
+  await scheduleObservabilityAggregation();
   scheduleAssignmentSegmentation();
   await scheduleOffboardingJobs();
   await scheduleAutoLogout();

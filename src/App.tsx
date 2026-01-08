@@ -215,7 +215,8 @@ const App = () => (
             <Route path="/my/profile/shifts" element={<ProtectedRoute><MyShifts /></ProtectedRoute>} />
             <Route path="/shift-management-2" element={<ProtectedRoute allowedRoles={['manager','hr','ceo']}><ShiftManagement2 /></ProtectedRoute>} />
             <Route path="/scheduling" element={<ProtectedRoute allowedRoles={['hr', 'ceo', 'admin']}><StaffScheduling /></ProtectedRoute>} />
-            <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
+            {/* AI Assistant - DISABLED: Uncomment below to re-enable */}
+            {/* <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} /> */}
             <Route path="/rag/upload" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><RAGDocumentUpload /></ProtectedRoute>} />
             <Route path="/attendance/clock" element={<ProtectedRoute><ClockInOut /></ProtectedRoute>} />
             <Route path="/hr/profile-requests" element={<ProtectedRoute allowedRoles={['hr', 'director', 'ceo', 'admin']}><HrProfileRequests /></ProtectedRoute>} />
